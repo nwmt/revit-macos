@@ -3,7 +3,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CC="$ROOT/toolchain/llvm-mingw/bin/x86_64-w64-mingw32-clang"
-[ -x "$CC" ] || "$ROOT/scripts/get-toolchain.sh"
+. "$ROOT/scripts/lib/shims.sh"; cc_or_prebuilt "$ROOT/build/svcshim/svcshim.exe"
 SRC="$ROOT/tools/svcshim"; OUT="$ROOT/build/svcshim"; mkdir -p "$OUT"
 "$CC" -O2 -Wall -Wno-unused-parameter -municode -o "$OUT/svcshim.exe" "$SRC/svcshim.c" -ladvapi32
 echo "built: $OUT/svcshim.exe ($(stat -f %z "$OUT/svcshim.exe") bytes)"

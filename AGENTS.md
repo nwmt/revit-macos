@@ -8,7 +8,7 @@ simple (`./install.sh <year>`) and the docs short.
 ```
 install.sh          single entry point: ./install.sh <year>
 scripts/            every install step as a script; scripts/lib/versions.sh holds per-version metadata
-tools/              our shim DLLs (C, built with llvm-mingw from scripts/get-toolchain.sh) and Python helpers
+tools/              our shim DLLs (C, llvm-mingw) and Python helpers; users get them prebuilt (scripts/get-shims.sh)
 versions/<year>.md  status, what works, workarounds for one Revit version
 docs/               troubleshooting, how it works
 installers/         user-supplied installers and runtimes (gitignored except README and checksums)

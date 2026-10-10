@@ -19,5 +19,11 @@ which CrossOver version, what worked and what didn't. Open an issue with the
 7. Mark a feature as working only after a real run. Untested is "not tested",
    a guess is a guess.
 
+## Releases
+
+Shim DLLs are built and published by GitHub Actions, never by hand: push a tag `vX.Y.Z`.
+Then set `SHIMS_VERSION` and `SHIMS_SHA256` in `scripts/lib/shims.sh` to the new release, so
+`install.sh` downloads it. Until then, clones with changed shim sources build them from source.
+
 Never commit or link Autodesk software. Everyone uses their own installer and
 license from their Autodesk Account.

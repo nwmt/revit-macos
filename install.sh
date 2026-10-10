@@ -81,12 +81,12 @@ echo "  ✓ ready"
 
 # ---- plan ----
 if [ "$YEAR" = 2020 ]; then
-  PLAN=("scripts/get-toolchain.sh"
+  PLAN=("scripts/get-shims.sh"
         "scripts/inspect-installer.sh 2020 --extract"
         "scripts/build-bottle.sh $BOTTLE"
         "scripts/make-launcher.sh $BOTTLE 2020")
 else
-  PLAN=("scripts/get-toolchain.sh"
+  PLAN=("scripts/get-shims.sh"
         "scripts/inspect-installer.sh $YEAR --extract"
         "scripts/cx-bottle.sh $BOTTLE"
         "scripts/install-odis.sh $YEAR $BOTTLE"

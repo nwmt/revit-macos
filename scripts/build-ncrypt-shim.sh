@@ -3,7 +3,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CC="$ROOT/toolchain/llvm-mingw/bin/x86_64-w64-mingw32-clang"
-[ -x "$CC" ] || "$ROOT/scripts/get-toolchain.sh"
+. "$ROOT/scripts/lib/shims.sh"; cc_or_prebuilt "$ROOT/build/ncrypt-shim/ncrypt.dll"
 SRC="$ROOT/tools/ncrypt-shim"; OUT="$ROOT/build/ncrypt-shim"; mkdir -p "$OUT"
 python3 "$SRC/gen_forwards.py"
 "$CC" -shared -O2 -Wall -Wno-unused-parameter -municode \
