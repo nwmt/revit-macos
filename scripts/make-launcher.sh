@@ -29,9 +29,14 @@ make_app() { # $1 = app title, $2 = Windows exe path, $3 = arguments, $4 = icon 
       /usr/libexec/PlistBuddy -c "Delete :CFBundleIconName" "$app/Contents/Info.plist" 2>/dev/null || true
     else echo "   (no icon: conversion failed)"; fi
   fi
+  # osacompile writes no bundle id; Launchpad/Apps skip bundles without one (Spotlight still finds them)
+  local id; id="local.revit-macos.$(printf '%s-%s' "$1" "$NAME" | tr -cs 'A-Za-z0-9' '-' | tr '[:upper:]' '[:lower:]' | sed 's/-$//')"
+  /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string $id" -c "Add :CFBundleDisplayName string $1 ($NAME)" \
+    -c "Add :LSApplicationCategoryType string public.app-category.graphics-design" "$app/Contents/Info.plist"
   # changing the bundle invalidates the osacompile signature; re-sign ad hoc so Gatekeeper lets it start
   codesign --force --sign - "$app" >/dev/null 2>&1 || true
   touch "$app"
+  /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$app" 2>/dev/null || true
   echo "done: $app"
 }
 
