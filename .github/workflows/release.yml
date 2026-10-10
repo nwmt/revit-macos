@@ -1,0 +1,35 @@
+name: Release
+
+# Push a tag like v0.1.0 to build the shim DLLs on GitHub and publish them as a release.
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Repo rules
+        run: .githooks/check-tree
+      - name: Build shims package
+        run: ./scripts/build-release.sh "${GITHUB_REF_NAME#v}"
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          SUM="$(cut -d' ' -f1 "dist/revit-macos-shims-$VER.zip.sha256")"
+          cat > notes.md <<NOTES
+          Prebuilt shim DLLs for Wine/CrossOver, built by GitHub Actions from this tag's sources
+          (\`scripts/build-release.sh\`). What each one fixes: [docs/how-it-works.md](https://github.com/${{ github.repository }}/blob/$GITHUB_REF_NAME/docs/how-it-works.md).
+
+          \`./install.sh\` still builds them from source; the package is for checking and reuse.
+          No Autodesk or Microsoft files are included.
+
+          SHA-256 of \`revit-macos-shims-$VER.zip\`: \`$SUM\`
+          NOTES
+          gh release create "$GITHUB_REF_NAME" dist/* --title "revit-macos $VER" --notes-file notes.md --generate-notes

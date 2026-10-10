@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    # macOS on Apple Silicon: the same /bin/bash 3.2, sips and toolchain users have
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # commit message check walks the PR range
+      - name: Repo rules (paths, binaries, English-only, personal data, bash syntax)
+        run: .githooks/check-tree
+      - name: Commit messages
+        if: github.event_name == 'pull_request'
+        run: |
+          for c in $(git rev-list "origin/${{ github.base_ref }}..HEAD"); do
+            git log -1 --format=%B "$c" > msg.txt
+            .githooks/commit-msg msg.txt || { echo "bad message in $c"; exit 1; }
+          done
+      - name: Python helpers compile
+        run: python3 -I -m py_compile tools/*.py tools/ncrypt-shim/gen_forwards.py
+      - name: Build all shims
+        run: |
+          ./scripts/get-toolchain.sh
+          for s in scripts/build-{add-printer,d3dwp,ncrypt-shim,rvtfix,svcshim,tlbpin,wbem-shim,wv2fix}.sh; do
+            echo "::group::$s"; "$s"; echo "::endgroup::"
+          done
+      - name: install.sh refuses cleanly without CrossOver and installers
+        run: |
+          if INSTALL_DRYRUN=1 ./install.sh 2020 > out.txt 2>&1; then cat out.txt; exit 1; fi
+          cat out.txt
+          grep -q "CrossOver not found" out.txt
