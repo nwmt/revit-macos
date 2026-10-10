@@ -56,7 +56,10 @@ fi
 if [ -d "$HOME/Library/Application Support/CrossOver/Bottles/$BOTTLE" ] && [ "${CX_RECREATE:-0}" != 1 ]; then
   need "bottle $BOTTLE already exists" "pick another name (./install.sh $YEAR rvt$YEAR-b) or rebuild it: CX_RECREATE=1 ./install.sh $YEAR"
 fi
-free_gb=$(df -g "$ROOT" | awk 'NR==2 {print $4}')
+# what Finder and System Settings call "available": includes purgeable space that df does not count
+free_gb=$(osascript -l JavaScript -e 'ObjC.import("Foundation"); var r = Ref();
+  $.NSURL.fileURLWithPath("/").getResourceValueForKeyError(r, $.NSURLVolumeAvailableCapacityForImportantUsageKey, null);
+  Math.floor(ObjC.unwrap(r[0]) / 1e9)' 2>/dev/null) || free_gb=$(df -g "$ROOT" | awk 'NR==2 {print $4}')
 [ "${free_gb:-0}" -ge 40 ] || warn "only ${free_gb} GB free" "an install needs up to ~45 GB (installer, extracted files, bottle)"
 H="$(hostname)"
 grep -qE "[[:space:]]$H([[:space:]]|\$)" /etc/hosts \
