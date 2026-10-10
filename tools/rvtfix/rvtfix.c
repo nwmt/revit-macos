@@ -1,0 +1,203 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * rvtfix -- fixes for Wine behavior inside the Revit process that can't be done by replacing files
+ * (Autodesk assemblies are signed: Revit checks add-in .sig files and won't load modified ones -- "Verify failed!").
+ * Loaded by our ncrypt.dll (tools/ncrypt-shim) if it sits next to Revit.exe.
+ *
+ * 1. RegisterDragDrop/RevokeDragDrop on a window of ANOTHER process.
+ *    Revit 2026 start screen (ModelBrowser add-in): after WebView2 initializes,
+ *    DragDropManager.RegisterDragDropHook calls RevokeDragDrop on the browser window (msedgewebview2.exe process).
+ *    Windows returns DRAGDROP_E_INVALIDHWND; Wine's ole32 (CrossOver 26.3) reads the IDropTarget pointer from the
+ *    foreign window's property and dereferences it locally -> AccessViolationException, Revit dies silently.
+ *    Fix: replace the RegisterDragDrop/RevokeDragDrop entries in ole32's export table (GetProcAddress sees them,
+ *    and .NET resolves P/Invoke through it). Already bound imports of other modules are left alone. Own windows get the original.
+ *
+ * 2. WebView2 browser arguments (start screen, Manage Links): CrossOver 26.3 (rule Hack 22330) appends
+ *    "--in-process-gpu --use-gl=swiftshader" to msedgewebview2.exe -> the GPU thread keeps failing to create a GL
+ *    context, the page stays white, ~60% CPU. Fixed by "--disable-gpu --disable-software-rasterizer
+ *    --disable-features=ForceSWDCompWhenDCompFallbackRequired". Revit sets the arguments
+ *    itself, so WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS never reaches the browser. Fix: in every loaded
+ *    WebView2Loader.dll replace the CreateCoreWebView2EnvironmentWithOptions export and append the flags to
+ *    AdditionalBrowserArguments of Revit's options. Custom flags: RVTFIX_WV2_ARGS; empty disables.
+ */
+#include <windows.h>
+#include <ole2.h>
+#include <winternl.h>
+
+typedef HRESULT (WINAPI *revoke_fn)(HWND);
+typedef HRESULT (WINAPI *register_fn)(HWND, IDropTarget *);
+static revoke_fn orig_revoke;
+static register_fn orig_register;
+
+static void trace(const char *s) { OutputDebugStringA(s); }
+
+static BOOL foreign(HWND hwnd)
+{
+    DWORD pid = 0;
+    if (!GetWindowThreadProcessId(hwnd, &pid)) return TRUE;   /* no such window: also INVALIDHWND, as on Windows */
+    return pid != GetCurrentProcessId();
+}
+
+static HRESULT WINAPI hook_revoke(HWND hwnd)
+{
+    if (foreign(hwnd)) return DRAGDROP_E_INVALIDHWND;
+    return orig_revoke(hwnd);
+}
+
+static HRESULT WINAPI hook_register(HWND hwnd, IDropTarget *target)
+{
+    if (foreign(hwnd)) return DRAGDROP_E_INVALIDHWND;
+    return orig_register(hwnd, target);
+}
+
+/* An export entry is a 32-bit RVA from ole32's base, so the thunk must be within 4 GB above the base. */
+static BYTE *alloc_near(BYTE *base, SIZE_T size)
+{
+    MEMORY_BASIC_INFORMATION mbi;
+    BYTE *p = base;
+    while (p < base + 0x7fff0000 && VirtualQuery(p, &mbi, sizeof(mbi))) {
+        if (mbi.State == MEM_FREE) {
+            BYTE *a = (BYTE *)(((ULONG_PTR)mbi.BaseAddress + 0xffff) & ~(ULONG_PTR)0xffff);
+            if (a + size <= (BYTE *)mbi.BaseAddress + mbi.RegionSize) {
+                BYTE *r = VirtualAlloc(a, size, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+                if (r) return r;
+            }
+        }
+        p = (BYTE *)mbi.BaseAddress + mbi.RegionSize;
+    }
+    return NULL;
+}
+
+static BOOL patch_export(HMODULE mod, const char *name, void *hook, void **orig, BYTE *thunk)
+{
+    BYTE *base = (BYTE *)mod;
+    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+    IMAGE_DATA_DIRECTORY dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+    IMAGE_EXPORT_DIRECTORY *exp = (IMAGE_EXPORT_DIRECTORY *)(base + dir.VirtualAddress);
+    DWORD *names = (DWORD *)(base + exp->AddressOfNames), *funcs = (DWORD *)(base + exp->AddressOfFunctions);
+    WORD *ords = (WORD *)(base + exp->AddressOfNameOrdinals);
+    DWORD i, old;
+    for (i = 0; i < exp->NumberOfNames; i++) {
+        if (lstrcmpA((char *)(base + names[i]), name)) continue;
+        DWORD *slot = &funcs[ords[i]];
+        *orig = base + *slot;
+        BYTE jmp[12] = {0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xe0}; /* mov rax, imm64; jmp rax */
+        CopyMemory(jmp + 2, &hook, sizeof(hook));
+        CopyMemory(thunk, jmp, sizeof(jmp));
+        if (!VirtualProtect(slot, sizeof(*slot), PAGE_READWRITE, &old)) return FALSE;
+        *slot = (DWORD)(thunk - base);
+        VirtualProtect(slot, sizeof(*slot), old, &old);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+/* --- 2. WebView2: browser arguments --- */
+typedef struct opts_vtbl { /* ICoreWebView2EnvironmentOptions: IUnknown + get/put AdditionalBrowserArguments + ... */
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *, REFIID, void **);
+    ULONG (STDMETHODCALLTYPE *AddRef)(void *);
+    ULONG (STDMETHODCALLTYPE *Release)(void *);
+    HRESULT (STDMETHODCALLTYPE *get_AdditionalBrowserArguments)(void *, LPWSTR *);
+    HRESULT (STDMETHODCALLTYPE *put_AdditionalBrowserArguments)(void *, LPCWSTR);
+} opts_vtbl;
+typedef HRESULT (STDAPICALLTYPE *create_env_fn)(PCWSTR, PCWSTR, void *, void *);
+#define MAX_LOADERS 8
+static struct { HMODULE mod; create_env_fn orig; BYTE *thunk; } loaders[MAX_LOADERS];
+static int nloaders;
+static WCHAR wv2_args[1024] = L"--disable-gpu --disable-software-rasterizer --disable-features=ForceSWDCompWhenDCompFallbackRequired";
+
+static HRESULT create_env_common(int i, PCWSTR folder, PCWSTR udf, void *options, void *handler)
+{
+    char msg[1600];
+    if (options && wv2_args[0]) {
+        opts_vtbl *vt = *(opts_vtbl **)options;
+        LPWSTR cur = NULL;
+        if (SUCCEEDED(vt->get_AdditionalBrowserArguments(options, &cur))) {
+            static WCHAR buf[4096];
+            lstrcpynW(buf, cur ? cur : L"", 2048);
+            if (buf[0]) lstrcatW(buf, L" ");
+            lstrcatW(buf, wv2_args);
+            HRESULT hr = vt->put_AdditionalBrowserArguments(options, buf);
+            wsprintfA(msg, "[rvtfix] WebView2 #%d: AdditionalBrowserArguments \"%ls\" -> \"%ls\" (hr=%08lx)\n", i, cur ? cur : L"", buf, hr);
+            trace(msg);
+            if (cur) CoTaskMemFree(cur);
+        }
+    } else {
+        wsprintfA(msg, "[rvtfix] WebView2 #%d: options=%p, arguments left unchanged\n", i, options); trace(msg);
+    }
+    return loaders[i].orig(folder, udf, options, handler);
+}
+#define CREATE_ENV(n) static HRESULT STDAPICALLTYPE create_env_##n(PCWSTR f, PCWSTR u, void *o, void *h) \
+    { return create_env_common(n, f, u, o, h); }
+CREATE_ENV(0) CREATE_ENV(1) CREATE_ENV(2) CREATE_ENV(3) CREATE_ENV(4) CREATE_ENV(5) CREATE_ENV(6) CREATE_ENV(7)
+static void *create_env_hooks[MAX_LOADERS] = {create_env_0, create_env_1, create_env_2, create_env_3,
+                                              create_env_4, create_env_5, create_env_6, create_env_7};
+
+static void patch_loader(HMODULE mod, const WCHAR *path)
+{
+    char msg[600]; int i;
+    for (i = 0; i < nloaders; i++) if (loaders[i].mod == mod) return;
+    if (nloaders == MAX_LOADERS) return;
+    i = nloaders;
+    BYTE *thunk = alloc_near((BYTE *)mod, 0x1000);
+    if (thunk && patch_export(mod, "CreateCoreWebView2EnvironmentWithOptions", create_env_hooks[i], (void **)&loaders[i].orig, thunk)) {
+        loaders[i].mod = mod; loaders[i].thunk = thunk; nloaders++;
+        FlushInstructionCache(GetCurrentProcess(), thunk, 16);
+        wsprintfA(msg, "[rvtfix] WebView2 #%d: hooked %ls\n", i, path);
+    } else wsprintfA(msg, "[rvtfix] WebView2: failed to hook %ls\n", path);
+    trace(msg);
+}
+
+typedef struct { ULONG Flags; const UNICODE_STRING *FullDllName, *BaseDllName; void *DllBase; ULONG SizeOfImage; } dll_notif_data;
+typedef VOID (CALLBACK *dll_notif_fn)(ULONG reason, const dll_notif_data *data, void *ctx);
+typedef NTSTATUS (NTAPI *ldr_register_fn)(ULONG, dll_notif_fn, void *, void **);
+
+static VOID CALLBACK on_dll(ULONG reason, const dll_notif_data *d, void *ctx)
+{
+    WCHAR name[64];
+    if (reason != 1 /* LDR_DLL_NOTIFICATION_REASON_LOADED */ || !d->BaseDllName) return;
+    lstrcpynW(name, d->BaseDllName->Buffer, min(64, d->BaseDllName->Length / 2 + 1));
+    if (!lstrcmpiW(name, L"WebView2Loader.dll")) {
+        WCHAR full[MAX_PATH]; lstrcpynW(full, d->FullDllName->Buffer, min(MAX_PATH, d->FullDllName->Length / 2 + 1));
+        patch_loader((HMODULE)d->DllBase, full);
+    }
+}
+
+static void fix_webview2(void)
+{
+    WCHAR env[1024];
+    DWORD n = GetEnvironmentVariableW(L"RVTFIX_WV2_ARGS", env, 1024);
+    if (n && n < 1024) lstrcpyW(wv2_args, env);
+    else if (!n && GetLastError() != ERROR_ENVVAR_NOT_FOUND) wv2_args[0] = 0;
+    if (!wv2_args[0]) { trace("[rvtfix] WebView2: disabled (RVTFIX_WV2_ARGS is empty)\n"); return; }
+    ldr_register_fn reg = (ldr_register_fn)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "LdrRegisterDllNotification");
+    void *cookie;
+    if (!reg || reg(0, on_dll, NULL, &cookie)) trace("[rvtfix] WebView2: no LdrRegisterDllNotification\n");
+    HMODULE m = GetModuleHandleW(L"WebView2Loader.dll"); /* already loaded: patch it too */
+    if (m) patch_loader(m, L"(already loaded)");
+}
+
+static void fix_dragdrop(void)
+{
+    HMODULE ole = LoadLibraryW(L"ole32.dll");
+    BYTE *thunks;
+    if (!ole || !(thunks = alloc_near((BYTE *)ole, 0x1000))) { trace("[rvtfix] ole32: no thunk\n"); return; }
+    if (patch_export(ole, "RevokeDragDrop", (void *)hook_revoke, (void **)&orig_revoke, thunks) &&
+        patch_export(ole, "RegisterDragDrop", (void *)hook_register, (void **)&orig_register, thunks + 16))
+        trace("[rvtfix] ole32!RevokeDragDrop/RegisterDragDrop: foreign window check\n");
+    else
+        trace("[rvtfix] ole32: export not found\n");
+    FlushInstructionCache(GetCurrentProcess(), thunks, 32);
+}
+
+BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
+{
+    if (reason == DLL_PROCESS_ATTACH) {
+        DisableThreadLibraryCalls(inst);
+        GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                           (LPCWSTR)DllMain, &(HMODULE){0}); /* thunks point here, so never unload */
+        fix_dragdrop();
+        fix_webview2();
+    }
+    return TRUE;
+}

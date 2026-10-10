@@ -1,0 +1,84 @@
+*PPD-Adobe: "4.3"
+*FormatVersion: "4.3"
+*FileVersion: "1.0"
+*LanguageVersion: English
+*LanguageEncoding: ISOLatin1
+*PCFileName: "REVITPDF.PPD"
+*Manufacturer: "revit-macos"
+*Product: "(Revit PDF)"
+*ModelName: "Revit PDF"
+*ShortNickName: "Revit PDF"
+*NickName: "Revit PDF (PostScript -> Ghostscript)"
+*PSVersion: "(3010.000) 0"
+*LanguageLevel: "3"
+*ColorDevice: True
+*DefaultColorSpace: RGB
+*FileSystem: False
+*Throughput: "1"
+*LandscapeOrientation: Plus90
+*TTRasterizer: Type42
+*DefaultResolution: 600dpi
+
+*OpenUI *PageSize: PickOne
+*OrderDependency: 10 AnySetup *PageSize
+*DefaultPageSize: A4
+*PageSize A4: "<</PageSize[595 842]/ImagingBBox null>>setpagedevice"
+*PageSize A3: "<</PageSize[842 1191]/ImagingBBox null>>setpagedevice"
+*PageSize A2: "<</PageSize[1191 1684]/ImagingBBox null>>setpagedevice"
+*PageSize A1: "<</PageSize[1684 2384]/ImagingBBox null>>setpagedevice"
+*PageSize A0: "<</PageSize[2384 3370]/ImagingBBox null>>setpagedevice"
+*PageSize Letter: "<</PageSize[612 792]/ImagingBBox null>>setpagedevice"
+*PageSize Legal: "<</PageSize[612 1008]/ImagingBBox null>>setpagedevice"
+*PageSize Tabloid: "<</PageSize[792 1224]/ImagingBBox null>>setpagedevice"
+*PageSize ARCHC: "<</PageSize[1296 1728]/ImagingBBox null>>setpagedevice"
+*PageSize ARCHD: "<</PageSize[1728 2592]/ImagingBBox null>>setpagedevice"
+*PageSize ARCHE: "<</PageSize[2592 3456]/ImagingBBox null>>setpagedevice"
+*CloseUI: *PageSize
+
+*OpenUI *PageRegion: PickOne
+*OrderDependency: 10 AnySetup *PageRegion
+*DefaultPageRegion: A4
+*PageRegion A4: "<</PageSize[595 842]/ImagingBBox null>>setpagedevice"
+*PageRegion A3: "<</PageSize[842 1191]/ImagingBBox null>>setpagedevice"
+*PageRegion A2: "<</PageSize[1191 1684]/ImagingBBox null>>setpagedevice"
+*PageRegion A1: "<</PageSize[1684 2384]/ImagingBBox null>>setpagedevice"
+*PageRegion A0: "<</PageSize[2384 3370]/ImagingBBox null>>setpagedevice"
+*PageRegion Letter: "<</PageSize[612 792]/ImagingBBox null>>setpagedevice"
+*PageRegion Legal: "<</PageSize[612 1008]/ImagingBBox null>>setpagedevice"
+*PageRegion Tabloid: "<</PageSize[792 1224]/ImagingBBox null>>setpagedevice"
+*PageRegion ARCHC: "<</PageSize[1296 1728]/ImagingBBox null>>setpagedevice"
+*PageRegion ARCHD: "<</PageSize[1728 2592]/ImagingBBox null>>setpagedevice"
+*PageRegion ARCHE: "<</PageSize[2592 3456]/ImagingBBox null>>setpagedevice"
+*CloseUI: *PageRegion
+
+*DefaultImageableArea: A4
+*ImageableArea A4: "0 0 595 842"
+*ImageableArea A3: "0 0 842 1191"
+*ImageableArea A2: "0 0 1191 1684"
+*ImageableArea A1: "0 0 1684 2384"
+*ImageableArea A0: "0 0 2384 3370"
+*ImageableArea Letter: "0 0 612 792"
+*ImageableArea Legal: "0 0 612 1008"
+*ImageableArea Tabloid: "0 0 792 1224"
+*ImageableArea ARCHC: "0 0 1296 1728"
+*ImageableArea ARCHD: "0 0 1728 2592"
+*ImageableArea ARCHE: "0 0 2592 3456"
+
+*DefaultPaperDimension: A4
+*PaperDimension A4: "595 842"
+*PaperDimension A3: "842 1191"
+*PaperDimension A2: "1191 1684"
+*PaperDimension A1: "1684 2384"
+*PaperDimension A0: "2384 3370"
+*PaperDimension Letter: "612 792"
+*PaperDimension Legal: "612 1008"
+*PaperDimension Tabloid: "792 1224"
+*PaperDimension ARCHC: "1296 1728"
+*PaperDimension ARCHD: "1728 2592"
+*PaperDimension ARCHE: "2592 3456"
+
+*DefaultFont: Courier
+*Font Courier: Standard "(002.004S)" Standard ROM
+*Font Helvetica: Standard "(001.006S)" Standard ROM
+*Font Times-Roman: Standard "(001.007S)" Standard ROM
+*Font Symbol: Special "(001.007S)" Special ROM

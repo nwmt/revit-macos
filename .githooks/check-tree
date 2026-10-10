@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Whole-tree check of tracked files: shell syntax, Cyrillic, personal data.
+# Run by pre-push; safe to run by hand: .githooks/check-tree
+cd "$(git rev-parse --show-toplevel)" || exit 1
+. .githooks/lib.sh
+rc=0
+
+while IFS= read -r f; do
+  case "$f" in *.sh|.githooks/*) bash -n "$f" || rc=1 ;; esac
+  head -1 "$f" 2>/dev/null | grep -q '^#!.*bash' && { bash -n "$f" || rc=1; }
+done < <(git ls-files)
+
+if hits="$(git grep -n -I -P '[\x{0400}-\x{04FF}]' 2>/dev/null)"; then
+  echo "Cyrillic in tracked files:" >&2; printf '%s\n' "$hits" | head -10 >&2; rc=1
+fi
+while IFS= read -r p; do
+  [ -z "$p" ] && continue
+  git grep -q -I -F -i -- "$p" && { echo "Personal data in tracked files: \"$p\"" >&2; git grep -n -I -F -i -- "$p" | head -5 >&2; rc=1; }
+done < <(personal_patterns)
+
+[ $rc -eq 0 ] && echo "check-tree: ok"
+exit $rc

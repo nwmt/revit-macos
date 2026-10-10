@@ -1,0 +1,48 @@
+# ---- private working notes: research journal, plans, raw benchmarks, old history ----
+internal/
+
+# ---- installers and other large binaries: bring your own, never commit ----
+installers/*
+!installers/README.md
+!installers/CHECKSUMS.txt
+
+# ---- Wine prefixes / CrossOver bottles ----
+prefixes/
+*.wineprefix/
+drive_c/
+
+# ---- logs and debug output ----
+logs/
+*.log
+*.log.gz
+*.dmp
+crash-*.txt
+
+# ---- temporary ----
+tmp/
+scratch/
+.cache/
+
+# ---- licenses and secrets ----
+secrets/
+*.lic
+*.licpath
+serial*.txt
+.env
+.env.*
+
+# ---- macOS / editors ----
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+.idea/
+.vscode/
+*.swp
+
+# ---- cross-compiler (scripts/get-toolchain.sh) and build output ----
+toolchain/
+build/
+
+# ---- release packages (scripts/build-release.sh) ----
+dist/

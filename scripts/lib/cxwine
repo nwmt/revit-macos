@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# CrossOver wine wrapper for winetricks: the bottle comes from CX_BOTTLE.
+exec /Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine --bottle "${CX_BOTTLE:?CX_BOTTLE is not set}" "$@"

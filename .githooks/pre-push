@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Gate for what gets published: branch names and a full-tree check.
+. "$(dirname "$0")/lib.sh"
+rc=0
+# stdin: <local ref> <local sha> <remote ref> <remote sha>
+while read -r _ lsha rref _; do
+  [[ "$lsha" =~ ^0+$ ]] && continue            # branch deletion
+  case "$rref" in refs/heads/*) b="${rref#refs/heads/}"; branch_ok "$b" || { branch_help; rc=1; } ;; esac
+done
+"$(dirname "$0")/check-tree" || rc=1
+exit $rc

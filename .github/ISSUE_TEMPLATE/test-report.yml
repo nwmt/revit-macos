@@ -1,0 +1,34 @@
+name: Test report
+description: Tell us how Revit ran on your Mac — works or not, both help.
+labels: [test-report]
+body:
+  - type: dropdown
+    id: revit
+    attributes:
+      label: Revit version
+      options: ["2020", "2021", "2022", "2023", "2024", "2025", "2026", "2027"]
+    validations: { required: true }
+  - type: input
+    id: mac
+    attributes:
+      label: Mac and macOS
+      placeholder: "MacBook Pro M3, 18 GB, macOS 26.1"
+    validations: { required: true }
+  - type: input
+    id: crossover
+    attributes:
+      label: CrossOver version
+      placeholder: "26.3"
+    validations: { required: true }
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options: ["Works for real work", "Starts, with problems", "Does not start", "Install failed"]
+    validations: { required: true }
+  - type: textarea
+    id: details
+    attributes:
+      label: What worked, what didn't
+      description: Steps, error text, the last lines of the log in logs/. Remove your name, email and Mac name from logs before pasting.
+    validations: { required: true }

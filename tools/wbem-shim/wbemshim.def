@@ -1,0 +1,4 @@
+LIBRARY wbemshim.dll
+EXPORTS
+    DllGetClassObject PRIVATE
+    DllCanUnloadNow PRIVATE

@@ -1,0 +1,3 @@
+LIBRARY d3dwp.dll
+EXPORTS
+    D3D11CreateDevice=shim_D3D11CreateDevice

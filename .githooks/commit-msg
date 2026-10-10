@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Validate the commit message: "type(scope): description", English, no AI signature.
+. "$(dirname "$0")/lib.sh"
+# Only what the author wrote: drop comment lines and everything below the
+# --verbose scissors line (the staged diff may legitimately contain anything).
+MSG="$(sed '/^# -* >8 -*$/,$d' "$1" | grep -v '^#')"
+SUBJECT="$(printf '%s\n' "$MSG" | sed -n '/[^[:space:]]/{s/^[[:space:]]*//;s/[[:space:]]*$//;p;q;}')"
+
+fail() {
+  echo "Invalid commit message: $1" >&2
+  echo "" >&2
+  echo "Expected examples:" >&2
+  echo "  feat(install): add Revit 2027 support" >&2
+  echo "  fix(wv2fix): avoid USER lock in WebView2" >&2
+  echo "  docs: update version matrix" >&2
+  echo "Allowed types: ${TYPES//|/, }. Scope is optional, kebab-case." >&2
+  exit 1
+}
+
+printf '%s\n' "$MSG" | has_cyrillic && fail "write it in English (no Cyrillic)."
+printf '%s\n' "$MSG" | grep -Eiq '^[[:space:]]*co-authored-by:.*(claude|codex|copilot|gemini|chatgpt|cursor|devin|gpt-[0-9]|noreply@anthropic\.com)' \
+  && fail "remove the AI assistant Co-Authored-By trailer."
+printf '%s\n' "$MSG" | grep -Eiq 'generated with.*(claude|codex|copilot|gemini|chatgpt|cursor|devin|gpt-[0-9])' \
+  && fail "remove the \"Generated with …\" line."
+printf '%s\n' "$SUBJECT" | grep -Eq '^(Merge |Revert "|fixup! |squash! )' && exit 0
+printf '%s\n' "$SUBJECT" | grep -Eq "^($TYPES)(\($KEBAB\))?: .*[^[:space:]]$" \
+  || fail 'subject must be "type(scope): description" or "type: description".'
+exit 0
