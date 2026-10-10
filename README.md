@@ -35,6 +35,7 @@ cd revit-macos
 The script checks everything first and tells you exactly what is missing. Then it builds a
 CrossOver bottle with Revit and all fixes (10–30 minutes). When it finishes, start Revit from
 `~/Applications/Revit <year> (rvt<year>-a).app` and sign in with your Autodesk account.
+Revit 2020 and 2026 also get a Revit Viewer app next to it.
 
 Want to see the plan first? `INSTALL_DRYRUN=1 ./install.sh 2026` checks and prints, changes nothing.
 
