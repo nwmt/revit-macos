@@ -120,7 +120,7 @@ if [ ! -f "$(revit_dir_unix "$B" "$YEAR")/Revit.exe" ]; then
   exit 1
 fi
 sum="$(ls -td "$ROOT"/logs/{d6,install}-"$BOTTLE"-*/ 2>/dev/null | head -1)summary.txt"
-if [ -f "$sum" ] && bad="$(grep -E 'exit=' "$sum" | grep -Ev 'exit=(0|3010|skip)[[:space:]]')"; then
+if [ -f "$sum" ] && bad="$(grep -E 'exit=' "$sum" | grep -Ev 'exit=(0|3010|skip|ok)[[:space:]]')"; then
   echo; echo "Some steps reported problems (Revit may still work; details in $sum):"; printf '%s\n' "$bad" | sed 's/^/  /'
 fi
 

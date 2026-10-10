@@ -25,6 +25,7 @@ Revit is a Windows x64 program. On an Apple Silicon Mac it runs like this:
 | `tools/rvtfix` | Revit 2026+: crash from a drag-and-drop call on the browser's window, and white web panels with high CPU. The shim fixes the call and adds browser flags. |
 | `tools/wv2fix` | Revit 2026+: the built-in web browser (WebView2) crashes on clicks and resizes. The shim flushes pending drawing before such window changes and skips changes that change nothing. |
 | `tools/pdf-printer` | The bottle has no printers. Adds a "Revit PDF" printer; Ghostscript turns its output into PDFs in `~/Documents/Revit-PDF`. |
+| `tools/adsk_sfx.py` | Unpacks Autodesk multi-part downloads (Revit 2020) on the Mac. Their own self-extractor runs out of memory under Wine. |
 | `tools/adix.py`, `tools/odis.py` | Read Autodesk's installer manifests and unpack ADIX packages (files and registry) into the bottle, instead of the ODIS installer. |
 
 Other steps use Microsoft or open-source components: RichEdit DLLs for text, DXVK for Direct3D 9, a current WebView2

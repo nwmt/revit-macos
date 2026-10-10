@@ -57,7 +57,9 @@ for s in "${STEPS[@]}"; do
     licensing) # BitRock InstallBuilder
       t0=$(date +%s)
       w "$DIST\\x86\\AdskLicensing\\AdskLicensing-installer.exe" --mode unattended --unattendedmodeui none >>"$LOGDIR/wine.log" 2>&1
-      printf '   %-10s exit=%-5s %4ss  %s\n' licensing "$?" "$(( $(date +%s) - t0 ))" "x86\\AdskLicensing\\AdskLicensing-installer.exe" | tee -a "$LOGDIR/summary.txt"
+      # exit 1 is expected under Wine: only its takeown/sc sdshow calls fail; the service itself comes from svcshim
+      rc=$?; [ $rc = 1 ] && rc=ok
+      printf '   %-10s exit=%-5s %4ss  %s\n' licensing "$rc" "$(( $(date +%s) - t0 ))" "x86\\AdskLicensing\\AdskLicensing-installer.exe" | tee -a "$LOGDIR/summary.txt"
       cp "$B"/drive_c/users/crossover/AppData/Local/Temp/AdskLicensing-install.log "$LOGDIR/" 2>/dev/null || true
       # exit=1 is expected: Wine lacks takeown and `sc sdshow` (1639) — ACL steps, not critical.
       # mklink /J under Wine creates an empty "Current<garbage>" folder instead of a junction → fix with a symlink.

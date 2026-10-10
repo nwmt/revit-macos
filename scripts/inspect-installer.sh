@@ -29,7 +29,10 @@ echo "== type per 7zz:"; 7zz l "$main" 2>/dev/null | grep -E '^(Type|Physical Si
 if [ "$EXTRACT" = --extract ] && [ ! -d "$DST" ]; then
   # into a temp folder first: a failed extraction must not look like a finished one on the next run
   echo "== extracting to $DST"; rm -rf "$DST.partial"; mkdir -p "$DST.partial"
-  if ! 7zz x -y -o"$DST.partial" "$main" >/dev/null; then
+  # Autodesk multi-part downloads (2020) are not 7z: tools/adsk_sfx.py reads them directly
+  case "$main" in *.sfx.exe) unpack() { python3 -I "$ROOT/tools/adsk_sfx.py" "$main" "$DST.partial"; } ;;
+                  *)         unpack() { 7zz x -y -o"$DST.partial" "$main" >/dev/null; } ;; esac
+  if ! unpack; then
     echo "!! extraction failed (incomplete download or full disk?); removed $DST.partial"; rm -rf "$DST.partial"; exit 1
   fi
   if [ -z "$(find "$DST.partial" -maxdepth 4 \( -iname setup.xml -o -iname Setup.ini \) | head -1)" ]; then
