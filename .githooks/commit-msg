@@ -17,7 +17,7 @@ fail() {
   exit 1
 }
 
-printf '%s\n' "$MSG" | has_cyrillic && fail "write it in English (no Cyrillic)."
+printf '%s\n' "$MSG" | has_foreign_letters && fail "write it in English (letters A-Z only)."
 printf '%s\n' "$MSG" | grep -Eiq '^[[:space:]]*co-authored-by:.*(claude|codex|copilot|gemini|chatgpt|cursor|devin|gpt-[0-9]|noreply@anthropic\.com)' \
   && fail "remove the AI assistant Co-Authored-By trailer."
 printf '%s\n' "$MSG" | grep -Eiq 'generated with.*(claude|codex|copilot|gemini|chatgpt|cursor|devin|gpt-[0-9])' \

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Block what must never reach a public repo: wrong branch names, Cyrillic,
+# Block what must never reach a public repo: wrong branch names, non-English text,
 # personal data, installers and other binaries.
 . "$(dirname "$0")/lib.sh"
 rc=0
@@ -9,8 +9,8 @@ if [ -n "$BR" ] && ! branch_ok "$BR"; then branch_help; rc=1; fi
 
 ADDED="$(git diff --cached -U0 --no-color --diff-filter=ACMR | grep '^+' | grep -v '^+++ ')"
 
-if hits="$(printf '%s\n' "$ADDED" | SHOW=1 has_cyrillic)"; then
-  echo "Cyrillic in staged changes (docs, comments and messages are English-only):" >&2
+if hits="$(printf '%s\n' "$ADDED" | SHOW=1 has_foreign_letters)"; then
+  echo "Non-English letters in staged changes (code, comments and docs use letters A-Z only):" >&2
   printf '%s\n' "$hits" | head -10 >&2; rc=1
 fi
 

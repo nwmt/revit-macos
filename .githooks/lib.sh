@@ -4,8 +4,9 @@
 
 TYPES='feat|fix|perf|refactor|style|docs|chore|test|ci|build'
 KEBAB='[a-z0-9]+(-[a-z0-9]+)*'
-# Exit 0 if stdin has Cyrillic (U+0400..U+04FF); prints the offending lines with -v.
-has_cyrillic() { perl -CSD -ne 'if (/[\x{0400}-\x{04FF}]/) { $f = 1; print if $ENV{SHOW} } END { exit !$f }'; }
+# English only: letters must be A-Z/a-z; digits, punctuation and symbols (— × ✅) are fine.
+# Exit 0 if stdin has any other letter; SHOW=1 prints those lines.
+has_foreign_letters() { perl -CSD -ne 'if (/(?![A-Za-z])\p{L}/) { $f = 1; print if $ENV{SHOW} } END { exit !$f }'; }
 
 branch_ok() { # $1 = branch name
   [ "$1" = main ] && return 0
