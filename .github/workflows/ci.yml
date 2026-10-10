@@ -13,7 +13,7 @@ jobs:
     # macOS on Apple Silicon: the same /bin/bash 3.2, sips and toolchain users have
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0   # commit message check walks the PR range
       - name: Repo rules (paths, binaries, English-only, personal data, bash syntax)
