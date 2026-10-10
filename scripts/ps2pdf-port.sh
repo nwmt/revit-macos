@@ -10,8 +10,10 @@ cat > "$TMP"
 # Document name from the %%Title DSC comment, if Wine wrote one.
 TITLE="$(LC_ALL=C grep -a -m1 '^%%Title:' "$TMP" | sed -E 's/^%%Title:[[:space:]]*\(?//; s/\)?[[:space:]]*$//; s/[^A-Za-z0-9._ -]+/_/g' | cut -c1-80)"
 NAME="${TITLE:+$TITLE-}$TS"
+# Landscape: wineps keeps the page portrait, rotates the drawing and writes %%PageOrientation: Landscape.
+# /PageByPage makes Ghostscript follow that comment and set /Rotate on the page (/None printed it sideways).
 if command -v gs >/dev/null 2>&1; then
-  gs -q -dSAFER -dBATCH -dNOPAUSE -sDEVICE=pdfwrite -dAutoRotatePages=/None -dCompatibilityLevel=1.6 \
+  gs -q -dSAFER -dBATCH -dNOPAUSE -sDEVICE=pdfwrite -dAutoRotatePages=/PageByPage -dCompatibilityLevel=1.6 \
      -sOutputFile="$OUT/$NAME.pdf" "$TMP" 2>>"$OUT/.ps2pdf.log" && rm -f "$TMP" || mv "$TMP" "$OUT/$NAME.ps"
 else
   echo "$(date) ghostscript not found, saved $NAME.ps" >>"$OUT/.ps2pdf.log"; mv "$TMP" "$OUT/$NAME.ps"

@@ -49,9 +49,6 @@ Measured on Revit 2020. The install script for 2020 warns when the line is missi
 → Use the **Revit PDF** printer. The install adds it. PDFs go to `~/Documents/Revit-PDF`. It needs Ghostscript:
 `brew install ghostscript`.
 
-**Landscape sheets come out rotated on a portrait page.**
-→ Known issue. No fix yet.
-
 **"Revit PDF cannot be used with … print settings".**
 → Normal. The file was saved with another computer's printer settings. Continue.
 
