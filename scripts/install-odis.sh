@@ -89,7 +89,8 @@ for s in "${STEPS[@]}"; do
           # its stub .addin ships in RCPRVT; without the MSI — "GenerativeDesignForRevitApplication does not inherit from IExternalApplication".
       IFS='|' read -r -a names <<< "${ODIS_PKGS:-$PKGS_CORE}"
       python3 -I "$ROOT/tools/odis.py" get "$DIST" "${names[@]}" > "$LOGDIR/pkgs.tsv" || exit 1
-      while IFS=$'\t' read -r pname _as ptype pfile pparams; do
+      # tab is whitespace to `read` and empty columns would collapse; split on \037 instead
+      while IFS=$'\037' read -r pname _as ptype pfile pparams; do
         tag="$(echo "$pname" | tr -c 'A-Za-z0-9_\n' '_')"; t0=$SECONDS
         case "$ptype" in
           ADIX)
@@ -105,7 +106,7 @@ for s in "${STEPS[@]}"; do
             msi_win "$tag" "$(win "$DIST/$pfile")" ADSK_SETUP_EXE=1 ${extra[@]+"${extra[@]}"} ;;
           *) say "$tag" skip "type $ptype ($pfile) — not supported" ;;
         esac
-      done < "$LOGDIR/pkgs.tsv" ;;
+      done < <(tr '\t' '\037' < "$LOGDIR/pkgs.tsv") ;;
     asc) # Autodesk Shared Components (pkg ASC, type EXE): an ODIS bundle itself — 7z subpackages into one folder
          # %COMMONPROGRAMFILES%\Autodesk Shared\Components\<year>\<version> + ASCRegistryTool --registry set (postInstall).
          # Without it Revit 2026 fails at startup: "Autodesk Shared Components bundle is missing" (ASC status 6).

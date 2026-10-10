@@ -3,7 +3,7 @@
 # Usage: ./install.sh <year> [bottle]
 #   ./install.sh 2020             → bottle rvt2020-a, app ~/Applications/Revit 2020 (rvt2020-a).app
 #   INSTALL_DRYRUN=1 ./install.sh 2026   checks and prints the plan, changes nothing
-#   CX_RECREATE=1 ./install.sh 2026      deletes and rebuilds an existing bottle
+#   CX_RECREATE=1 ./install.sh 2026 [bottle]   deletes and rebuilds an existing bottle
 # Supported: 2020, 2026, 2027. Everything else is untested — see README.md.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"; . "$ROOT/scripts/lib/versions.sh"
@@ -17,6 +17,8 @@ case "$YEAR" in
      echo "Working versions: 2020, 2026, 2027. See README.md." >&2; exit 1 ;;
 esac
 BOTTLE="${BOTTLE:-$(revit_bottle_default "$YEAR")}"
+# the name ends up in shell commands, AppleScript and app names: keep it plain
+[[ "$BOTTLE" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "Bottle name may contain only letters, digits, - and _: \"$BOTTLE\"" >&2; exit 1; }
 export REVIT_YEAR="$YEAR"
 
 # ---- preflight: report every problem at once, with the fix ----
@@ -25,8 +27,12 @@ need() { echo "  ✗ $1"; echo "      fix: $2"; missing=1; }
 warn() { echo "  ! $1"; echo "      $2"; }
 echo "Checking requirements for Revit $YEAR (bottle $BOTTLE)…"
 
-[ "$(uname -m)" = arm64 ] || need "Apple Silicon Mac required" "this setup is tested on M-series Macs only"
-pgrep -q oahd || need "Rosetta 2 is not running" "softwareupdate --install-rosetta --agree-to-license"
+if [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" != 1 ]; then
+  need "Apple Silicon Mac required" "this setup is tested on M-series Macs only"
+elif [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = 1 ]; then
+  need "this Terminal runs under Rosetta" "quit Terminal, turn off \"Open using Rosetta\" in its Get Info window, and run again"
+fi
+/usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null || need "Rosetta 2 is not installed" "softwareupdate --install-rosetta --agree-to-license"
 [ -x "$CX/bin/cxbottle" ] || need "CrossOver not found in /Applications" "install it from https://www.codeweavers.com/crossover (trial available)"
 for t in 7zz:sevenzip winetricks:winetricks cabextract:cabextract gs:ghostscript python3:python3; do
   command -v "${t%%:*}" >/dev/null || need "${t%%:*} not found" "brew install ${t#*:}"
@@ -37,10 +43,14 @@ if [ ! -d "$DST" ] && [ -z "$(find "$SRC" -maxdepth 2 -type f \( -iname '*.exe' 
   need "no Revit $YEAR installer in installers/revit$YEAR/" "download it from your Autodesk Account, see installers/README.md"
 fi
 part1=$(find "$SRC" -maxdepth 2 -type f -iname '*_001_0*.sfx.exe' 2>/dev/null | head -1)
-if [ ! -d "$DST" ] && [ -n "$part1" ]; then # multi-part download: all parts must be next to each other
-  total=$(basename "$part1" | sed -E 's/.*_001_0*([0-9]+)\.sfx\.exe$/\1/')
-  have=$(find "$SRC" -maxdepth 2 -type f -iname "*_0*_$(printf '%03d' "$total").sfx.exe" | wc -l | tr -d ' ')
-  [ "$have" -eq "$total" ] || need "only $have of $total installer parts in installers/revit$YEAR/" "download all parts from your Autodesk Account"
+if [ ! -d "$DST" ] && [ -n "$part1" ]; then # multi-part download (2020): every part 001…NNN of the same download
+  total=$(basename "$part1" | sed -E 's/.*_001_0*([0-9]+)\.sfx\.exe$/\1/'); stem="${part1%_001_*}"; tot3=$(printf '%03d' "$total")
+  gone=""; for n in $(seq -f '%03g' 1 "$total"); do [ -f "${stem}_${n}_${tot3}.sfx.exe" ] || gone+=" $n"; done
+  [ -z "$gone" ] || need "installer parts missing in installers/revit$YEAR/:$gone (of $tot3)" "download all parts from your Autodesk Account"
+fi
+if [ ! -d "$DST" ] && [ "$YEAR" != 2020 ] && [ -z "$(find "$SRC" -maxdepth 2 -type f -iname '*.7z' 2>/dev/null | head -1)" ]; then
+  need "no .7z payload in installers/revit$YEAR/ (the small .exe alone is only the downloader)" \
+       "download both files of the Autodesk download, see versions/$YEAR.md"
 fi
 RX="$ROOT/installers/redist/win7sp1/x64"
 [ -f "$RX/msls31.dll" ] || need "installers/redist/win7sp1/x64/msls31.dll missing" "copy C:\\Windows\\System32\\msls31.dll from any Windows 7/10 x64, see installers/README.md"
@@ -54,7 +64,7 @@ else
 fi
 
 if [ -d "$HOME/Library/Application Support/CrossOver/Bottles/$BOTTLE" ] && [ "${CX_RECREATE:-0}" != 1 ]; then
-  need "bottle $BOTTLE already exists" "pick another name (./install.sh $YEAR rvt$YEAR-b) or rebuild it: CX_RECREATE=1 ./install.sh $YEAR"
+  need "bottle $BOTTLE already exists" "pick another name (./install.sh $YEAR rvt$YEAR-b) or rebuild it: CX_RECREATE=1 ./install.sh $YEAR $BOTTLE"
 fi
 # what Finder and System Settings call "available": includes purgeable space that df does not count
 free_gb=$(osascript -l JavaScript -e 'ObjC.import("Foundation"); var r = Ref();
@@ -91,10 +101,28 @@ export CX_DESC="Revit $YEAR"
 t0=$SECONDS; i=1
 for s in "${PLAN[@]}"; do
   echo; echo "==> [$i/${#PLAN[@]}] $s"
-  # shellcheck disable=SC2086 # each plan entry is a script path plus plain words
-  "$ROOT"/$s || { echo; echo "Step failed: $s — logs are in logs/. See docs/troubleshooting.md." >&2; exit 1; }
+  # shellcheck disable=SC2086
+  # entries are a script path plus plain words (the bottle name is validated above)
+  "$ROOT"/$s || {
+    last="$(ls -td "$ROOT"/logs/* 2>/dev/null | head -1)"; [ -d "$last" ] && last="$last/summary.txt"
+    echo; echo "Step failed: $s" >&2
+    [ -f "$last" ] && { echo "Last log: $last" >&2; tail -15 "$last" | sed 's/^/  | /' >&2; }
+    echo "See docs/troubleshooting.md. To start over: CX_RECREATE=1 ./install.sh $YEAR $BOTTLE" >&2
+    exit 1
+  }
   i=$((i + 1))
 done
+
+# installers report errors in their own way; check the result instead of trusting exit codes
+B="$HOME/Library/Application Support/CrossOver/Bottles/$BOTTLE"
+if [ ! -f "$(revit_dir_unix "$B" "$YEAR")/Revit.exe" ]; then
+  echo; echo "Install finished, but Revit.exe is not in the bottle. Logs: logs/. To start over: CX_RECREATE=1 ./install.sh $YEAR $BOTTLE" >&2
+  exit 1
+fi
+sum="$(ls -td "$ROOT"/logs/{d6,install}-"$BOTTLE"-*/ 2>/dev/null | head -1)summary.txt"
+if [ -f "$sum" ] && bad="$(grep -E 'exit=' "$sum" | grep -Ev 'exit=(0|3010|skip)[[:space:]]')"; then
+  echo; echo "Some steps reported problems (Revit may still work; details in $sum):"; printf '%s\n' "$bad" | sed 's/^/  /'
+fi
 
 echo
 echo "Done in $(((SECONDS - t0) / 60)) min."

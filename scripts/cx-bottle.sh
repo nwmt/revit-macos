@@ -9,7 +9,7 @@ NAME="${1:?specify a bottle name}"
 TEMPLATE="${2:-win10_64}"
 CX="/Applications/CrossOver.app/Contents/SharedSupport/CrossOver"
 BOTTLES="$HOME/Library/Application Support/CrossOver/Bottles"
-LOG="$(cd "$(dirname "$0")/.." && pwd)/logs/bottle-$NAME-$(date +%Y%m%d-%H%M%S).log"
+LOG="$(cd "$(dirname "$0")/.." && pwd)/logs/bottle-$NAME-$(date +%Y%m%d-%H%M%S).log"; mkdir -p "$(dirname "$LOG")"
 
 [ -x "$CX/bin/cxbottle" ] || { echo "CrossOver not found in /Applications" >&2; exit 1; }
 

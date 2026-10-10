@@ -27,7 +27,7 @@ Where to put the installer and the extra files: [installers/README.md](installer
 ## Install
 
 ```bash
-git clone https://github.com/<owner>/revit-macos.git
+git clone https://github.com/nwmt/revit-macos.git
 cd revit-macos
 ./install.sh 2020        # or 2026, 2027
 ```

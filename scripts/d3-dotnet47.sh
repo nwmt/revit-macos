@@ -11,7 +11,7 @@ CX="/Applications/CrossOver.app/Contents/SharedSupport/CrossOver"
 B="$HOME/Library/Application Support/CrossOver/Bottles/$NAME"
 NET40="$ROOT/installers/redist/dotNetFx40_Full_x86_x64.exe"
 NET47="$(ls "$ROOT"/installers/extracted/revit2020/*/3rdParty/NET/47/wcu/dotNetFramework/dotNetFx47_Full_x86_x64.exe 2>/dev/null | head -1)"
-LOG="$ROOT/logs/d3-$NAME-$(date +%Y%m%d-%H%M%S).log"
+LOG="$ROOT/logs/d3-$NAME-$(date +%Y%m%d-%H%M%S).log"; mkdir -p "$ROOT/logs"
 w() { "$CX/bin/wine" --bottle "$NAME" --wait-children "$@"; }
 mscoree_state() {
   for d in system32 syswow64; do

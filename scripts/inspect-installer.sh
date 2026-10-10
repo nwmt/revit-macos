@@ -8,7 +8,7 @@ set -uo pipefail
 YEAR="${1:?specify a year, e.g. 2026}"; EXTRACT="${2:-}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; . "$ROOT/scripts/lib/versions.sh"
 SRC="$(revit_installers "$YEAR")"; DST="$(revit_extracted "$YEAR")"
-OUT="$ROOT/logs/inspect-revit$YEAR-$(date +%Y%m%d-%H%M%S).txt"
+OUT="$ROOT/logs/inspect-revit$YEAR-$(date +%Y%m%d-%H%M%S).txt"; mkdir -p "$ROOT/logs"
 command -v 7zz >/dev/null || { echo "7zz required: brew install sevenzip" >&2; exit 1; }
 exec > >(tee "$OUT") 2>&1
 
@@ -27,7 +27,15 @@ echo "   sha256: $(shasum -a 256 "$main" | cut -d' ' -f1)  (add to installers/CH
 echo "== type per 7zz:"; 7zz l "$main" 2>/dev/null | grep -E '^(Type|Physical Size|Method)' | sed 's/^/   /'
 
 if [ "$EXTRACT" = --extract ] && [ ! -d "$DST" ]; then
-  echo "== extracting to $DST"; mkdir -p "$DST"; 7zz x -y -o"$DST" "$main" >/dev/null || echo "!! 7zz failed"
+  # into a temp folder first: a failed extraction must not look like a finished one on the next run
+  echo "== extracting to $DST"; rm -rf "$DST.partial"; mkdir -p "$DST.partial"
+  if ! 7zz x -y -o"$DST.partial" "$main" >/dev/null; then
+    echo "!! extraction failed (incomplete download or full disk?); removed $DST.partial"; rm -rf "$DST.partial"; exit 1
+  fi
+  if [ -z "$(find "$DST.partial" -maxdepth 4 \( -iname setup.xml -o -iname Setup.ini \) | head -1)" ]; then
+    echo "!! extracted files have no Setup.ini or setup.xml — not a Revit installer?"; rm -rf "$DST.partial"; exit 1
+  fi
+  mv "$DST.partial" "$DST"
 fi
 [ -d "$DST" ] || { echo "== contents (not extracted, first 60 lines):"; 7zz l "$main" | sed -n '/^-----/,$p' | head -60; exit 0; }
 

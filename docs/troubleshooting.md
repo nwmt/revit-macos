@@ -79,7 +79,7 @@ To undo: `... wpfhw`.
 ## Anything else
 
 **The bottle is in a strange state.**
-→ Do not repair it. Delete and rebuild: `CX_RECREATE=1 ./install.sh <year>`.
+→ Do not repair it. Delete and rebuild it with the same year and bottle name: `CX_RECREATE=1 ./install.sh <year> <bottle>`.
 
 To see what went wrong, start Revit with logs: `REVIT_YEAR=<year> ./scripts/d7-launch.sh <bottle>`.
 Logs land in `logs/`.

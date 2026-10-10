@@ -9,7 +9,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CX="/Applications/CrossOver.app/Contents/SharedSupport/CrossOver"
 B="$HOME/Library/Application Support/CrossOver/Bottles/$NAME"
 DIST="$(ls -d "$ROOT"/installers/extracted/revit2020/*/ | head -1)"
-LOG="$ROOT/logs/d2-$NAME-$(date +%Y%m%d-%H%M%S).log"
+LOG="$ROOT/logs/d2-$NAME-$(date +%Y%m%d-%H%M%S).log"; mkdir -p "$ROOT/logs"
 w() { "$CX/bin/wine" --bottle "$NAME" --wait-children "$@"; }
 override() { for d in "$@"; do w reg add 'HKCU\Software\Wine\DllOverrides' /v "$d" /d native,builtin /f >>"$LOG" 2>&1; done; }
 run_exe() { # $1 = path inside the installer, rest = switches
