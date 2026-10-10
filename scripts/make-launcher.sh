@@ -20,7 +20,9 @@ unix_path() { local p="${1#[Cc]:}"; echo "$B/drive_c${p//\\//}"; }   # C:\a\b â†
 make_app() { # $1 = app title, $2 = Windows exe path, $3 = arguments, $4 = icon (Windows path, may be empty)
   local app="$HOME/Applications/$1 ($NAME).app" exe="${2//\\/\\\\}"
   rm -rf "$app"
-  osacompile -o "$app" -e "do shell script \"cd ~ && '$CXW' --bottle '$NAME' '$exe' $3 >/dev/null 2>&1 &\""
+  # The redirect covers the whole ( ) group: with `cd ~ && wine â€¦ >/dev/null &` the backgrounded shell keeps
+  # do shell script's output pipe open, so the applet waits (and sits in the Dock) until Revit quits.
+  osacompile -o "$app" -e "do shell script \"(cd ~ && '$CXW' --bottle '$NAME' '$exe' $3) >/dev/null 2>&1 &\""
   local ico; ico="$(unix_path "$4")"
   if [ -n "$4" ] && [ -f "$ico" ]; then
     if python3 -I "$ROOT/tools/win_shortcut.py" icns "$ico" "$app/Contents/Resources/applet.icns"; then

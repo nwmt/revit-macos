@@ -15,8 +15,9 @@ ver="$(ls "$B/drive_c/Program Files/Autodesk/AdskIdentityManager" 2>/dev/null | 
 EXE="C:\\\\Program Files\\\\Autodesk\\\\AdskIdentityManager\\\\$ver\\\\AdskIdentityManager.exe"
 APP="$HOME/Applications/Autodesk Sign-In ($NAME).app"
 rm -rf "$APP"
+# The redirect covers the whole ( ) group, or the backgrounded shell keeps do shell script waiting (see make-launcher.sh).
 osacompile -o "$APP" -e "on open location u
-  do shell script \"cd ~ && '$CXW' --bottle '$NAME' '$EXE' \" & quoted form of u & \" >/dev/null 2>&1 &\"
+  do shell script \"(cd ~ && '$CXW' --bottle '$NAME' '$EXE' \" & quoted form of u & \") >/dev/null 2>&1 &\"
 end open location"
 P="$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier local.revit-macos.adsk-signin.$NAME" "$P" 2>/dev/null \
