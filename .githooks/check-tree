@@ -1,24 +1,41 @@
 #!/usr/bin/env bash
-# Whole-tree check of tracked files: shell syntax, English-only text, personal data.
-# Run by pre-push; safe to run by hand: .githooks/check-tree
+# Checks one snapshot of the repo: what is staged (default) or a commit.
+#   .githooks/check-tree            the index (pre-commit)
+#   .githooks/check-tree <commit>   a commit (pre-push runs it for every commit it publishes)
+# Rules: allowed paths only, no binaries or big files, bash syntax, letters A-Z only, no personal data.
 cd "$(git rev-parse --show-toplevel)" || exit 1
 . .githooks/lib.sh
+REV="${1:-}"
+if [ -n "$REV" ]; then SRC=("$REV"); PFX="$REV:"; LABEL="commit $(git rev-parse --short "$REV")"
+else SRC=(--cached); PFX=":"; LABEL="staged files"; fi
 rc=0
+bad() { echo "$LABEL: $1" >&2; [ -n "${2:-}" ] && printf '%s\n' "$2" | head -10 | sed 's/^/  /' >&2; rc=1; }
+
+if [ -n "$REV" ]; then files="$(git ls-tree -r --name-only "$REV")"; else files="$(git ls-files --cached)"; fi
+text="$(git grep -I --name-only -e '' "${SRC[@]}" | sed "s|^$REV:||")"
 
 while IFS= read -r f; do
-  case "$f" in *.sh|.githooks/*) bash -n "$f" || rc=1 ;; esac
-  head -1 "$f" 2>/dev/null | grep -q '^#!.*bash' && { bash -n "$f" || rc=1; }
-done < <(git ls-files)
+  [ -z "$f" ] && continue
+  case "$f" in
+    internal/*|logs/*|toolchain/*|build/*|dist/*) bad "private or generated path: $f" ;;
+    installers/README.md|installers/CHECKSUMS.txt) ;;
+    installers/*) bad "installers stay local: $f" ;;
+  esac
+  lower="$(printf '%s' "$f" | tr '[:upper:]' '[:lower:]')"
+  case "$lower" in
+    *.exe|*.msi|*.msp|*.msu|*.dll|*.sys|*.7z|*.zip|*.cab|*.iso|*.dmg|*.pkg|*.tar|*.gz|*.xz|*.lic|*.rvt|*.rfa|*.rte|*.log|*.dmp)
+      bad "binary, installer or log file: $f" ;;
+  esac
+  size="$(git cat-file -s "$PFX$f")"
+  [ "$size" -gt 1048576 ] && bad "file over 1 MB: $f ($size bytes)"
+  if [ "$size" -gt 0 ] && ! grep -qxF -- "$f" <<<"$text"; then bad "binary content: $f"; fi
+  case "$f" in *.sh|.githooks/*|scripts/lib/cxwine) git show "$PFX$f" | bash -n 2>/dev/null || bad "bash syntax error: $f" ;; esac
+done <<<"$files"
 
-# git grep -e '' prints every line of every text file as path:line:text
-if hits="$(git grep -n -I -e '' | SHOW=1 has_foreign_letters)"; then
-  echo "Non-English letters in tracked files (letters A-Z only):" >&2; printf '%s
-' "$hits" | head -10 >&2; rc=1
-fi
-while IFS= read -r p; do
-  [ -z "$p" ] && continue
-  git grep -q -I -F -i -- "$p" && { echo "Personal data in tracked files: \"$p\"" >&2; git grep -n -I -F -i -- "$p" | head -5 >&2; rc=1; }
-done < <(personal_patterns)
+# every line of every text file as path:line:text
+lines="$(git grep -n -I -e '' "${SRC[@]}")"
+hits="$(printf '%s\n' "$lines" | SHOW=1 has_foreign_letters)" && bad "letters outside A-Z (English only):" "$hits"
+hits="$(printf '%s\n' "$lines" | find_personal)" && bad "personal data (use a placeholder such as <name>, \$HOME or ~):" "$hits"
 
-[ $rc -eq 0 ] && echo "check-tree: ok"
+[ $rc -eq 0 ] && echo "check-tree: ok ($LABEL)"
 exit $rc

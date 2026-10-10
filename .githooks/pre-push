@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
-# Gate for what gets published: branch names and a full-tree check.
+# Gate for what gets published: branch names, and check-tree on every commit being pushed
+# (not the working tree: an uncommitted fix must not hide a leak still in history).
 . "$(dirname "$0")/lib.sh"
 rc=0
+ZERO='^0+$'
 # stdin: <local ref> <local sha> <remote ref> <remote sha>
-while read -r _ lsha rref _; do
-  [[ "$lsha" =~ ^0+$ ]] && continue            # branch deletion
+while read -r _ lsha rref rsha; do
+  [[ "$lsha" =~ $ZERO ]] && continue            # deletion
   case "$rref" in refs/heads/*) b="${rref#refs/heads/}"; branch_ok "$b" || { branch_help; rc=1; } ;; esac
+  if [[ "$rsha" =~ $ZERO ]]; then range=("$lsha" --not --remotes); else range=("$rsha..$lsha"); fi
+  while read -r c; do
+    "$(dirname "$0")/check-tree" "$c" >/dev/null || rc=1
+  done < <(git rev-list "${range[@]}")
 done
-"$(dirname "$0")/check-tree" || rc=1
 exit $rc

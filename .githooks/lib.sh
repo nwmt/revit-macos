@@ -6,7 +6,10 @@ TYPES='feat|fix|perf|refactor|style|docs|chore|test|ci|build'
 KEBAB='[a-z0-9]+(-[a-z0-9]+)*'
 # English only: letters must be A-Z/a-z; digits, punctuation and symbols (— × ✅) are fine.
 # Exit 0 if stdin has any other letter; SHOW=1 prints those lines.
-has_foreign_letters() { perl -CSD -ne 'if (/(?![A-Za-z])\p{L}/) { $f = 1; print if $ENV{SHOW} } END { exit !$f }'; }
+# NFC first, so "e" + combining accent counts as one non-English letter; a mark left on a letter after NFC counts too (emoji modifiers like the one in ⚠️ do not).
+has_foreign_letters() {
+  perl -CSD -MUnicode::Normalize -ne '$_ = NFC($_); if (/(?![A-Za-z])\p{L}|\p{L}\p{M}/) { $f = 1; print if $ENV{SHOW} } END { exit !$f }'
+}
 
 branch_ok() { # $1 = branch name
   [ "$1" = main ] && return 0
@@ -27,4 +30,20 @@ personal_patterns() {
   git config user.email 2>/dev/null | grep -v 'users.noreply.github.com'
   [ -f "$(git rev-parse --git-dir)/info/denylist" ] && grep -v '^\s*\(#\|$\)' "$(git rev-parse --git-dir)/info/denylist"
   return 0
+}
+
+# stdin: lines of text. Prints lines with personal data, exit 0 if any.
+# Generic: any email except noreply/example addresses, any /Users/<real name> path (each match judged
+# on its own, so a placeholder elsewhere on the line does not excuse it). Specific: personal_patterns.
+find_personal() {
+  PERSONAL="$(personal_patterns)" perl -ne '
+    BEGIN { @p = grep { length } split /\n/, $ENV{PERSONAL} }
+    my $hit = 0;
+    for my $e (/([A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,})/g) {
+      $hit = 1 unless $e =~ /noreply|\@example\.(?:com|org|net)$|\@users\.noreply\.github\.com$/i;
+    }
+    $hit = 1 if m{/Users/(?!<|\$|Shared\b)[A-Za-z0-9_.-]+};
+    for my $p (@p) { $hit = 1 if index(lc $_, lc $p) >= 0 }
+    if ($hit) { $f = 1; print }
+    END { exit !$f }'
 }

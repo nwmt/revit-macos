@@ -1,37 +1,9 @@
 #!/usr/bin/env bash
 # Block what must never reach a public repo: wrong branch names, non-English text,
-# personal data, installers and other binaries.
+# personal data, installers and other binaries. Checks the whole staged snapshot.
 . "$(dirname "$0")/lib.sh"
 rc=0
-
 BR="$(git symbolic-ref --short -q HEAD)"
 if [ -n "$BR" ] && ! branch_ok "$BR"; then branch_help; rc=1; fi
-
-ADDED="$(git diff --cached -U0 --no-color --diff-filter=ACMR | grep '^+' | grep -v '^+++ ')"
-
-if hits="$(printf '%s\n' "$ADDED" | SHOW=1 has_foreign_letters)"; then
-  echo "Non-English letters in staged changes (code, comments and docs use letters A-Z only):" >&2
-  printf '%s\n' "$hits" | head -10 >&2; rc=1
-fi
-
-while IFS= read -r p; do
-  [ -z "$p" ] && continue
-  if printf '%s\n' "$ADDED" | grep -Fqi -- "$p"; then
-    echo "Personal data in staged changes: \"$p\". Replace it with a placeholder." >&2; rc=1
-  fi
-done < <(personal_patterns)
-
-if hits="$(printf '%s\n' "$ADDED" | grep -E '/Users/[A-Za-z0-9_.-]+' | grep -v '/Users/<')"; then
-  echo "Absolute /Users/<name> path in staged changes; use \$HOME or ~:" >&2
-  printf '%s\n' "$hits" | head -5 >&2; rc=1
-fi
-
-while IFS= read -r f; do
-  case "$f" in
-    *.exe|*.msi|*.msp|*.dll|*.7z|*.zip|*.cab|*.iso|*.dmg|*.lic|*.rvt|*.rfa|*.log)
-      echo "Binary/installer/log file staged: $f (installers and logs stay local)." >&2; rc=1 ;;
-  esac
-  [ -f "$f" ] && [ "$(wc -c <"$f")" -gt 1048576 ] && { echo "File over 1 MB staged: $f" >&2; rc=1; }
-done < <(git diff --cached --name-only --diff-filter=ACMR)
-
+"$(dirname "$0")/check-tree" >/dev/null || rc=1
 exit $rc

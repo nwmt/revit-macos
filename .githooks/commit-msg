@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Validate the commit message: "type(scope): description", English, no AI signature.
 . "$(dirname "$0")/lib.sh"
+AI='claude|anthropic|codex|openai|copilot|gemini|chatgpt|cursor|devin|gpt-[0-9]'
 # Only what the author wrote: drop comment lines and everything below the
 # --verbose scissors line (the staged diff may legitimately contain anything).
 MSG="$(sed '/^# -* >8 -*$/,$d' "$1" | grep -v '^#')"
@@ -18,11 +19,12 @@ fail() {
 }
 
 printf '%s\n' "$MSG" | has_foreign_letters && fail "write it in English (letters A-Z only)."
-printf '%s\n' "$MSG" | grep -Eiq '^[[:space:]]*co-authored-by:.*(claude|codex|copilot|gemini|chatgpt|cursor|devin|gpt-[0-9]|noreply@anthropic\.com)' \
+printf '%s\n' "$MSG" | grep -Eiq "^[[:space:]]*co-authored-by:.*($AI|noreply@anthropic\.com)" \
   && fail "remove the AI assistant Co-Authored-By trailer."
-printf '%s\n' "$MSG" | grep -Eiq 'generated with.*(claude|codex|copilot|gemini|chatgpt|cursor|devin|gpt-[0-9])' \
+printf '%s\n' "$MSG" | grep -Eiq "(generated|written|created) (with|by).*($AI)" \
   && fail "remove the \"Generated with …\" line."
+printf '%s\n' "$MSG" | find_personal >/dev/null && fail "remove personal data (email, /Users/<name> path, host name)."
 printf '%s\n' "$SUBJECT" | grep -Eq '^(Merge |Revert "|fixup! |squash! )' && exit 0
-printf '%s\n' "$SUBJECT" | grep -Eq "^($TYPES)(\($KEBAB\))?: .*[^[:space:]]$" \
+printf '%s\n' "$SUBJECT" | grep -Eq "^($TYPES)(\($KEBAB\))?!?: .*[^[:space:]]$" \
   || fail 'subject must be "type(scope): description" or "type: description".'
 exit 0
