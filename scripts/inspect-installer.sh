@@ -18,6 +18,9 @@ find "$SRC" -maxdepth 2 -type f ! -name .gitkeep -exec ls -lh {} \; 2>/dev/null 
 # largest archive: in "db" downloads (2023+) *_001_002.exe is a 16 MB bootstrapper, the payload is *_002_002.7z
 main=$(find "$SRC" -maxdepth 2 -type f \( -iname '*.exe' -o -iname '*.iso' -o -iname '*.zip' -o -iname '*.7z' \) \
   -exec stat -f '%z %N' {} + | sort -n | tail -1 | cut -d' ' -f2-)
+# multi-part downloads (2020: *_001_007.sfx.exe … *_007_007.sfx.exe, equal sizes) start from part 001
+first=$(find "$SRC" -maxdepth 2 -type f -iname '*_001_0*.sfx.exe' | sort | head -1)
+[ -n "$first" ] && main="$first"
 [ -n "$main" ] || { echo "!! no installer in $SRC"; exit 1; }
 echo "== main file: $main"
 echo "   sha256: $(shasum -a 256 "$main" | cut -d' ' -f1)  (add to installers/CHECKSUMS.txt)"

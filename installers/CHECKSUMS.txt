@@ -1,4 +1,3 @@
-ccb7dfcd44e695a5b78c400841756d01a9acefc43d368e8678d8e7d40fdd3ca0  revit2020/Revit_2020_G1_Win_64bit_r3_dlm.exe  (Revit 2020, self-extracting archive, 12 GB)
 65e064258f2e418816b304f646ff9e87af101e4c9552ab064bb74d281c38659f  redist/dotNetFx40_Full_x86_x64.exe  (Microsoft .NET Framework 4.0, Revit 2020 only)
 50b807166a3b02045f77b80a6afba32d30d1dae98f1cacdd96358767e40961e7  redist/win7sp1/x64/msls31.dll  (x64 3.10.349.0, from a Windows machine; your copy may differ)
 24615fd6eae2a8c66b8f50e3808edd9726175345e4a75aae65b437624c2c8409  revit2026/RVT_2026_NA_win_db_001_002.exe  (Autodesk downloader, 16 MB; build 26.0.4.409)

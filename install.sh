@@ -36,6 +36,12 @@ SRC="$(revit_installers "$YEAR")"; DST="$(revit_extracted "$YEAR")"
 if [ ! -d "$DST" ] && [ -z "$(find "$SRC" -maxdepth 2 -type f \( -iname '*.exe' -o -iname '*.7z' -o -iname '*.zip' -o -iname '*.iso' \) 2>/dev/null | head -1)" ]; then
   need "no Revit $YEAR installer in installers/revit$YEAR/" "download it from your Autodesk Account, see installers/README.md"
 fi
+part1=$(find "$SRC" -maxdepth 2 -type f -iname '*_001_0*.sfx.exe' 2>/dev/null | head -1)
+if [ ! -d "$DST" ] && [ -n "$part1" ]; then # multi-part download: all parts must be next to each other
+  total=$(basename "$part1" | sed -E 's/.*_001_0*([0-9]+)\.sfx\.exe$/\1/')
+  have=$(find "$SRC" -maxdepth 2 -type f -iname "*_0*_$(printf '%03d' "$total").sfx.exe" | wc -l | tr -d ' ')
+  [ "$have" -eq "$total" ] || need "only $have of $total installer parts in installers/revit$YEAR/" "download all parts from your Autodesk Account"
+fi
 RX="$ROOT/installers/redist/win7sp1/x64"
 [ -f "$RX/msls31.dll" ] || need "installers/redist/win7sp1/x64/msls31.dll missing" "copy C:\\Windows\\System32\\msls31.dll from any Windows 7/10 x64, see installers/README.md"
 if [ "$YEAR" = 2020 ]; then

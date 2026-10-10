@@ -1,7 +1,6 @@
 # installers/
 
-Put the files the install needs here. Nothing in this folder goes into git except this file and
-[CHECKSUMS.txt](CHECKSUMS.txt).
+Put the files the install needs here.
 
 **Revit installers come only from your own Autodesk Account** (manage.autodesk.com → Products and Services → Revit).
 For older versions use **Previous versions**. This project does not provide or link to any Autodesk files.
@@ -11,7 +10,9 @@ For older versions use **Previous versions**. This project does not provide or l
 ```
 installers/
 ├── revit2020/
-│   └── Revit_2020_G1_Win_64bit_r3_dlm.exe        Revit 2020, self-extracting archive (about 12 GB)
+│   ├── Revit_2020_G1_Win_64bit_r3_dlm_001_007.sfx.exe   Revit 2020 download: all 7 parts
+│   ├── …                                                  (6 × 1.97 GB + 429.8 MB)
+│   └── Revit_2020_G1_Win_64bit_r3_dlm_007_007.sfx.exe
 ├── revit2026/
 │   ├── RVT_2026_NA_win_db_001_002.exe            Revit 2026 download: both files
 │   └── RVT_2026_NA_win_db_002_002.7z
