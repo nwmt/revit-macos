@@ -28,8 +28,7 @@ Full_Simplified, average of 3 runs.
 | 2027 | 99.0 s | 27.9 s | **off** | Intel Core Ultra 9 275HX + RTX 5090 laptop: 65.2 s modeling |
 
 **The 2026 numbers were taken with anti-aliasing on**, before we switched to measuring without it, and will be
-re-measured. 2020 is measured with anti-aliasing on on purpose. One earlier 2020 run without anti-aliasing (on another day) gave 130.9 s / 27.1 s,
-so do not expect the new numbers to be lower.
+re-measured. 2020 is measured with anti-aliasing on on purpose.
 
 ### Notes per version
 
