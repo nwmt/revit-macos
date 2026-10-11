@@ -335,8 +335,12 @@ PY
               #   [Graphics] Antialiasing=0 AntialiasingOptions=1 — anti-aliasing off: smoother under Wine, and DXMT draws
               #   a black view with it; [AppFrame] Theme, [Colors] CanvasTheme — 0 dark, 1 light (Revit API UITheme/CanvasTheme),
               #   from the macOS appearance at install time, or REVIT_THEME=dark|light.
+              # 2025: Revit finds RealDWG Shared (DWG import/export, needed at startup) through the HIVE host, which asks ODIS's
+              #   install database; we install packages without ODIS, so Revit says "Cannot load the required component Autodesk
+              #   RealDWG Shared" and exits. Revit first takes the path it cached in [Interoperability] → give it the path.
               # Revit.ini lives in ProgramData (seed for new users) and in the user profile; Revit must be closed.
       keys=(Language.Select=ENU)
+      [ "$YEAR" = 2025 ] && keys+=("Interoperability.RealDWGInstalledLocation=C:\\Program Files\\Autodesk\\RealDWG Shared $YEAR\\")
       if [ "$YEAR" -ge 2025 ]; then
         theme="${REVIT_THEME:-$(defaults read -g AppleInterfaceStyle 2>/dev/null | grep -qi dark && echo dark || echo light)}"
         t=1; [ "$theme" = dark ] && t=0; theme+=", from ${REVIT_THEME:+REVIT_THEME}"; [ -n "${REVIT_THEME:-}" ] || theme+="macOS"
