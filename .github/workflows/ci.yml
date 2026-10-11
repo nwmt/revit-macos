@@ -31,6 +31,8 @@ jobs:
           git diff --quiet "v$SHIMS_VERSION" -- "${SHIMS_SOURCES[@]}" || echo "::warning::shim sources changed since v$SHIMS_VERSION: tag a release and bump scripts/lib/shims.sh (until then install.sh builds from source)"
       - name: Python helpers compile
         run: python3 -I -m py_compile tools/*.py tools/ncrypt-shim/gen_forwards.py
+      - name: ./revit and install.sh argument checks (sandbox, /bin/bash 3.2)
+        run: tests/revit-cli.sh
       - name: Build all shims
         run: |
           ./scripts/get-toolchain.sh

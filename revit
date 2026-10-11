@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Everyday commands for Revit on this Mac: ./revit <command> <year> [bottle]. Run ./revit for the list.
+# A thin front for install.sh and scripts/: it checks the arguments, refuses to touch the wrong or a running
+# bottle, and asks before deleting anything. REVIT_CX (tests only) points at a fake CrossOver.
+set -uo pipefail
+ROOT="$(cd "$(dirname "$0")" && pwd)"; . "$ROOT/scripts/lib/versions.sh"
+CX="${REVIT_CX:-/Applications/CrossOver.app/Contents/SharedSupport/CrossOver}"
+BOTTLES="$HOME/Library/Application Support/CrossOver/Bottles"
+
+usage() {
+  cat <<'EOF'
+Usage: ./revit <command> <year> [bottle]
+
+  install   install Revit
+  check     check what the install needs, change nothing
+  addins    add RevitLookup and pyRevit
+  stop      quit a Revit that hangs
+  logs      list the newest logs
+  debug     start Revit and record a log
+  rebuild   delete the bottle and install Revit again
+  remove    delete Revit, its bottle and its apps
+
+Example: ./revit install 2025
+Each Revit year lives in its own bottle, rvt<year>-a. To use another bottle, add its name at the end.
+EOF
+}
+die() { echo "$*" >&2; exit 1; }
+tilde() { case "$1" in "$HOME"/*) echo "~${1#"$HOME"}" ;; *) echo "$1" ;; esac; }
+size() { du -sh "$1" 2>/dev/null | cut -f1; }
+
+CMD="${1:-}"; YEAR="${2:-}"; NAME="${3:-}"
+case "$CMD" in
+  install|check|addins|stop|logs|debug|rebuild|remove) ;;
+  ""|help|-h|--help) usage; exit 0 ;;
+  *) echo "Unknown command: $CMD" >&2; echo >&2; usage >&2; exit 1 ;;
+esac
+[ -n "$YEAR" ] || die "Which Revit year? Example: ./revit $CMD 2025"
+if ! in_list "$YEAR" "${REVIT_SUPPORTED[@]}"; then
+  [[ "$YEAR" =~ ^[0-9]{4}$ ]] || die "\"$YEAR\" is not a Revit year. Example: ./revit $CMD 2025"
+  die "Revit $YEAR is not supported yet. Supported: ${REVIT_SUPPORTED[*]}."
+fi
+DEFAULT="$(revit_bottle_default "$YEAR")"; NAME="${NAME:-$DEFAULT}"
+revit_bottle_name_ok "$NAME" || die "Bottle name may contain only letters, digits, - and _, and cannot be \"default\": \"$NAME\""
+B="$BOTTLES/$NAME"
+no_link() { # CrossOver follows a link to the real bottle, so the checks would look at one bottle and delete another
+  [ ! -L "$B" ] || die "Bottle $NAME is a link to another bottle. Use the real bottle name."
+}
+[ "$CMD" = logs ] || no_link   # logs only reads logs/
+SFX=""; [ "$NAME" = "$DEFAULT" ] || SFX=" $NAME"   # hints name the bottle only when it is not the default
+
+case "$CMD" in
+  install) exec "$ROOT/install.sh" "$YEAR" "$NAME" ;;
+  check)   export INSTALL_DRYRUN=1; exec "$ROOT/install.sh" "$YEAR" "$NAME" ;;
+  *) die "./revit $CMD is not ready yet." ;;
+esac

@@ -29,7 +29,7 @@ while IFS= read -r f; do
   size="$(git cat-file -s "$PFX$f")"
   [ "$size" -gt 1048576 ] && bad "file over 1 MB: $f ($size bytes)"
   if [ "$size" -gt 0 ] && ! grep -qxF -- "$f" <<<"$text"; then bad "binary content: $f"; fi
-  case "$f" in *.sh|.githooks/*|scripts/lib/cxwine) git show "$PFX$f" | bash -n 2>/dev/null || bad "bash syntax error: $f" ;; esac
+  case "$f" in *.sh|revit|.githooks/*|scripts/lib/cxwine) git show "$PFX$f" | bash -n 2>/dev/null || bad "bash syntax error: $f" ;; esac
 done <<<"$files"
 
 # every line of every text file as path:line:text

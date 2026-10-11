@@ -3,6 +3,15 @@
 # Requirement sources: Autodesk "System requirements for Revit 20XX" pages, Autodesk blog (2025/2026 → .NET 8).
 # 2027 → .NET 10: the installer ships windowsdesktop-runtime-10.0.0 (pkg.dotnet100.xml).
 REVIT_YEARS=(2020 2021 2022 2023 2024 2025 2026 2027)
+REVIT_SUPPORTED=(2020 2023 2024 2025 2026 2027)   # install.sh and ./revit accept these
+REVIT_ADDIN_YEARS=(2020 2023 2024 2025 2026)      # scripts/d8-addins.sh knows their add-ins
+
+in_list() { local x="$1" y; shift; for y in "$@"; do [ "$x" = "$y" ] && return 0; done; return 1; }
+
+revit_bottle_name_ok() { # the name ends up in shell commands, AppleScript and app names: keep it plain.
+  # "default" is CrossOver's alias for another bottle (CXBottle.pm), so a command could hit the wrong one
+  [[ "$1" =~ ^[A-Za-z0-9_-]+$ ]] && [ "$1" != default ]
+}
 
 revit_dotnet() { # .NET that Revit is built on
   case "$1" in
