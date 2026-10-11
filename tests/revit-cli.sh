@@ -64,10 +64,10 @@ fake_revit() { # $1 = bottle, $2 = year: a process that looks like Revit.exe and
     "C:\\Program Files\\Autodesk\\Revit $2\\Revit.exe" &
   PIDS="$PIDS $!"; sleep 1
 }
-fake_install() { bash -c 'sleep 60; :' install.sh "$1" & PIDS="$PIDS $!"; sleep 1; } # looks like install.sh <year>
-fake_script() { bash -c 'sleep 60; :' "$R/scripts/d8-addins.sh" "$1" & PIDS="$PIDS $!"; sleep 1; } # a script on bottle $1
-fake_odis() { bash -c 'sleep 60; :' "$R/scripts/install-odis.sh" "$1" "$2" & PIDS="$PIDS $!"; sleep 1; } # <year> <bottle>
-fake_unpack() { bash -c 'sleep 60; :' "$R/scripts/inspect-installer.sh" "$1" --extract & PIDS="$PIDS $!"; sleep 1; }
+fake_install() { bash -c 'sleep 60; :' install.sh "$1" 2>/dev/null & PIDS="$PIDS $!"; sleep 1; } # looks like install.sh <year>
+fake_script() { bash -c 'sleep 60; :' "$R/scripts/d8-addins.sh" "$1" 2>/dev/null & PIDS="$PIDS $!"; sleep 1; } # a script on bottle $1
+fake_odis() { bash -c 'sleep 60; :' "$R/scripts/install-odis.sh" "$1" "$2" 2>/dev/null & PIDS="$PIDS $!"; sleep 1; } # <year> <bottle>
+fake_unpack() { bash -c 'sleep 60; :' "$R/scripts/inspect-installer.sh" "$1" --extract 2>/dev/null & PIDS="$PIDS $!"; sleep 1; }
 run() { # $1 = what to type at the prompt; rest = ./revit arguments. Sets OUT and RC.
   local input="$1"; shift; : > "$CALLS"
   OUT="$(cd / && printf '%s\n' "$input" | env -u REVIT_YEAR -u INSTALL_DRYRUN -u CX_RECREATE \
@@ -110,6 +110,39 @@ expect "install.sh: rebuild hint names the bottle" 1 "rebuild it: ./revit rebuil
 expect "install.sh: final hint names the bottle" 1 "run ./revit install 2024 rvt2024-b again"
 reset; bottle rvt2024-a 2024 2024; run_install INSTALL_DRYRUN=1 2024
 check "install.sh: default bottle is not named" grep -qx '      fix: pick another name (./revit install 2024 rvt2024-b) or rebuild it: ./revit rebuild 2024' <<<"$OUT"
+
+# ---- addins, stop, logs, debug ----
+reset; run "" addins 2027;           expect "no add-ins for 2027" 1 "The add-in script is not set up for Revit 2027 yet."
+reset; run "" addins 2024;           expect "addins needs the bottle" 1 "There is no bottle rvt2024-a. To install Revit 2024: ./revit install 2024"
+reset; bottle rvt2024-a 2024 2024; run "" addins 2024; expect "addins runs the add-in script" 0 ""
+check "addins passes the year and the bottle" called "d8-addins.sh rvt2024-a | REVIT_YEAR=2024"
+reset; bottle rvt2025-a 2025 2025; run "" stop 2024 rvt2025-a
+expect "stop refuses a bottle of another year" 1 "Bottle rvt2025-a is for Revit 2025, not 2024."
+check "wrong year: nothing stopped" not_called "wineserver"
+reset; bottle exp "" ""; run "" stop 2024 exp; expect "stop refuses a non-Revit bottle" 1 "does not look like a Revit bottle"
+reset; bottle rvt2024-b 2024 ""; run "" stop 2024 rvt2024-b; expect "stop accepts a half-installed bottle" 0 "Stopped"
+check "stop kills that bottle's wineserver" called "wineserver -k | REVIT_YEAR= INSTALL_DRYRUN= CX_RECREATE= WINEPREFIX=$BOTTLES/rvt2024-b"
+reset; bottle rvt2024-a 2024 2024; touch "$T/wineserver-idle"; run "" stop 2024; expect "stop when nothing runs" 0 "Nothing is running in rvt2024-a."
+check "idle: nothing killed" not_called "wineserver -k |"
+reset; bottle rvt2024-a 2024 2024; touch "$T/wineserver-fails"; run "" stop 2024; expect "stop reports a failure" 1 "Could not stop rvt2024-a."
+reset; bottle rvt2024-a 2024 2024; ln -s "$BOTTLES/rvt2024-a" "$BOTTLES/rvt2024-t"; run "" stop 2024 rvt2024-t
+expect "a bottle that is a link is refused" 1 "Bottle rvt2024-t is a link to another bottle."
+reset; rm -rf "$CXF"; bottle rvt2024-a 2024 2024; run "" stop 2024; expect "stop without CrossOver" 1 "CrossOver not found"
+reset; run "" logs 2024;             expect "logs when there are none" 1 "No logs for rvt2024-a yet."
+reset; mkdir -p "$R/logs/install-rvt2024-a-20261011-100000" "$R/logs/d7-rvt2024-a-default-20261011-110000" \
+  "$R/logs/install-rvt2025-a-20261011-120000" "$R/logs/install-rvt2024-a-test-20261011-130000"
+run "" logs 2024;                    expect "logs works without a bottle" 0 "d7-rvt2024-a-default-20261011-110000"
+check "logs leaves out other bottles" eval '! grep -q -e rvt2025-a -e rvt2024-a-test <<<"$OUT"'
+reset; ln -s "$BOTTLES/elsewhere" "$BOTTLES/rvt2024-a"; mkdir -p "$R/logs/install-rvt2024-a-20261011-100000"
+run "" logs 2024;                    expect "logs is not blocked by a bottle link" 0 "install-rvt2024-a-20261011-100000"
+reset; bottle rvt2024-a 2024 2024; run "" debug 2024; expect "debug starts Revit with logging" 0 "then run ./revit logs 2024."
+check "debug passes the year" called "d7-launch.sh rvt2024-a | REVIT_YEAR=2024"
+reset; bottle rvt2024-a 2024 2024; fake_revit rvt2024-a 2024; run "" debug 2024
+expect "debug refuses while Revit runs" 1 "Revit 2024 is running in rvt2024-a."
+reset; bottle rvt2024-a 2024 2024; fake_script rvt2024-a; run "" debug 2024
+expect "debug refuses while a script works on the bottle" 1 "A script is still working on rvt2024-a."
+reset; bottle rvt2024-a 2024 2024; fake_install 2024; run "" debug 2024
+expect "debug refuses during an install of this year" 1 "An install of Revit 2024 is running."
 
 # ---- end ----
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]
