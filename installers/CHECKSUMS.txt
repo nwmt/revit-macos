@@ -12,5 +12,6 @@ b8b92c7597a6b522b9aeff3f18e9840d4eae9e4ea832ee145758e09a3853ed2a  revit2023/Revi
 2a6add76c37bfa872eb8c2b22d45b3216b8e2a1f193e0774006340ff62ac5fa0  redist/webview2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe  (Microsoft WebView2 Evergreen Standalone x64, go.microsoft.com/fwlink/?linkid=2124701, downloaded 2026-10-10; newer downloads will differ)
 a5e760f77cf581d6a26f9d12c5b408dbded5c0a6dc4c955316e7de29e62843d3  addins/revitlookup/RevitLookup-2020.0.0.3-SingleUser.msi  (optional; GitHub lookup-foundation/RevitLookup release 2023.1.0-EOL)
 84d6f271638445f8c949aaf6f07ff902e3d44242441ee427cb34573531daba3a  addins/pyrevit48/pyRevit_4.8.12.22247_signed.exe  (optional; GitHub pyrevitlabs/pyRevit v4.8.12)
+20190d68e6668e67aed225b80e4e762ff523d76589270bd5305e7bcbef58e9a3  addins/revitlookup/RevitLookup-2023.5.4-SingleUser.msi  (optional; GitHub lookup-foundation/RevitLookup release 2027.0.4)
 81c61845d01f3990edaa7f7a6ea796a27c37cb7c5e8ca85032afb2969cf8a996  addins/revitlookup/RevitLookup-2026.1.4-SingleUser.msi  (optional; GitHub lookup-foundation/RevitLookup release 2027.0.4)
 bf242d23f3ca8ae214f430aa29764f63e02756e7fcb620b21ca85965c8ee4476  addins/pyrevit7/pyRevit_7.0.0.26278_signed.exe  (optional; GitHub pyrevitlabs/pyRevit v7.0.0.26278+2233)

@@ -142,4 +142,4 @@ else
   echo "First launch: Revit opens Autodesk sign-in in your browser. After signing in, when the browser asks"
   echo "which app should open the link, choose \"Autodesk Sign-In ($BOTTLE)\"."
 fi
-case "$YEAR" in 2020|2026) echo "Optional add-ins (RevitLookup, pyRevit): REVIT_YEAR=$YEAR ./scripts/d8-addins.sh $BOTTLE" ;; esac
+case "$YEAR" in 2020|2023|2026) echo "Optional add-ins (RevitLookup, pyRevit): REVIT_YEAR=$YEAR ./scripts/d8-addins.sh $BOTTLE" ;; esac

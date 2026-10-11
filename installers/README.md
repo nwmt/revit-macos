@@ -28,9 +28,9 @@ installers/
 │   ├── dotNetFx40_Full_x86_x64.exe               Revit 2020 and 2023: Microsoft .NET Framework 4.0
 │   └── webview2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe   Revit 2026+, recommended
 ├── addins/                                       optional add-ins
-│   ├── revitlookup/   RevitLookup-2020.0.0.3-SingleUser.msi, RevitLookup-2026.1.4-SingleUser.msi
+│   ├── revitlookup/   RevitLookup-2020.0.0.3-SingleUser.msi, RevitLookup-2023.5.4-SingleUser.msi, RevitLookup-2026.1.4-SingleUser.msi
 │   ├── pyrevit48/     pyRevit_4.8.12.22247_signed.exe   (Revit 2020)
-│   └── pyrevit7/      pyRevit_7.0.0.26278_signed.exe    (Revit 2026)
+│   └── pyrevit7/      pyRevit_7.0.0.26278_signed.exe    (Revit 2023, 2026)
 └── extracted/                                    created by the install; safe to delete afterwards
 ```
 

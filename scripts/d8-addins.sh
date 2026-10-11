@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# D8: Revit add-ins (RevitLookup, pyRevit). 2020 runs them on the stock .NET 4.7; 2026 on Revit's own .NET 8.
+# D8: Revit add-ins (RevitLookup, pyRevit). 2020 runs them on the stock .NET 4.7; 2023 on .NET 4.8; 2026 on Revit's own .NET 8.
 # Usage: [REVIT_YEAR=2026] ./scripts/d8-addins.sh <bottle> [steps...]   (default year 2020)
-#   default steps: revitlookup pyrevit check (2026: + wpfsw)
+#   default steps: revitlookup pyrevit check (2023, 2026: + wpfsw)
 #   net472 / net48 — available, but Revit 2020 crashes in clr.dll on them; don't use
 #   enscape-off / enscape-on — remove/restore the Enscape manifest (Start crashes Revit)
 #   wpfsw / wpfhw — software-rendered WPF (fixes black boxes from add-in windows) / revert
@@ -13,12 +13,13 @@
 #   addins/enscape/Enscape-3.4.4-94564.msi                — enscape step (not default; bring your own)
 #   redist/nuget/system.valuetuple.4.5.0.nupkg           — for the enscape step (nuget.org)
 #   addins/pyrevit48/pyRevit_4.8.12.22247_signed.exe     — the IPY277 engine works on .NET 4.7 (6.5.5 doesn't)
+#   2023: addins/revitlookup/RevitLookup-2023.5.4-SingleUser.msi, addins/pyrevit7/pyRevit_7.0.0.26278_signed.exe
 #   2026: addins/revitlookup/RevitLookup-2026.1.4-SingleUser.msi, addins/pyrevit7/pyRevit_7.0.0.26278_signed.exe
 set -uo pipefail
 
 NAME="${1:?specify a bottle}"; shift
 YEAR="${REVIT_YEAR:-2020}"
-STEPS=("$@"); [ ${#STEPS[@]} -eq 0 ] && { STEPS=(revitlookup pyrevit check); [ "$YEAR" = 2026 ] && STEPS=(revitlookup pyrevit wpfsw check); }
+STEPS=("$@"); [ ${#STEPS[@]} -eq 0 ] && { STEPS=(revitlookup pyrevit check); case "$YEAR" in 2023|2026) STEPS=(revitlookup pyrevit wpfsw check);; esac; }
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CX="/Applications/CrossOver.app/Contents/SharedSupport/CrossOver"
 B="$HOME/Library/Application Support/CrossOver/Bottles/$NAME"
@@ -37,6 +38,8 @@ net_release() { w reg query 'HKLM\Software\Microsoft\NET Framework Setup\NDP\v4\
 case "$YEAR" in
   2020) LOOKUP="$I/addins/revitlookup/RevitLookup-2020.0.0.3-SingleUser.msi"   # last build for 2020 (2023.1.0-EOL)
         PYRSETUP="$I/addins/pyrevit48/pyRevit_4.8.12.22247_signed.exe";;
+  2023) LOOKUP="$I/addins/revitlookup/RevitLookup-2023.5.4-SingleUser.msi"   # GitHub release 2027.0.4
+        PYRSETUP="$I/addins/pyrevit7/pyRevit_7.0.0.26278_signed.exe";;
   2026) LOOKUP="$I/addins/revitlookup/RevitLookup-2026.1.4-SingleUser.msi"
         PYRSETUP="$I/addins/pyrevit7/pyRevit_7.0.0.26278_signed.exe";;
   *) echo "d8: year $YEAR is not configured" >&2; exit 1;;
