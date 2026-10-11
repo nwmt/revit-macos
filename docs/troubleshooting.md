@@ -58,6 +58,10 @@ Measured on Revit 2020. The install script for 2020 warns when the line is missi
 → Turn on software drawing for add-in windows: `REVIT_YEAR=2026 ./scripts/d8-addins.sh <bottle> wpfsw`.
 To undo: `... wpfhw`.
 
+**Revit asks "This signed add-in has been found" on every start, even after "Always Load".**
+→ Under Wine Revit can't save that answer. Trust the publishers of the add-ins in your Addins folder (what "Always
+Load" would do): `REVIT_YEAR=<year> ./scripts/d8-addins.sh <bottle> trust`. The add-in script does it by default.
+
 **Revit 2020: pyRevit 6.x does not load.**
 → Use pyRevit 4.8.12. `REVIT_YEAR=2020 ./scripts/d8-addins.sh <bottle>` installs it.
 

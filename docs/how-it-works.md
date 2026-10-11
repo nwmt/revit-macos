@@ -27,6 +27,7 @@ Revit is a Windows x64 program. On an Apple Silicon Mac it runs like this:
 | `tools/pdf-printer` | The bottle has no printers. Adds a "Revit PDF" printer; Ghostscript turns its output into PDFs in `~/Documents/Revit-PDF`. |
 | `tools/win_shortcut.py` | Reads the Start Menu shortcuts the installer creates and builds the macOS apps from them, with the same command line and icon. |
 | `tools/adsk_sfx.py` | Unpacks Autodesk multi-part downloads (Revit 2020) on the Mac. Their own self-extractor runs out of memory under Wine. |
+| `tools/trustpub.py` | Revit asks "Always Load?" for signed add-ins on every start: under Wine it can't save the answer. The add-in script trusts the publishers of the add-ins it installs, as that button would. |
 | `tools/adix.py`, `tools/odis.py` | Read Autodesk's installer manifests and unpack ADIX packages (files and registry) into the bottle, instead of the ODIS installer. |
 
 Other steps use Microsoft or open-source components: RichEdit DLLs for text, DXVK for Direct3D 9, a current WebView2

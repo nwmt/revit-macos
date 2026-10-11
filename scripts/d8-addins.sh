@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# D8: Revit add-ins (RevitLookup, pyRevit). 2020 runs them on the stock .NET 4.7; 2023 on .NET 4.8; 2026 on Revit's own .NET 8.
+# D8: Revit add-ins (RevitLookup, pyRevit). 2020 runs them on the stock .NET 4.7; 2023 on .NET 4.8; 2025, 2026 on Revit's own .NET (8, or 10 after the .5 update).
 # Usage: [REVIT_YEAR=2026] ./scripts/d8-addins.sh <bottle> [steps...]   (default year 2020)
-#   default steps: revitlookup pyrevit check (2023, 2026: + wpfsw)
+#   default steps: revitlookup pyrevit trust check (2023, 2025, 2026: + wpfsw)
+#   trust — trust the publishers of the add-ins in your Addins\<year> folder, as "Always Load" does (under Wine Revit
+#           can't save that choice and asks on every start); trust is per publisher, so it covers their other add-ins too
 #   net472 / net48 — available, but Revit 2020 crashes in clr.dll on them; don't use
 #   enscape-off / enscape-on — remove/restore the Enscape manifest (Start crashes Revit)
 #   wpfsw / wpfhw — software-rendered WPF (fixes black boxes from add-in windows) / revert
@@ -14,12 +16,13 @@
 #   redist/nuget/system.valuetuple.4.5.0.nupkg           — for the enscape step (nuget.org)
 #   addins/pyrevit48/pyRevit_4.8.12.22247_signed.exe     — the IPY277 engine works on .NET 4.7 (6.5.5 doesn't)
 #   2023: addins/revitlookup/RevitLookup-2023.5.4-SingleUser.msi, addins/pyrevit7/pyRevit_7.0.0.26278_signed.exe
+#   2025: addins/revitlookup/RevitLookup-2025.2.4-SingleUser.msi, addins/pyrevit7/pyRevit_7.0.0.26278_signed.exe
 #   2026: addins/revitlookup/RevitLookup-2026.1.4-SingleUser.msi, addins/pyrevit7/pyRevit_7.0.0.26278_signed.exe
 set -uo pipefail
 
 NAME="${1:?specify a bottle}"; shift
 YEAR="${REVIT_YEAR:-2020}"
-STEPS=("$@"); [ ${#STEPS[@]} -eq 0 ] && { STEPS=(revitlookup pyrevit check); case "$YEAR" in 2023|2026) STEPS=(revitlookup pyrevit wpfsw check);; esac; }
+STEPS=("$@"); [ ${#STEPS[@]} -eq 0 ] && { STEPS=(revitlookup pyrevit trust check); case "$YEAR" in 2023|2025|2026) STEPS=(revitlookup pyrevit trust wpfsw check);; esac; }
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CX="/Applications/CrossOver.app/Contents/SharedSupport/CrossOver"
 B="$HOME/Library/Application Support/CrossOver/Bottles/$NAME"
@@ -39,6 +42,8 @@ case "$YEAR" in
   2020) LOOKUP="$I/addins/revitlookup/RevitLookup-2020.0.0.3-SingleUser.msi"   # last build for 2020 (2023.1.0-EOL)
         PYRSETUP="$I/addins/pyrevit48/pyRevit_4.8.12.22247_signed.exe";;
   2023) LOOKUP="$I/addins/revitlookup/RevitLookup-2023.5.4-SingleUser.msi"   # GitHub release 2027.0.4
+        PYRSETUP="$I/addins/pyrevit7/pyRevit_7.0.0.26278_signed.exe";;
+  2025) LOOKUP="$I/addins/revitlookup/RevitLookup-2025.2.4-SingleUser.msi"     # GitHub release 2027.0.4
         PYRSETUP="$I/addins/pyrevit7/pyRevit_7.0.0.26278_signed.exe";;
   2026) LOOKUP="$I/addins/revitlookup/RevitLookup-2026.1.4-SingleUser.msi"
         PYRSETUP="$I/addins/pyrevit7/pyRevit_7.0.0.26278_signed.exe";;
@@ -79,6 +84,25 @@ for s in "${STEPS[@]}"; do
     PYR='C:\users\crossover\AppData\Roaming\pyRevit-Master\bin\pyrevit.exe'
     [ "$YEAR" = 2020 ] && w "$PYR" attach master 277 2020 >>"$LOGDIR/wine.log" 2>&1
     echo "   pyrevit exit=$RC  $(( $(date +%s) - t0 ))s"; w "$PYR" attached 2>/dev/null | tr -d '\r' | sed 's/^/   /'
+    ;;
+  trust)
+    # "This signed add-in has been found" → "Always Load" adds the signer's certificate to the user's TrustedPublisher
+    # store; under Wine that write doesn't happen, so Revit asks again on every start. Do it for the add-ins in our
+    # Addins folder: the assemblies their .addin manifests name (absolute, or relative to the manifest).
+    files=()
+    for m in "$ADDINS"/*.addin; do
+      [ -f "$m" ] || continue
+      while IFS= read -r a; do
+        case "$a" in [A-Za-z]:\\*) f="$B/drive_c/$(echo "${a:3}" | tr '\\' /)";; *) f="$ADDINS/$(echo "$a" | tr '\\' /)";; esac
+        [ -f "$f" ] && files+=("$f")
+      done < <(grep -o '<Assembly>[^<]*' "$m" | sed 's/<Assembly>//' | tr -d '\r')
+    done
+    if [ ${#files[@]} -eq 0 ]; then echo "   trust: no add-in assemblies in $ADDINS"
+    else
+      python3 -I "$ROOT/tools/trustpub.py" "$B/drive_c/d8-trust.reg" "${files[@]}" | sed "s|$B/drive_c/||; s|^|   trust: |"
+      w regedit /s 'C:\d8-trust.reg' >>"$LOGDIR/wine.log" 2>&1; RC=$?
+      mv "$B/drive_c/d8-trust.reg" "$LOGDIR/"; echo "   trust exit=$RC"
+    fi
     ;;
   wpfsw|wpfhw)
     # Add-in windows (pyRevit, RevitLookup) use WPF effects: their D3D9 shaders fail to compile via DXVK → MoltenVK
