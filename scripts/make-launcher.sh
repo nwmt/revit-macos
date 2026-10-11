@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Creates macOS apps in ~/Applications for the Revit shortcuts in the bottle, with their own icons:
-#   Revit <year> (<bottle>).app, and Revit Viewer <year> (<bottle>).app where the version has a Viewer.
+#   Revit <year> (<bottle>).app and Revit Viewer <year> (<bottle>).app (Revit started with /viewer).
 # Usage: ./scripts/make-launcher.sh <bottle> [year]
 #   year: argument, else $REVIT_YEAR, else the 4 digits in the bottle name (rvt2026-a → 2026), else 2020.
 # Why: CrossOver 26 cxmenu doesn't create an app for "Revit <year>.lnk". The command line (/viewer, /language …)
@@ -42,12 +42,19 @@ make_app() { # $1 = app title, $2 = Windows exe path, $3 = arguments, $4 = icon 
   echo "done: $app"
 }
 
-made=0
+made=0; viewer=0; r_target=""; r_args=""; r_icon=""
 for title in "Revit $YEAR" "Revit Viewer $YEAR"; do
   lnk="$MENU/$title.lnk"
   [ -f "$lnk" ] || continue
-  IFS=$'\t' read -r target args icon < <(python3 -I "$ROOT/tools/win_shortcut.py" info "$lnk")
+  # \037, not tab: read merges empty tab-separated fields, which would move the icon into the arguments
+  IFS=$'\037' read -r target args icon < <(python3 -I "$ROOT/tools/win_shortcut.py" info "$lnk" | tr '\t' '\037')
   make_app "$title" "$target" "$args" "$icon"; made=$((made + 1))
+  if [ "$title" = "Revit $YEAR" ]; then r_target="$target"; r_args="$args"; r_icon="$icon"; else viewer=1; fi
 done
 # no Start Menu shortcuts (unusual install): plain Revit without an icon
-[ $made -gt 0 ] || make_app "Revit $YEAR" "C:\\Program Files\\Autodesk\\Revit $YEAR\\Revit.exe" "" ""
+[ $made -gt 0 ] || { r_target="C:\\Program Files\\Autodesk\\Revit $YEAR\\Revit.exe"; make_app "Revit $YEAR" "$r_target" "" ""; }
+# Revit Viewer is Revit started with /viewer; not every installer creates its shortcut. Its icon sits next to Revit's.
+if [ $viewer = 0 ]; then
+  v_icon="${r_icon%\\*}\\RevitViewer.ico"; [ -f "$(unix_path "$v_icon")" ] || v_icon="$r_icon"
+  make_app "Revit Viewer $YEAR" "$r_target" "/viewer${r_args:+ $r_args}" "$v_icon"
+fi
