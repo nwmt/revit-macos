@@ -92,6 +92,39 @@ verify() { # who the bottle is and that nothing uses it; run before confirm and 
   no_link
   if [ -d "$B" ]; then check_year; not_busy; fi
 }
+confirm() { # typing the year is harder to do by accident than y/n
+  local a=""; printf 'Type %s to continue, anything else to cancel: ' "$YEAR"
+  read -r a || a=""
+  [ "$a" = "$YEAR" ] || { echo; echo "Cancelled. Nothing changed."; exit 1; }
+}
+docs_note() { # the bottle's Documents is normally a link to the Mac's Documents: deleting the bottle removes the link only
+  local t
+  if t="$(readlink "$B/drive_c/users/crossover/Documents")"; then
+    echo "  Documents in this bottle is your Mac folder $(tilde "$t"). It stays."
+  else
+    echo "  Documents in this bottle is not linked to your Mac. Files in it are deleted too."
+  fi
+  echo "  Everything else on the bottle's C: drive is deleted."
+}
+other_bottle_of_year() { # another bottle of this year still needs installers/extracted/revit<year>
+  local b ys
+  for b in "$BOTTLES"/*/; do
+    b="${b%/}"
+    if [ "$b" = "$B" ] || [ -L "$b" ]; then continue; fi
+    ys="$(bottle_years "$b")"   # a variable, not a pipe into grep -q: see revit_running
+    grep -qx "$YEAR" <<<"$ys" && { basename "$b"; return 0; }
+  done
+  return 1
+}
+extracted_plan() { # sets DROP_X (1 = remove deletes the unpacked files) and KEEP_X (why they stay)
+  X="$(revit_extracted "$YEAR")"; DROP_X=0; KEEP_X=""
+  [ -d "$X" ] || return 0
+  if o="$(other_bottle_of_year)"; then KEEP_X="bottle $o still uses it"
+  # unpacking starts before the bottle exists, and the download/unpack steps also run on their own
+  elif pgrep -f "(install|scripts/inspect-installer|scripts/get-revit)\.sh $YEAR( |$)" >/dev/null 2>&1; then
+    KEEP_X="an install of Revit $YEAR is running"
+  else DROP_X=1; fi
+}
 
 case "$CMD" in
   install) exec "$ROOT/install.sh" "$YEAR" "$NAME" ;;
@@ -120,5 +153,52 @@ case "$CMD" in
     need_crossover; need_bottle; not_busy
     export REVIT_YEAR="$YEAR"; "$ROOT/scripts/d7-launch.sh" "$NAME" || exit 1
     echo "Make the problem happen, quit Revit, then run ./revit logs $YEAR$SFX." ;;
-  *) die "./revit $CMD is not ready yet." ;;
+  rebuild)
+    need_crossover; need_bottle; verify
+    echo "This deletes the bottle $NAME and installs Revit $YEAR into it again (10–30 minutes)."
+    echo "  Revit is installed from the files already in installers/extracted/revit$YEAR. To get a newer Revit update,"
+    echo "  see \"Updating\" in the README."
+    if in_list "$YEAR" "${REVIT_ADDIN_YEARS[@]}"; then
+      echo "  Revit settings and add-ins in this bottle are reset: run ./revit addins $YEAR$SFX again if you use them."
+    else
+      echo "  Revit settings in this bottle are reset."
+    fi
+    docs_note
+    confirm
+    need_bottle; verify   # again: the bottle may have changed, or Revit or an install started, while the user was reading
+    export CX_RECREATE=1; exec "$ROOT/install.sh" "$YEAR" "$NAME" ;;
+  remove)
+    APPS=(); NA=0
+    for a in "Revit $YEAR" "Revit Viewer $YEAR" "Autodesk Sign-In"; do
+      [ -d "$HOME/Applications/$a ($NAME).app" ] && { APPS+=("$HOME/Applications/$a ($NAME).app"); NA=$((NA + 1)); }
+    done
+    if [ -d "$B" ]; then need_crossover; fi
+    verify
+    extracted_plan
+    if [ ! -d "$B" ] && [ "$NA" -eq 0 ] && [ "$DROP_X" = 0 ]; then echo "Nothing to remove for Revit $YEAR ($NAME)."; exit 0; fi
+    echo "This deletes:"
+    [ -d "$B" ] && printf '  %-48s %s\n' "bottle $NAME" "$(size "$B")"
+    [ "$DROP_X" = 1 ] && printf '  %-48s %s\n' "installers/extracted/revit$YEAR (unpacked files)" "$(size "$X")"
+    for a in ${APPS[@]+"${APPS[@]}"}; do echo "  $(tilde "$a")"; done
+    [ -d "$B" ] && docs_note
+    echo "Kept: installers/revit$YEAR (your downloads)."
+    [ -n "$KEEP_X" ] && echo "Kept: installers/extracted/revit$YEAR ($KEEP_X)."
+    confirm
+    # again, right before deleting: the bottle may have changed, or Revit or an install started, while the user was reading
+    verify
+    # the second look may only shrink what was confirmed, never add to it
+    want_x="$DROP_X"; extracted_plan
+    if [ "$want_x" = 1 ] && [ "$DROP_X" = 0 ]; then echo "Kept: installers/extracted/revit$YEAR ($KEEP_X)."; fi
+    [ "$want_x" = 1 ] || DROP_X=0
+    if [ -d "$B" ]; then
+      "$CX/bin/cxbottle" --bottle "$NAME" --delete --force
+      [ -d "$B" ] && die "The bottle is still there: $(tilde "$B"). Nothing else was removed. Quit CrossOver and run ./revit remove $YEAR$SFX again."
+    fi
+    for a in ${APPS[@]+"${APPS[@]}"}; do
+      rm -rf "$a" 2>/dev/null; [ ! -e "$a" ] || die "Could not delete $(tilde "$a"). Delete it in Finder, or run ./revit remove $YEAR$SFX again."
+    done
+    if [ "$DROP_X" = 1 ]; then
+      rm -rf "$X" 2>/dev/null; [ ! -e "$X" ] || die "Could not delete installers/extracted/revit$YEAR. Delete it in Finder."
+    fi
+    echo "Removed Revit $YEAR ($NAME)." ;;
 esac

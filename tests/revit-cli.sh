@@ -144,5 +144,65 @@ expect "debug refuses while a script works on the bottle" 1 "A script is still w
 reset; bottle rvt2024-a 2024 2024; fake_install 2024; run "" debug 2024
 expect "debug refuses during an install of this year" 1 "An install of Revit 2024 is running."
 
+# ---- rebuild ----
+reset; bottle rvt2024-a 2024 2024; run "no" rebuild 2024; expect "rebuild can be cancelled" 1 "Cancelled. Nothing changed."
+check "cancelled rebuild ran nothing" not_called "install.sh"
+reset; bottle rvt2024-a 2024 2024; run "2024" rebuild 2024; expect "rebuild explains the reset" 0 "run ./revit addins 2024 again"
+check "rebuild reinstalls with CX_RECREATE" called "install.sh 2024 rvt2024-a | REVIT_YEAR= INSTALL_DRYRUN= CX_RECREATE=1"
+reset; bottle rvt2024-b 2024 2024; run "" rebuild 2024 rvt2024-b; expect "rebuild hint names a non-default bottle" 1 "run ./revit addins 2024 rvt2024-b again"
+reset; bottle rvt2025-a 2025 2025; run "2024" rebuild 2024 rvt2025-a; expect "rebuild refuses another year" 1 "is for Revit 2025"
+check "wrong year: the 2025 bottle is untouched" test -d "$BOTTLES/rvt2025-a"
+reset; bottle rvt2024-a 2024 2024; fake_revit rvt2024-a 2024; run "2024" rebuild 2024
+expect "rebuild refuses while Revit runs" 1 "Save your work and quit Revit"
+check "running: nothing reinstalled" not_called "install.sh"
+reset; bottle rvt2024-a 2024 2024; bottle rvt2024-b 2024 2024; fake_revit rvt2024-b 2024; run "2024" rebuild 2024
+expect "Revit in another bottle does not block rebuild" 0 ""
+
+# ---- remove ----
+reset; bottle rvt2024-a 2024 2024; apps 2024 rvt2024-a; mkdir -p "$R/installers/extracted/revit2024"
+run "no" remove 2024;                expect "remove can be cancelled" 1 "Cancelled. Nothing changed."
+check "cancelled remove kept the bottle" test -d "$BOTTLES/rvt2024-a"
+run "2024" remove 2024;              expect "remove says Documents stays" 0 "Documents in this bottle is your Mac folder ~/Documents. It stays."
+check "remove deleted the bottle" test ! -d "$BOTTLES/rvt2024-a"
+check "remove deleted the Revit app" test ! -d "$H/Applications/Revit 2024 (rvt2024-a).app"
+check "remove deleted the Sign-In app" test ! -d "$H/Applications/Autodesk Sign-In (rvt2024-a).app"
+check "remove deleted the unpacked files" test ! -d "$R/installers/extracted/revit2024"
+check "remove kept the downloads" test -f "$R/installers/revit2024/Create_Installer_RVT_2024_3_6_English_WIN64.exe"
+check "remove kept the Mac's Documents" test -f "$H/Documents/project.rvt"
+check "remove lines up the sizes" eval '[ "$(grep -E "^  (bottle|installers/extracted)" <<<"$OUT" | awk "{ print length(\$0) }" | sort -u | wc -l)" -eq 1 ]'
+reset; bottle rvt2024-a 2024 2024; bottle rvt2024-b 2024 2024; mkdir -p "$R/installers/extracted/revit2024"
+run "2024" remove 2024;              expect "remove keeps unpacked files another bottle uses" 0 "Kept: installers/extracted/revit2024 (bottle rvt2024-b still uses it)."
+check "unpacked files still there" test -d "$R/installers/extracted/revit2024"
+reset; bottle rvt2024-a 2024 2024; fake_install 2024
+run "2024" remove 2024;              expect "remove refuses during an install of this year" 1 "An install of Revit 2024 is running."
+check "install running: bottle kept" test -d "$BOTTLES/rvt2024-a"
+reset; apps 2024 rvt2024-a; mkdir -p "$R/installers/extracted/revit2024"; fake_install 2024
+run "2024" remove 2024;              expect "remove keeps unpacked files during an install" 0 "an install of Revit 2024 is running"
+check "unpacked files kept during an install" test -d "$R/installers/extracted/revit2024"
+reset; bottle rvt2024-a 2024 2024; fake_script rvt2024-a
+run "2024" remove 2024;              expect "remove refuses while a script works on the bottle" 1 "A script is still working on rvt2024-a."
+reset; bottle rvt2024-a 2024 2024; fake_odis 2024 rvt2024-a
+run "2024" remove 2024;              expect "remove refuses while install-odis.sh works on the bottle" 1 "A script is still working on rvt2024-a."
+reset; apps 2024 rvt2024-a; mkdir -p "$R/installers/extracted/revit2024"; fake_unpack 2024
+run "2024" remove 2024;              expect "remove keeps unpacked files while they are being unpacked" 0 "an install of Revit 2024 is running"
+check "unpacking: files kept" test -d "$R/installers/extracted/revit2024"
+reset; apps 2024 rvt2024-a; chmod 555 "$H/Applications"
+run "2024" remove 2024;              expect "remove reports an app it could not delete" 1 "Could not delete ~/Applications/"
+chmod 755 "$H/Applications"
+reset; bottle rvt2024-a 2024 2024; bottle rvt2024-b 2024 2024; fake_revit rvt2024-b 2024
+run "2024" remove 2024;              expect "Revit in another bottle does not block remove" 0 "Removed Revit 2024 (rvt2024-a)."
+reset; bottle rvt2024-a 2024 2024; fake_revit rvt2024-a 2024
+run "2024" remove 2024;              expect "remove refuses while Revit runs" 1 "Revit 2024 is running in rvt2024-a."
+check "running: bottle kept" test -d "$BOTTLES/rvt2024-a"
+reset; bottle rvt2025-a 2025 2025; run "2024" remove 2024 rvt2025-a; expect "remove refuses another year" 1 "is for Revit 2025"
+check "wrong year: bottle kept" test -d "$BOTTLES/rvt2025-a"
+reset; bottle rvt2024-a 2024 2024; apps 2024 rvt2024-a; touch "$T/cxbottle-fails"
+run "2024" remove 2024;              expect "a failed bottle delete stops remove" 1 "The bottle is still there"
+check "failed delete: apps kept" test -d "$H/Applications/Revit 2024 (rvt2024-a).app"
+reset; apps 2024 rvt2024-a; run "2024" remove 2024; expect "remove finishes a partial remove" 0 "Removed Revit 2024 (rvt2024-a)."
+check "partial remove: apps gone" test ! -d "$H/Applications/Revit Viewer 2024 (rvt2024-a).app"
+reset; run "" remove 2024;           expect "nothing to remove" 0 "Nothing to remove for Revit 2024 (rvt2024-a)."
+reset; rm -rf "$CXF"; bottle rvt2024-a 2024 2024; run "2024" remove 2024; expect "remove without CrossOver" 1 "CrossOver not found"
+
 # ---- end ----
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]
