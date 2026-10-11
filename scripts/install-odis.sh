@@ -4,14 +4,14 @@
 # Usage: ./scripts/install-odis.sh <year> <bottle> [steps...]
 #   default steps: vc fonts dotnet licensing svcshim idmgr rvt pkgs asc revitini register ncryptshim webview2 d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix wv2fix
 #   2023 (sign-in through AdSSO as in 2020, no WebView2/IdentityManager/ASC packages):
-#     vc fonts dotnet licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix pdfprinter
+#     vc fonts dotnet licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix pdfprinter dynamo
 # The installer must be extracted: ./scripts/inspect-installer.sh <year> --extract
 set -uo pipefail
 YEAR="${1:?specify a year}"; NAME="${2:?specify a bottle}"; shift 2
 STEPS=("$@")
 if [ ${#STEPS[@]} -eq 0 ]; then
   case "$YEAR" in
-    2023) STEPS=(vc fonts dotnet licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix pdfprinter) ;;
+    2023) STEPS=(vc fonts dotnet licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix pdfprinter dynamo) ;;
     *)    STEPS=(vc fonts dotnet licensing svcshim idmgr rvt pkgs asc revitini register ncryptshim webview2 d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix wv2fix) ;;
   esac
 fi
@@ -295,6 +295,37 @@ PY2
         w 'C:\rvt-pdf\add_printer.exe' 'Revit PDF' 'C:\rvt-pdf\revitpdf.ppd' 'REVITPDF:'
       } >>"$LOGDIR/pdfprinter.log" 2>&1
       say pdfprinter "$?" "Revit PDF → REVITPDF: → scripts/ps2pdf-port.sh" ;;
+    dynamo) # Dynamo's 3D preview (HelixToolkit.SharpDX) breaks under D3DMetal: crash in 2020 (GetSharedHandle → E_NOTIMPL),
+            # black squares and lag across Revit in 2023. As in 2020: turn off Dynamo's hardware acceleration and background
+            # 3D preview, keep the preview in Revit views. Dynamo writes the file on exit: run with Revit closed.
+      DV="$(revit_dynamo "$YEAR")" || { say dynamo skip "no Dynamo version for $YEAR"; continue; }
+      DS="$B/drive_c/users/crossover/AppData/Roaming/Dynamo/Dynamo Revit/$DV/DynamoSettings.xml"
+      mkdir -p "$(dirname "$DS")"
+      python3 -I - "$DS" >>"$LOGDIR/dynamo.log" 2>&1 <<'PY'
+import os, sys, xml.etree.ElementTree as ET
+p = sys.argv[1]
+if os.path.exists(p):
+    t = ET.parse(p); r = t.getroot()
+else:
+    r = ET.Element("PreferenceSettings"); t = ET.ElementTree(r)
+    ET.SubElement(r, "IsFirstRun").text = "false"
+def setv(tag, val):
+    e = r.find(tag)
+    if e is None: e = ET.SubElement(r, tag)
+    e.text = val
+setv("UseHardwareAcceleration", "false")
+bp = r.find("BackgroundPreviews")
+if bp is None: bp = ET.SubElement(r, "BackgroundPreviews")
+st = {e.findtext("Name"): e for e in bp.findall("BackgroundPreviewActiveState")}
+for name, val in (("IsBackgroundPreviewActive", "false"), ("IsRevitBackgroundPreviewActive", "true")):
+    e = st.get(name)
+    if e is None:
+        e = ET.SubElement(bp, "BackgroundPreviewActiveState"); ET.SubElement(e, "Name").text = name; ET.SubElement(e, "IsActive")
+    e.find("IsActive").text = val
+t.write(p, xml_declaration=True, encoding="utf-8")
+print("ok", p)
+PY
+      say dynamo "$?" "Dynamo $DV DynamoSettings.xml: UseHardwareAcceleration=false, IsBackgroundPreviewActive=false" ;;
     revitini) # Revit takes template and library paths from [Directories<Select>] in Revit.ini. After installing 2027
               # [Language] Select=en-US (2026 has ENU) → there's no [Directoriesen-US] section → "The path specified for default
               # family templates is empty or invalid", empty template and library lists. Set Select=ENU.

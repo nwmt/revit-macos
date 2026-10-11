@@ -34,6 +34,9 @@ revit_dist() { # the installer root (setup.xml): the extracted folder (2026+) or
   echo "${d%/}"
 }
 revit_bottle_default() { echo "rvt$1-a"; }                                    # name of the version's first bottle
+revit_dynamo() { # Dynamo for Revit version: its settings folder %APPDATA%\Dynamo\Dynamo Revit\<version>
+  case "$1" in 2020) echo 2.3;; 2023) echo 2.13;; *) return 1;; esac
+}
 revit_prodkey() { # ADLM_PRODKEY from the RVT.msi Property table
   case "$1" in 2020) echo 829L1;; 2023) echo 829O1;; 2026) echo 829R1;; 2027) echo 829S1;; *) return 1;; esac
 }
