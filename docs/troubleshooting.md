@@ -23,7 +23,8 @@ All versions
 All versions
 
 1. Run `./revit logs <year>`. It lists the newest logs, newest first.
-2. If `./revit install` failed: attach `summary.txt` from the newest folder.
+2. If `./revit install` failed: copy what Terminal shows from `Step failed` to the end. If it names a `Last log`,
+   attach that file.
 3. If Revit fails when it starts or while you work: run `./revit debug <year>`, make the problem happen, and quit
    Revit. Attach `stdout.log` and the last 200 lines of `wine.cxlog` from the newest `d7-…` folder.
 4. Remove your name, email and your Mac's name from the files.

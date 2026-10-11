@@ -25,8 +25,8 @@ Keep the file names as Autodesk gives them. Only the versions you install need t
 
 ## Extra files
 
-- **msls31.dll** (all versions, required) → `installers/redist/win7sp1/x64/`.
-  Copy `C:\Windows\System32\msls31.dll` from any 64-bit Windows 7 or 10 PC. Revit needs it to show text.
+- **msls31.dll** (all versions, required) → `installers/redist/win7sp1/x64/`. Revit needs it to show text.
+  Where to get it: [What you need](../README.md#what-you-need).
 - **.NET Framework 4.0** (Revit 2020, 2023, 2024) → `installers/redist/`.
   The offline installer `dotNetFx40_Full_x86_x64.exe` from Microsoft.
 - **WebView2 runtime** (Revit 2024 and newer, recommended) → `installers/redist/webview2/`.
@@ -69,10 +69,11 @@ unpacks them again from the download; `./revit remove` deletes them for you.
 
 ## Checksums
 
-Optional. [CHECKSUMS.txt](CHECKSUMS.txt) lists the files we tested. To compare yours:
+Optional. [CHECKSUMS.txt](CHECKSUMS.txt) lists the files we tested. To compare yours, for example for Revit 2025
+(put your year instead of 2025):
 
 ```bash
-cd installers && shasum -a 256 revit<year>/*
+shasum -a 256 installers/revit2025/*
 ```
 
 A different checksum for a Revit file means a different build from the one we tested. It may still work.
