@@ -24,6 +24,7 @@ Full_Simplified, average of 3 runs.
 |---|---:|---:|---|---|
 | 2020 | 121.3 s | 24.9 s | on (benchmark template) | Intel i7-10750H laptop: 193.3 s / 43.9 s (over remote desktop) |
 | 2023 | 115.1 s | 27.1 s | **off** | Intel i9-13900KS + RTX 4090 desktop: 55.0 s modeling |
+| 2025 | 128.1 s | 31.9 s | **off** | Intel i9-13900KS virtual machine (Hyper-V): 84.7 s modeling |
 | 2026 | 128.0 s | 32.4 s | on (benchmark template) | none |
 | 2027 | 99.0 s | 27.9 s | **off** | Intel Core Ultra 9 275HX + RTX 5090 laptop: 65.2 s modeling |
 
@@ -41,5 +42,9 @@ re-measured. 2020 is measured with anti-aliasing on on purpose.
   28.0 / 27.9 / 27.9 s. The Windows numbers come from the reference report that ships with the benchmark (Revit 2027.0,
   a laptop with an Intel Core Ultra 9 275HX and 128 GB): the Mac takes about 1.5× as long for modeling. Its graphics
   test is a different set, so it is left out.
+- **2025:** measured on 2025.5 (build 25.5.0.57). Runs were steady: modeling 128.0 / 129.6 / 126.6 s, graphics
+  31.9 / 32.0 / 31.9 s. The Windows numbers come from the reference report that ships with the benchmark (Revit 2025.0
+  in a Hyper-V virtual machine on an Intel i9-13900KS, 5 GB): the Mac takes about 1.5× as long for modeling. Its
+  graphics test is a different set, so it is left out.
 - **2026:** measured on 2026.0. There is no Windows reference for 2026, and other apps were using a lot of CPU during
   the run.
