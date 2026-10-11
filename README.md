@@ -48,7 +48,7 @@ Want to see the plan first? `INSTALL_DRYRUN=1 ./install.sh 2026` checks and prin
 
 ## Speed
 
-RFO Benchmark (Full_Simplified, average of 3 runs, lower is better) on one Apple M5 MacBook, 16 GB, CrossOver 26.3:
+RFO Benchmark, Full_Simplified, lower is better, on one Apple M5 MacBook (16 GB):
 
 | Revit | Modeling | Graphics |
 |---|---:|---:|
@@ -56,8 +56,8 @@ RFO Benchmark (Full_Simplified, average of 3 runs, lower is better) on one Apple
 | 2023 | 116 s | 28 s |
 | 2026 | 128 s | 32 s |
 
-Each Revit year has its own benchmark set, so the rows are not comparable with each other. These are our numbers on
-one machine, not a promise for yours. Windows reference numbers and caveats are on each version's page.
+Taken with anti-aliasing on; to be re-measured with it off. Method, Windows references and caveats:
+[docs/benchmarks.md](docs/benchmarks.md).
 
 ## Good to know
 
