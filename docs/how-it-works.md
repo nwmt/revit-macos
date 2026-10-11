@@ -22,7 +22,7 @@ Revit is a Windows x64 program. On an Apple Silicon Mac it runs like this:
 4. Unpacks the installer on the Mac.
 5. Creates the bottle.
 6. Runs the steps below.
-7. Creates the **Autodesk Sign-In (<bottle>)** app for the sign-in link (2024 and newer).
+7. Creates the **Autodesk Sign-In** app for the sign-in link (2024 and newer).
 8. Creates the Revit and Revit Viewer apps in `~/Applications`.
 
 ## Steps
@@ -41,7 +41,7 @@ In install order. Normal install steps have "—" in What breaks.
 | `rvt` | Autodesk installer (ODIS) | Install Revit's MSI directly; for 2024 the update, a patch to that MSI, is applied while installing it | all |
 | `pkgs` | Autodesk installer (ODIS); Steel Connections puts its language files into a wrong folder | Install the other packages directly; move those files into Revit's folder | 2023+ |
 | `asc` | "Autodesk Shared Components bundle is missing" on start | Install the Shared Components bundle ourselves | 2026+ |
-| `revitini` | 2024, 2025: "Cannot load the required component Autodesk RealDWG Shared", Revit closes. 2027: "Default family templates is empty or invalid" | In `Revit.ini`: where RealDWG is, the language section; defaults for new users (anti-aliasing off, theme to match the Mac or `REVIT_THEME`) | 2024+ |
+| `revitini` | 2024, 2025: "Cannot load the required component Autodesk RealDWG Shared", Revit closes. 2027: "Default family templates is empty or invalid" | In `Revit.ini`: where RealDWG is, the language section; defaults for new users (anti-aliasing off, theme to match the Mac) | 2024+ |
 | `register` | — | Register Revit with Autodesk licensing, as Autodesk's installer does | all |
 | `ncryptshim` | Crash on start and on save (signature check) | Own `ncrypt.dll` for Revit | all |
 | `wbemshim` | Crash on New Project and in Options (system info query) | Own WMI wrapper | 2020, 2023, 2024 |
@@ -56,7 +56,7 @@ In install order. Normal install steps have "—" in What breaks.
 | `wv2fix` | The built-in browser (WebView2) crashes on clicks and resizes | Own `version.dll` in the browser process | 2024+ |
 | `pdfprinter` | No printer, so Print and Page Setup do not open | **Revit PDF** printer: PostScript → Ghostscript → PDF in `~/Documents/Revit-PDF` | 2020, 2023–2025 |
 | `dynamo` | Dynamo's 3D preview draws black squares, lags or crashes | Dynamo without hardware acceleration and background preview | 2020, 2023–2025 |
-| `urlhandler` | macOS does not know the link that returns from the browser to Revit: "Opening product" and nothing happens | The **Autodesk Sign-In (<bottle>)** app passes the link into the bottle | 2024+ |
+| `urlhandler` | macOS does not know the link that returns from the browser to Revit: "Opening product" and nothing happens | The **Autodesk Sign-In** app passes the link into the bottle | 2024+ |
 
 Some fixes were carried over from another version as they are, without checking that this version still needs them.
 

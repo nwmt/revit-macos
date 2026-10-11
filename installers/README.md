@@ -1,8 +1,12 @@
 # installers/
 
-Put the files that `./revit install` needs here. Revit comes only from your own Autodesk Account
-(manage.autodesk.com → Products and Services → Revit; older versions under **Previous versions**). This project does
-not provide or link to any Autodesk files.
+Put the files that `./revit install` needs here. Create the folders you need, named as in the tables below (for
+example `installers/revit2025/`): in Finder, File → New Folder.
+
+Revit comes only from your own Autodesk Account (manage.autodesk.com → Products and Services → Revit; older versions
+under **Previous versions**). Choose the English, Windows 64-bit version: other languages are not tested. If your
+account shows no download for Revit, ask your company's Autodesk admin. This project does not provide or link to any
+Autodesk files.
 
 ## Revit installer
 
@@ -13,8 +17,8 @@ not provide or link to any Autodesk files.
 | 2024–2027 | `Create_Installer_RVT_<year>_…_WIN64.exe` (32 MB) | `installers/revit<year>/` |
 
 For 2024 and newer the small Create Installer file is enough. `./revit install` reads from it where Autodesk keeps
-Revit, downloads the base release (10–11 GB) and the latest update (1.5–3.7 GB, checksum-checked), and installs
-Revit already updated. An interrupted download resumes on the next run. If you already have the base files from an
+Revit, downloads the base release (10–11 GB) and the update the file names (1.5–3.7 GB, checksum-checked), and
+installs Revit already updated. An interrupted download resumes on the next run. If you already have the base files from an
 older download (the parts, or the two `RVT_<year>_NA_win_db_…` files), they are used as they are.
 
 Keep the file names as Autodesk gives them. Only the versions you install need to be here.
@@ -26,8 +30,8 @@ Keep the file names as Autodesk gives them. Only the versions you install need t
 - **.NET Framework 4.0** (Revit 2020, 2023, 2024) → `installers/redist/`.
   The offline installer `dotNetFx40_Full_x86_x64.exe` from Microsoft.
 - **WebView2 runtime** (Revit 2024 and newer, recommended) → `installers/redist/webview2/`.
-  The Evergreen Standalone x64 installer from Microsoft (go.microsoft.com/fwlink/?linkid=2124701). Without it the
-  start screen and Manage Links stay white.
+  `MicrosoftEdgeWebView2RuntimeInstallerX64.exe` from Microsoft: <https://go.microsoft.com/fwlink/?linkid=2124701>
+  (Evergreen Standalone, x64). Without it the start screen and Manage Links stay white.
 - **RichEdit files**: `./revit install` downloads them from Microsoft by itself (Windows 7 SP1 package, about
   947 MB, once).
 
@@ -59,12 +63,13 @@ Approximate sizes:
 | 2026 | 13 GB | 11 GB | 7 GB |
 | 2027 | 12 GB | 11 GB | not measured |
 
-After the install you can delete `installers/extracted/revit<year>` (the unpacked files). `./revit rebuild` then
+`./revit install` needs free space for all three columns together. Afterwards you can delete
+`installers/extracted/revit<year>` (the unpacked files). `./revit rebuild` then
 unpacks them again from the download; `./revit remove` deletes them for you.
 
 ## Checksums
 
-[CHECKSUMS.txt](CHECKSUMS.txt) lists the files we tested. To compare yours:
+Optional. [CHECKSUMS.txt](CHECKSUMS.txt) lists the files we tested. To compare yours:
 
 ```bash
 cd installers && shasum -a 256 revit<year>/*

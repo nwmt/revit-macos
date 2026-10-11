@@ -1,6 +1,7 @@
 # Troubleshooting
 
-Find what you see. Each entry says which Revit versions it applies to. `<year>` is your Revit year, for example 2025.
+Find what you see. Each entry says which Revit versions it applies to. `<year>` is your Revit year, for example 2025;
+`<bottle>` is its bottle, for example `rvt2025-a`. Run the commands in Terminal, in the project folder.
 
 ## First
 
@@ -51,11 +52,11 @@ Revit 2024 and newer
 
 ### Revit pauses for about 5 seconds
 
-Measured on Revit 2020
+All versions (measured on Revit 2020)
 
 Opening a template or changing types stalls for about 5 seconds each time: your Mac's own name does not resolve.
 
-**Solution:** Add it to `/etc/hosts` (asks for your password):
+**Solution:** Add it to `/etc/hosts`. The command asks for your Mac login password; nothing appears while you type.
 
 ```bash
 H="$(hostname)"; sudo sh -c "printf '127.0.0.1\t$H\n::1\t$H\n' >> /etc/hosts"
@@ -69,7 +70,9 @@ H="$(hostname)"; sudo sh -c "printf '127.0.0.1\t$H\n::1\t$H\n' >> /etc/hosts"
 
 Revit 2023 and newer
 
-**Solution:** `./revit rebuild <year>`. The fixes for the built-in browser are part of `./revit install`.
+**Solution:** For 2024 and newer, put the WebView2 runtime into `installers/redist/webview2/` first
+([Extra files](../installers/README.md#extra-files)). Then `./revit rebuild <year>`: the fixes for the built-in
+browser are part of `./revit install`.
 
 ### Web panels sometimes redraw when another web window opens
 
@@ -131,7 +134,7 @@ REVIT_YEAR=<year> ./scripts/d8-addins.sh <bottle> wpfhw
 
 Revit 2020, 2023, 2024, 2025, 2026
 
-Under Wine Revit cannot save the **Always Load** answer.
+In CrossOver, Revit cannot save the **Always Load** answer.
 
 **Solution:** `./revit addins <year>`. It trusts the publishers of the add-ins in your Addins folder, as
 **Always Load** would.
@@ -152,9 +155,9 @@ Revit 2020 only runs on the .NET 4.7 from its own installer.
 
 ### Pressing Start in Enscape crashes Revit
 
-Revit 2020 (tested)
+Tested on Revit 2020; other versions are not tested.
 
-Not supported: Enscape needs Vulkan features the Mac does not have.
+Not supported: Enscape needs graphics features that CrossOver on a Mac does not have.
 
 <details>
 <summary>Advanced: turn Enscape off so it does not load</summary>
