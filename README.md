@@ -8,7 +8,7 @@ No Windows license, no virtual machine. One command builds everything.
 | Revit | Status | Notes |
 |---|---|---|
 | **2020** | ✅ Works | Real projects: modeling, sheets, exports, PDF printing. Faster than a comparable Windows laptop. [Details](versions/2020.md) |
-| **2023** | ⚠️ Mostly works | Modeling, 3D, Materials, saving, web panels. Start screen is blank. [Details](versions/2023.md) |
+| **2023** | ⚠️ Mostly works | Modeling, 3D, Materials, saving, start screen, web panels. Many features not tested yet. [Details](versions/2023.md) |
 | **2026** | ⚠️ Mostly works | Modeling, 3D, Materials, saving, pyRevit and RevitLookup. Start screen sometimes redraws. [Details](versions/2026.md) |
 | **2027** | ⚠️ Mostly works | Sign-in, new project, modeling, start screen, web panels. Many features not tested yet. [Details](versions/2027.md) |
 | 2021, 2022, 2024, 2025 | Not tested yet | |

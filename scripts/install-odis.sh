@@ -4,14 +4,14 @@
 # Usage: ./scripts/install-odis.sh <year> <bottle> [steps...]
 #   default steps: vc fonts dotnet licensing svcshim idmgr rvt pkgs asc revitini register ncryptshim webview2 d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix wv2fix
 #   2023 (sign-in through AdSSO as in 2020, no WebView2/IdentityManager/ASC packages):
-#     vc fonts dotnet licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim d3d9dxvk dpipatch richedit tlbpin warpshim gdoff
+#     vc fonts dotnet licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix
 # The installer must be extracted: ./scripts/inspect-installer.sh <year> --extract
 set -uo pipefail
 YEAR="${1:?specify a year}"; NAME="${2:?specify a bottle}"; shift 2
 STEPS=("$@")
 if [ ${#STEPS[@]} -eq 0 ]; then
   case "$YEAR" in
-    2023) STEPS=(vc fonts dotnet licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim d3d9dxvk dpipatch richedit tlbpin warpshim gdoff) ;;
+    2023) STEPS=(vc fonts dotnet licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix) ;;
     *)    STEPS=(vc fonts dotnet licensing svcshim idmgr rvt pkgs asc revitini register ncryptshim webview2 d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix wv2fix) ;;
   esac
 fi
@@ -260,6 +260,7 @@ PY2
             # Currently: RegisterDragDrop/RevokeDragDrop on another process's window (start screen: the WebView2 window) —
             # Wine's ole32 crashes with AccessViolation, Windows returns DRAGDROP_E_INVALIDHWND. Patching the ole32 name in the
             # ModelBrowser assembly isn't possible: Revit verifies add-in signatures ("Verify failed!") and won't load it.
+            # 2023: adds --in-process-gpu for the CefSharp start screen, which stays blank otherwise.
       "$ROOT/scripts/build-ncrypt-shim.sh" >>"$LOGDIR/rvtfix.log" 2>&1; "$ROOT/scripts/build-rvtfix.sh" >>"$LOGDIR/rvtfix.log" 2>&1
       cp "$ROOT/build/ncrypt-shim/ncrypt.dll" "$ROOT/build/rvtfix/rvtfix.dll" "$B/drive_c/Program Files/Autodesk/Revit $YEAR/"
       say rvtfix "$?" "rvtfix.dll + ncrypt.dll (loads rvtfix) → Revit $YEAR" ;;

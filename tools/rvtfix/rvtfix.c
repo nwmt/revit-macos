@@ -19,6 +19,14 @@
  *    itself, so WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS never reaches the browser. Fix: in every loaded
  *    WebView2Loader.dll replace the CreateCoreWebView2EnvironmentWithOptions export and append the flags to
  *    AdditionalBrowserArguments of Revit's options. Custom flags: RVTFIX_WV2_ARGS; empty disables.
+ *
+ * 3. CefSharp browser (Revit 2023 start screen): Chromium's GPU process draws into Revit's window from another
+ *    process, which winemac doesn't show -> the page loads (DevTools on port 8088 shows it) but the screen stays blank.
+ *    "--in-process-gpu" keeps the GPU thread inside Revit. Revit sets CefSettings itself, but CEF also reads the
+ *    browser process command line (GetCommandLineW), so give it ours plus the flag: replace the GetCommandLineW exports
+ *    of kernelbase and kernel32 (Wine's returns its own copy, not the PEB string) before libcef.dll loads.
+ *    Only if CefSharp\libcef.dll sits next to Revit.exe.
+ *    Custom flags: RVTFIX_CEF_ARGS; empty disables.
  */
 #include <windows.h>
 #include <ole2.h>
@@ -177,6 +185,39 @@ static void fix_webview2(void)
     if (m) patch_loader(m, L"(already loaded)");
 }
 
+/* --- 3. CefSharp: browser process command line --- */
+static WCHAR *cef_cmdline;
+static LPWSTR WINAPI hook_getcmdline(void) { return cef_cmdline; }
+
+static void fix_cef(void)
+{
+    WCHAR args[1024] = L"--in-process-gpu", path[MAX_PATH], *slash;
+    char msg[1600];
+    DWORD n = GetEnvironmentVariableW(L"RVTFIX_CEF_ARGS", args, 1024);
+    if (!n && GetLastError() != ERROR_ENVVAR_NOT_FOUND) args[0] = 0;
+    else if (!n) lstrcpyW(args, L"--in-process-gpu");
+    if (!args[0]) { trace("[rvtfix] CefSharp: disabled (RVTFIX_CEF_ARGS is empty)\n"); return; }
+    if (!GetModuleFileNameW(NULL, path, MAX_PATH) || !(slash = wcsrchr(path, L'\\'))) return;
+    lstrcpyW(slash + 1, L"CefSharp\\libcef.dll");
+    if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) return; /* no CefSharp in this Revit */
+    const WCHAR *cur = GetCommandLineW();
+    cef_cmdline = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (lstrlenW(cur) + 2 + lstrlenW(args)) * sizeof(WCHAR)); /* never freed */
+    if (!cef_cmdline) return;
+    lstrcpyW(cef_cmdline, cur); lstrcatW(cef_cmdline, L" "); lstrcatW(cef_cmdline, args);
+    const WCHAR *dlls[] = {L"kernelbase.dll", L"kernel32.dll"};
+    int i, ok = 0;
+    for (i = 0; i < 2; i++) {
+        HMODULE m = GetModuleHandleW(dlls[i]);
+        BYTE *thunk = m ? alloc_near((BYTE *)m, 0x1000) : NULL;
+        void *orig;
+        if (thunk && patch_export(m, "GetCommandLineW", (void *)hook_getcmdline, &orig, thunk)) {
+            FlushInstructionCache(GetCurrentProcess(), thunk, 16); ok++;
+        }
+    }
+    wsprintfA(msg, "[rvtfix] CefSharp: GetCommandLineW += \"%ls\" (%d of 2 exports)\n", args, ok);
+    trace(msg);
+}
+
 static void fix_dragdrop(void)
 {
     HMODULE ole = LoadLibraryW(L"ole32.dll");
@@ -198,6 +239,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
                            (LPCWSTR)DllMain, &(HMODULE){0}); /* thunks point here, so never unload */
         fix_dragdrop();
         fix_webview2();
+        fix_cef();
     }
     return TRUE;
 }
