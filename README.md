@@ -7,7 +7,7 @@ No Windows license, no virtual machine. One command builds everything.
 
 | Revit | Status | Notes |
 |---|---|---|
-| **2020** | ✅ Works | Real projects: modeling, sheets, exports, PDF printing. Faster than a comparable Windows laptop. [Details](versions/2020.md) |
+| **2020** | ✅ Works | Real projects: modeling, sheets, exports, PDF printing. [Details](versions/2020.md) |
 | **2023** | ⚠️ Mostly works | Modeling, 3D, Materials, saving, PDF, exports, Dynamo (empty node library). [Details](versions/2023.md) |
 | **2026** | ⚠️ Mostly works | Modeling, 3D, Materials, saving, pyRevit and RevitLookup. Start screen sometimes redraws. [Details](versions/2026.md) |
 | **2027** | ⚠️ Mostly works | Sign-in, new project, modeling, start screen, web panels. Many features not tested yet. [Details](versions/2027.md) |
@@ -42,14 +42,16 @@ Want to see the plan first? `INSTALL_DRYRUN=1 ./install.sh 2026` checks and prin
 
 ## Speed
 
-RFO Benchmark for Revit 2020, average of 3 runs, lower is better:
+RFO Benchmark (Full_Simplified, average of 3 runs, lower is better) on one Apple M5 MacBook, 16 GB, CrossOver 26.3:
 
-| | Mac (Apple M5, 16 GB) | Windows laptop (Intel i7-10750H, 16 GB) |
+| Revit | Modeling | Graphics |
 |---|---:|---:|
-| Modeling | **121 s** | 193 s |
-| Graphics | **25 s** | 44 s |
+| 2020 | 121 s | 25 s |
+| 2023 | 116 s | 28 s |
+| 2026 | 128 s | 32 s |
 
-The Windows numbers come from an older run over remote desktop. Treat this as a rough comparison.
+Each Revit year has its own benchmark set, so the rows are not comparable with each other. These are our numbers on
+one machine, not a promise for yours. Windows reference numbers and caveats are on each version's page.
 
 ## Good to know
 
