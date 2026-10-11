@@ -6,7 +6,7 @@ body:
     id: revit
     attributes:
       label: Revit version
-      options: ["2020", "2021", "2022", "2023", "2024", "2025", "2026", "2027"]
+      options: ["2020", "2021", "2022", "2023", "2024", "2025", "2026", "2027", "Other"]
     validations: { required: true }
   - type: input
     id: mac
@@ -29,6 +29,12 @@ body:
   - type: textarea
     id: details
     attributes:
-      label: What worked, what didn't
-      description: Steps, error text, the last lines of the log in logs/. Remove your name, email and Mac name from logs before pasting.
+      label: What worked, what did not
+      description: Steps and error text.
     validations: { required: true }
+  - type: textarea
+    id: log
+    attributes:
+      label: Log (optional)
+      description: From ./revit logs. Remove your name, email and Mac name.
+      render: shell
