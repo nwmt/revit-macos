@@ -22,19 +22,21 @@ Full_Simplified, average of 3 runs.
 | Revit | Modeling | Graphics | Anti-aliasing | Windows reference |
 |---|---:|---:|---|---|
 | 2020 | 121.3 s | 24.9 s | on (benchmark template) | Intel i7-10750H laptop: 193.3 s / 43.9 s (over remote desktop) |
-| 2023 | 115.6 s | 28.3 s | on (benchmark template) | Intel i9-13900KS + RTX 4090 desktop: 55.0 s modeling |
+| 2023 | 115.1 s | 27.1 s | **off** | Intel i9-13900KS + RTX 4090 desktop: 55.0 s modeling |
 | 2026 | 128.0 s | 32.4 s | on (benchmark template) | none |
 | 2027 | 99.0 s | 27.9 s | **off** | Intel Core Ultra 9 275HX + RTX 5090 laptop: 65.2 s modeling |
 
-**The 2020, 2023 and 2026 numbers were taken with anti-aliasing on**, before we switched to measuring without it.
+**The 2020 and 2026 numbers were taken with anti-aliasing on**, before we switched to measuring without it.
 They will be re-measured with anti-aliasing off. One earlier 2020 run without anti-aliasing (on another day) gave 130.9 s / 27.1 s,
 so do not expect the new numbers to be lower.
 
 ### Notes per version
 
 - **2020:** the Windows laptop run is older and was done over remote desktop, which lowers its graphics score.
-- **2023:** the Windows numbers come from the reference report that ships with the benchmark. Its graphics test is a
-  different set, so it is left out. Mac runs were steady (modeling 116.8 / 115.2 / 114.8 s).
+- **2023:** runs were steady: modeling 115.4 / 115.4 / 114.4 s, graphics 27.2 / 27.2 / 26.9 s. With anti-aliasing on
+  (earlier, same bottle) it was 115.6 s and 28.3 s: modeling is the same, graphics about 4 % slower. The Windows
+  numbers come from the reference report that ships with the benchmark; its graphics test is a different set, so it
+  is left out.
 - **2027:** measured on 2027.3 (build 27.3.0.28). Runs were steady: modeling 100.2 / 98.5 / 98.2 s, graphics
   28.0 / 27.9 / 27.9 s. The Windows numbers come from the reference report that ships with the benchmark (Revit 2027.0,
   a laptop with an Intel Core Ultra 9 275HX and 128 GB): the Mac takes about 1.5× as long for modeling. Its graphics
