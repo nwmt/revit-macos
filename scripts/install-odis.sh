@@ -3,6 +3,7 @@
 # Order and switches come from manifest/app.RVT.xml and x64/RVT/pkg.RVT.xml (Dependencies), see versions/<year>.md.
 # Usage: ./scripts/install-odis.sh <year> <bottle> [steps...]
 #   default steps: vc fonts dotnet licensing svcshim idmgr rvt pkgs asc revitini register ncryptshim webview2 d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix wv2fix
+#   2025: the default + pdfprinter dynamo
 #   2023 (sign-in through AdSSO as in 2020, no WebView2/IdentityManager/ASC packages):
 #     vc fonts dotnet licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix pdfprinter dynamo
 # The installer must be extracted: ./scripts/inspect-installer.sh <year> --extract
@@ -12,6 +13,7 @@ STEPS=("$@")
 if [ ${#STEPS[@]} -eq 0 ]; then
   case "$YEAR" in
     2023) STEPS=(vc fonts dotnet licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix pdfprinter dynamo) ;;
+    2025) STEPS=(vc fonts dotnet licensing svcshim idmgr rvt pkgs asc revitini register ncryptshim webview2 d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix wv2fix pdfprinter dynamo) ;;
     *)    STEPS=(vc fonts dotnet licensing svcshim idmgr rvt pkgs asc revitini register ncryptshim webview2 d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix wv2fix) ;;
   esac
 fi
@@ -139,7 +141,15 @@ for s in "${STEPS[@]}"; do
             say "$tag" "$rc" "ADIX $pfile: ${n:-?} files$([ -f "$LOGDIR/$tag.reg" ] && echo ' + registry') ($((SECONDS - t0)) s)" ;;
           MSI)
             read -r -a extra <<< "$pparams"
-            msi_win "$tag" "$(win "$DIST/$pfile")" ADSK_SETUP_EXE=1 ${extra[@]+"${extra[@]}"} ;;
+            msi_win "$tag" "$(win "$DIST/$pfile")" ADSK_SETUP_EXE=1 ${extra[@]+"${extra[@]}"}
+            # Steel Connections (2025–2027): its DIRCA_INSTALLDIR builds the folder from REVIT-05\InstallRoot (which RVT.msi
+            # sets to Revit's own folder here) + "Revit <year>" → "…\Revit 2025Revit 2025\", and passing INSTALLDIR doesn't
+            # override it. Its language resources belong in Revit's AddIns\SteelConnections (the add-in itself is ADIX): move them.
+            RD="$B/drive_c/Program Files/Autodesk/Revit $YEAR"
+            if [ "$pname" = RVTCPSTLCON ] && [ -d "${RD}Revit $YEAR" ]; then
+              ditto "${RD}Revit $YEAR" "$RD" && rm -rf "${RD}Revit $YEAR"
+              say "$tag" "$?" "moved its files from \"Revit ${YEAR}Revit $YEAR\" into \"Revit $YEAR\""
+            fi ;;
           *) say "$tag" skip "type $ptype ($pfile) — not supported" ;;
         esac
       done < <(tr '\t' '\037' < "$LOGDIR/pkgs.tsv") ;;

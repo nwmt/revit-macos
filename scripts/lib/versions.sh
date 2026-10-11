@@ -36,7 +36,7 @@ revit_dist() { # the installer root (setup.xml): the extracted folder (2026+) or
 }
 revit_bottle_default() { echo "rvt$1-a"; }                                    # name of the version's first bottle
 revit_dynamo() { # Dynamo for Revit version: its settings folder %APPDATA%\Dynamo\Dynamo Revit\<version>
-  case "$1" in 2020) echo 2.3;; 2023) echo 2.13;; *) return 1;; esac
+  case "$1" in 2020) echo 2.3;; 2023) echo 2.13;; 2025) echo 3.3;; *) return 1;; esac
 }
 revit_prodkey() { # ADLM_PRODKEY from the RVT.msi Property table
   case "$1" in 2020) echo 829L1;; 2023) echo 829O1;; 2025) echo 829Q1;; 2026) echo 829R1;; 2027) echo 829S1;; *) return 1;; esac
@@ -45,8 +45,8 @@ revit_pkgs_core() { # core ODIS packages for install-odis.sh pkgs (names from ma
   case "$1" in
     # 2023: Revit itself is in RVT.msi (no ADIX packages); materials CM2023/…2023
     2023) echo "RCLC|RCLCRVT|RVTCPSTLCON|REX Framework|REX Revit|RSA CommonData|RSA COM|RSA Interop|RSA RoReinf|CM2023|CMILB2023|PrismBaseImageLibrary2023|PrismLowImageLibrary2023|PrismMediumImageLibrary2023|UNITSCHEMAS|RCLEENU|RET|GenerativeDesign";;
-    # 2025: like 2026 without OpenUSD; adds RSA Interop and CEFSHARP (CefSharp, as in 2023); no ASC package
-    2025) echo "RCLC|RCLCRVT|RVTCPSTLCON|HIVE|DWGSHARED|REX Framework|REX Revit|RSA CommonData|RSA COM|RSA Interop|RSA RoReinf|CM4|CMILB4|PrismBaseImageLibrary4|PrismLowImageLibrary4|PrismMediumImageLibrary4|UNITSCHEMAS|RCLEENU|ATF|CORE|CLOUD|SHARED|RVTONLY|CEFSHARP|RET|GenerativeDesign";;
+    # 2025: like 2026 without OpenUSD; adds RSA Interop and CEFSHARP (CefSharp, as in 2023); no ASC package; Dynamo 3.3 (ADIX)
+    2025) echo "RCLC|RCLCRVT|RVTCPSTLCON|HIVE|DWGSHARED|REX Framework|REX Revit|RSA CommonData|RSA COM|RSA Interop|RSA RoReinf|CM4|CMILB4|PrismBaseImageLibrary4|PrismLowImageLibrary4|PrismMediumImageLibrary4|UNITSCHEMAS|RCLEENU|ATF|CORE|CLOUD|SHARED|RVTONLY|CEFSHARP|RET|GenerativeDesign|DYNAMO_CORE|DYNAMO_DOCS";;
     2026) echo "RCLC|RCLCRVT|RVTCPSTLCON|HIVE|DWGSHARED|REX Framework|REX Revit|RSA CommonData|RSA COM|RSA RoReinf|CM4|CMILB4|PrismBaseImageLibrary4|PrismLowImageLibrary4|PrismMediumImageLibrary4|UNITSCHEMAS|RCLEENU|ATF|CORE|CLOUD|SHARED|RVTONLY|RET|OpenUSD|GenerativeDesign";;
     # 2027: materials v5, ENU content split into Imperial/Metric, core is CORE+COREADD+COREEXT; no RET, RSA RoReinf, Generative Design
     2027) echo "RCLC|RCLCRVT|RVTCPSTLCON|HIVE|DWGSHARED|REX Framework|REX Revit|RSA CommonData|RSA COM|CM5|CMILB5|PrismBaseImageLibrary5|PrismLowImageLibrary5|PrismMediumImageLibrary5|UNITSCHEMAS|UNITSCHEMASLOCALE|RCLEENUI|RCLEENUM|ATF|CORE|COREADD|COREEXT|CLOUD|SHARED|SHAREDRENDER|RVTONLY|RVTONLY_CLOUD|OpenUSD|Addins Manager";;
