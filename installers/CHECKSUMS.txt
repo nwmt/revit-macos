@@ -5,6 +5,8 @@
 b8b92c7597a6b522b9aeff3f18e9840d4eae9e4ea832ee145758e09a3853ed2a  revit2023/Revit_2023_G1_Win_64bit_dlm_003_005.sfx.exe  (part 3 of 5, build 20220304_1515)
 60192da389e2a9a02cc30205b7c6f2e9bbc4d7c4d391afa3ee3d1a05cd8dacab  revit2023/Revit_2023_G1_Win_64bit_dlm_004_005.sfx.exe  (part 4 of 5, build 20220304_1515)
 683d3876c9ca0fc872ae0fd466fdc005e2b501bf8f986524a22f94b47743fd0c  revit2023/Revit_2023_G1_Win_64bit_dlm_005_005.sfx.exe  (part 5 of 5, build 20220304_1515)
+9a31da87aee52092d7e6cc107c77cfde20974a95a5c22f9f629ac9f164d8fa73  revit2025/RVT_2025_NA_win_db_001_002.exe  (Autodesk downloader, 16 MB; build 25.0.2.419)
+3e72075bc186ca92450d104735d01009720096686c581281ff0c1ec01f2b4269  revit2025/RVT_2025_NA_win_db_002_002.7z  (payload, 11 GB; build 25.0.2.419)
 24615fd6eae2a8c66b8f50e3808edd9726175345e4a75aae65b437624c2c8409  revit2026/RVT_2026_NA_win_db_001_002.exe  (Autodesk downloader, 16 MB; build 26.0.4.409)
 83ccdbd05dd98b8e216b527b8b8169b2fab5a87680f0f6a490d7f96b927dee96  revit2026/RVT_2026_NA_win_db_002_002.7z  (payload, 9.8 GB; md5 from db-bootstrap.json: 1fb8710dbdaf2696abdbd231969b507b)
 0ecb8fdd115084cbe3705dd88ae50cc682794ee2bea82e237acde05f64525cf9  revit2027/RVT_2027_NA_win_db_001_002.exe  (Autodesk downloader, 30 MB; build 27.0.4.412)

@@ -5,12 +5,12 @@ Put the files the install needs here.
 **Revit installers come only from your own Autodesk Account** (manage.autodesk.com → Products and Services → Revit).
 For older versions use **Previous versions**. This project does not provide or link to any Autodesk files.
 
-**Revit 2026 and newer: Create Installer.** Autodesk Account now offers a 32 MB `Create_Installer_RVT_<year>_…_WIN64.exe`
+**Revit 2025 and newer: Create Installer.** Autodesk Account now offers a 32 MB `Create_Installer_RVT_<year>_…_WIN64.exe`
 (for example `Create_Installer_RVT_2027_3_English_WIN64.exe`). Put only that file into `installers/revit<year>/`.
 `install.sh` reads from it where Autodesk keeps the files and downloads:
 
-- the full installer of the base release (2026.0, 2027.0; about 10 GB) into `installers/revit<year>/`;
-- the update named in the file (2026.5, 2027.3; 1.5–3 GB) into `installers/revit<year>/update/`, checked against
+- the full installer of the base release (2025.0, 2026.0, 2027.0; 10–11 GB) into `installers/revit<year>/`;
+- the update named in the file (2025.5, 2026.5, 2027.3; 1.5–3.7 GB) into `installers/revit<year>/update/`, checked against
   the SHA-256 Autodesk lists for it.
 
 The update is laid over the base before installing, so Revit is installed already updated. An interrupted download
@@ -29,6 +29,11 @@ installers/
 │   ├── Revit_2023_G1_Win_64bit_dlm_001_005.sfx.exe      Revit 2023 download: all 5 parts
 │   ├── …                                                  (4 × 1.97 GB + 418 MB)
 │   └── Revit_2023_G1_Win_64bit_dlm_005_005.sfx.exe
+├── revit2025/
+│   ├── Create_Installer_RVT_2025_5_English_WIN64.exe   the only file you need (Autodesk Account)
+│   ├── RVT_2025_NA_win_db_001_002.exe            downloaded by the install
+│   ├── RVT_2025_NA_win_db_002_002.7z
+│   └── update/Revit_2025_5_0.exe                 downloaded by the install
 ├── revit2026/
 │   ├── Create_Installer_RVT_2026_5_English_WIN64.exe   the only file you need (Autodesk Account)
 │   ├── RVT_2026_NA_win_db_001_002.exe            downloaded by the install (or the old two-file download)
@@ -42,7 +47,7 @@ installers/
 ├── redist/
 │   ├── win7sp1/x64/msls31.dll                    required for all versions (see below)
 │   ├── dotNetFx40_Full_x86_x64.exe               Revit 2020 and 2023: Microsoft .NET Framework 4.0
-│   └── webview2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe   Revit 2026+, recommended
+│   └── webview2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe   Revit 2025+, recommended
 ├── addins/                                       optional add-ins
 │   ├── revitlookup/   RevitLookup-2020.0.0.3-SingleUser.msi, RevitLookup-2023.5.4-SingleUser.msi, RevitLookup-2026.1.4-SingleUser.msi
 │   ├── pyrevit48/     pyRevit_4.8.12.22247_signed.exe   (Revit 2020)
@@ -59,7 +64,7 @@ Use the file names as Autodesk gives them. Only the versions you install need to
 - **RichEdit DLLs** (riched20, usp10 and others). The install downloads them from Microsoft automatically
   (Windows 7 SP1 package, about 947 MB, once) into `redist/win7sp1/`.
 - **.NET Framework 4.0** (Revit 2020 and 2023): `dotNetFx40_Full_x86_x64.exe` from Microsoft.
-- **WebView2 runtime** (Revit 2026+): the Evergreen Standalone x64 installer from Microsoft
+- **WebView2 runtime** (Revit 2025+): the Evergreen Standalone x64 installer from Microsoft
   (go.microsoft.com/fwlink/?linkid=2124701). Without it the install uses the old runtime from the Revit download,
   and the start screen and Manage Links stay white.
 - **Add-ins** (optional): RevitLookup from github.com/lookup-foundation/RevitLookup, pyRevit from
