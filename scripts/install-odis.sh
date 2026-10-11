@@ -330,21 +330,22 @@ PY
     revitini) # Revit takes template and library paths from [Directories<Select>] in Revit.ini. After installing 2027
               # [Language] Select=en-US (2026 has ENU) → there's no [Directoriesen-US] section → "The path specified for default
               # family templates is empty or invalid", empty template and library lists. Set Select=ENU.
+              # Defaults for new users (2026+, values as Revit writes them after changing Options by hand):
+              #   [Graphics] Antialiasing=0 AntialiasingOptions=1 — anti-aliasing off: smoother under Wine, and DXMT draws
+              #   a black view with it; [AppFrame] Theme, [Colors] CanvasTheme — 0 dark, 1 light (Revit API UITheme/CanvasTheme),
+              #   from the macOS appearance at install time, or REVIT_THEME=dark|light.
               # Revit.ini lives in ProgramData (seed for new users) and in the user profile; Revit must be closed.
+      keys=(Language.Select=ENU)
+      if [ "$YEAR" -ge 2026 ]; then
+        theme="${REVIT_THEME:-$(defaults read -g AppleInterfaceStyle 2>/dev/null | grep -qi dark && echo dark || echo light)}"
+        t=1; [ "$theme" = dark ] && t=0; theme+=", from ${REVIT_THEME:+REVIT_THEME}"; [ -n "${REVIT_THEME:-}" ] || theme+="macOS"
+        keys+=(Graphics.Antialiasing=0 Graphics.AntialiasingOptions=1 AppFrame.Theme=$t Colors.CanvasTheme=$t)
+      fi
       for f in "$B/drive_c/ProgramData/Autodesk/RVT $YEAR/UserDataCache/Revit.ini" \
                "$B/drive_c/users/crossover/AppData/Roaming/Autodesk/Revit/Autodesk Revit $YEAR/Revit.ini"; do
-        [ -f "$f" ] || continue; [ -f "$f.orig" ] || cp "$f" "$f.orig"
-        python3 -I - "$f.orig" "$f" >>"$LOGDIR/revitini.log" 2>&1 <<'PY2'
-import sys
-src, out = sys.argv[1:3] # from .orig — re-running gives the same result
-raw = open(src, "rb").read(); bom = raw.startswith(b"\xff\xfe")
-lines = raw.decode("utf-16").split("\r\n")
-i = lines.index("[Language]"); j = i + 1
-while not lines[j].startswith("Select="): j += 1
-print(out.split("/drive_c/")[1], lines[j], "-> Select=ENU"); lines[j] = "Select=ENU"
-open(out, "wb").write(("﻿" if bom else "").encode("utf-16-le") + "\r\n".join(lines).encode("utf-16-le"))
-PY2
-        say revitini "$?" "Revit.ini [Language] Select=ENU: ${f#$B/drive_c/}"
+        [ -f "$f" ] || continue; [ -f "$f.orig" ] || cp "$f" "$f.orig" # from .orig — re-running gives the same result
+        python3 -I "$ROOT/tools/revitini.py" "$f.orig" "$f" "${keys[@]}" >>"$LOGDIR/revitini.log" 2>&1
+        say revitini "$?" "Revit.ini ${keys[*]}${theme:+ ($theme)}: ${f#$B/drive_c/}"
       done ;;
     register) # register the product with AdskLicensing (instead of licRegister in the MSI), like the 2020 register step
       PIT="C:\\ProgramData\\Autodesk\\Revit\\Revit $YEAR\\Setup\\RevitConfig.pit"
