@@ -8,10 +8,15 @@ No Windows license, no virtual machine. One command builds everything.
 | Revit | Status | Notes |
 |---|---|---|
 | **2020** | ✅ Works | Real projects: modeling, sheets, exports, PDF printing. [Details](versions/2020.md) |
-| **2023** | ⚠️ Mostly works | Modeling, 3D, Materials, saving, PDF, exports, Dynamo (empty node library). [Details](versions/2023.md) |
+| **2023** | ✅ Works | Modeling, 3D, Materials, PDF, exports, Dynamo, pyRevit and RevitLookup. Dynamo's node list is empty (search works). [Details](versions/2023.md) |
 | **2026** | ⚠️ Mostly works | Modeling, 3D, Materials, saving, pyRevit and RevitLookup. Start screen sometimes redraws. [Details](versions/2026.md) |
 | **2027** | ⚠️ Mostly works | Sign-in, new project, modeling, start screen, web panels. Many features not tested yet. [Details](versions/2027.md) |
 | 2021, 2022, 2024, 2025 | Not tested yet | |
+
+- ✅ **Works**: the everyday basics work, roughly 90 % or more of what most users need: sign-in, open and save,
+  modeling, views and 3D, Materials, printing to PDF, common exports. What's left are minor issues with workarounds.
+- ⚠️ **Mostly works**: Revit runs and the core modeling works, but noticeably less than that. Some important features
+  are broken or not tested yet.
 
 Tested on an Apple M5 MacBook (16 GB), macOS 26, CrossOver 26.3.
 

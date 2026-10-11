@@ -18,6 +18,8 @@ which CrossOver version, what worked and what didn't. Open an issue with the
    rebuilt from scratch.
 7. Mark a feature as working only after a real run. Untested is "not tested",
    a guess is a guess.
+8. Version status follows the scale in the README: ✅ when the everyday basics work (about 90 %+ of what most
+   users need), ⚠️ when it is noticeably less.
 
 ## Releases
 
