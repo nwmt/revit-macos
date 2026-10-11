@@ -11,8 +11,9 @@ These are our numbers on one machine, not a promise for yours.
 - **Machine:** Apple M5 MacBook, 10 cores (4 performance + 6 efficiency), 16 GB, macOS 26, CrossOver 26.3.
   Revit runs under Rosetta 2 on top of Wine.
 - **Set:** Full_Simplified (modeling + graphics), 3 runs in a row, average. The Mac is not used during the runs.
-- **Anti-aliasing off.** This is the default of our install for 2026 and newer: Revit runs better under Wine without
-  it. The benchmark's own `Revit.ini` template turns it on; from now on we do not take that part of the template.
+- **Anti-aliasing off** for 2023 and newer. This is the default of our install for 2026 and newer: Revit runs better
+  under Wine without it. The benchmark's own `Revit.ini` template turns it on; we turn it off. Revit 2020 stays
+  measured with anti-aliasing on, as in the benchmark template: it works well there.
 - **Same bottle as a normal install.** No extra tuning for the benchmark.
 
 ## Results
@@ -26,8 +27,8 @@ Full_Simplified, average of 3 runs.
 | 2026 | 128.0 s | 32.4 s | on (benchmark template) | none |
 | 2027 | 99.0 s | 27.9 s | **off** | Intel Core Ultra 9 275HX + RTX 5090 laptop: 65.2 s modeling |
 
-**The 2020 and 2026 numbers were taken with anti-aliasing on**, before we switched to measuring without it.
-They will be re-measured with anti-aliasing off. One earlier 2020 run without anti-aliasing (on another day) gave 130.9 s / 27.1 s,
+**The 2026 numbers were taken with anti-aliasing on**, before we switched to measuring without it, and will be
+re-measured. 2020 is measured with anti-aliasing on on purpose. One earlier 2020 run without anti-aliasing (on another day) gave 130.9 s / 27.1 s,
 so do not expect the new numbers to be lower.
 
 ### Notes per version

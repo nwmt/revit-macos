@@ -57,7 +57,7 @@ RFO Benchmark, Full_Simplified, lower is better, on one Apple M5 MacBook (16 GB)
 | 2026 | 128 s | 32 s |
 | 2027 | 99 s | 28 s |
 
-2023 and 2027 are without anti-aliasing; 2020 and 2026 were taken with it on and will be re-measured. Method, Windows references and caveats:
+2023 and 2027 without anti-aliasing, 2020 with it; 2026 was taken with it on and will be re-measured. Method, Windows references and caveats:
 [docs/benchmarks.md](docs/benchmarks.md).
 
 ## Good to know
