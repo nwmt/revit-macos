@@ -21,6 +21,7 @@ d1483e9c016b80859a96d10a72bba4009c6ca0af71b6efdddb68e73e8c12e6bc  revit2024/Revi
 a5e760f77cf581d6a26f9d12c5b408dbded5c0a6dc4c955316e7de29e62843d3  addins/revitlookup/RevitLookup-2020.0.0.3-SingleUser.msi  (optional; GitHub lookup-foundation/RevitLookup release 2023.1.0-EOL)
 84d6f271638445f8c949aaf6f07ff902e3d44242441ee427cb34573531daba3a  addins/pyrevit48/pyRevit_4.8.12.22247_signed.exe  (optional; GitHub pyrevitlabs/pyRevit v4.8.12)
 20190d68e6668e67aed225b80e4e762ff523d76589270bd5305e7bcbef58e9a3  addins/revitlookup/RevitLookup-2023.5.4-SingleUser.msi  (optional; GitHub lookup-foundation/RevitLookup release 2027.0.4)
+7b9f08e68f902d0cab977618ddf0adc9bd02bbb11c4ec3414eed3971a272c1f0  addins/revitlookup/RevitLookup-2024.3.4-SingleUser.msi  (optional; GitHub lookup-foundation/RevitLookup release 2027.0.4)
 06e9e6605a2df1104d67cde3e1c24d4b823b119e89f4a250915f0969b0a015cd  addins/revitlookup/RevitLookup-2025.2.4-SingleUser.msi  (optional; GitHub lookup-foundation/RevitLookup release 2027.0.4)
 81c61845d01f3990edaa7f7a6ea796a27c37cb7c5e8ca85032afb2969cf8a996  addins/revitlookup/RevitLookup-2026.1.4-SingleUser.msi  (optional; GitHub lookup-foundation/RevitLookup release 2027.0.4)
 bf242d23f3ca8ae214f430aa29764f63e02756e7fcb620b21ca85965c8ee4476  addins/pyrevit7/pyRevit_7.0.0.26278_signed.exe  (optional; GitHub pyrevitlabs/pyRevit v7.0.0.26278+2233)

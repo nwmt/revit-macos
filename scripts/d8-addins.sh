@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# D8: Revit add-ins (RevitLookup, pyRevit). 2020 runs them on the stock .NET 4.7; 2023 on .NET 4.8; 2025, 2026 on Revit's own .NET (8, or 10 after the .5 update).
+# D8: Revit add-ins (RevitLookup, pyRevit). 2020 runs them on the stock .NET 4.7; 2023, 2024 on .NET 4.8; 2025, 2026 on Revit's own .NET (8, or 10 after the .5 update).
 # Usage: [REVIT_YEAR=2026] ./scripts/d8-addins.sh <bottle> [steps...]   (default year 2020)
-#   default steps: revitlookup pyrevit trust check (2023, 2025, 2026: + wpfsw)
+#   default steps: revitlookup pyrevit trust check (2023–2026: + wpfsw)
 #   trust — trust the publishers of the add-ins in your Addins\<year> folder, as "Always Load" does (under Wine Revit
 #           can't save that choice and asks on every start); trust is per publisher, so it covers their other add-ins too
 #   net472 / net48 — available, but Revit 2020 crashes in clr.dll on them; don't use
@@ -16,13 +16,14 @@
 #   redist/nuget/system.valuetuple.4.5.0.nupkg           — for the enscape step (nuget.org)
 #   addins/pyrevit48/pyRevit_4.8.12.22247_signed.exe     — the IPY277 engine works on .NET 4.7 (6.5.5 doesn't)
 #   2023: addins/revitlookup/RevitLookup-2023.5.4-SingleUser.msi, addins/pyrevit7/pyRevit_7.0.0.26278_signed.exe
+#   2024: addins/revitlookup/RevitLookup-2024.3.4-SingleUser.msi, addins/pyrevit7/pyRevit_7.0.0.26278_signed.exe
 #   2025: addins/revitlookup/RevitLookup-2025.2.4-SingleUser.msi, addins/pyrevit7/pyRevit_7.0.0.26278_signed.exe
 #   2026: addins/revitlookup/RevitLookup-2026.1.4-SingleUser.msi, addins/pyrevit7/pyRevit_7.0.0.26278_signed.exe
 set -uo pipefail
 
 NAME="${1:?specify a bottle}"; shift
 YEAR="${REVIT_YEAR:-2020}"
-STEPS=("$@"); [ ${#STEPS[@]} -eq 0 ] && { STEPS=(revitlookup pyrevit trust check); case "$YEAR" in 2023|2025|2026) STEPS=(revitlookup pyrevit trust wpfsw check);; esac; }
+STEPS=("$@"); [ ${#STEPS[@]} -eq 0 ] && { STEPS=(revitlookup pyrevit trust check); case "$YEAR" in 2023|2024|2025|2026) STEPS=(revitlookup pyrevit trust wpfsw check);; esac; }
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CX="/Applications/CrossOver.app/Contents/SharedSupport/CrossOver"
 B="$HOME/Library/Application Support/CrossOver/Bottles/$NAME"
@@ -42,6 +43,8 @@ case "$YEAR" in
   2020) LOOKUP="$I/addins/revitlookup/RevitLookup-2020.0.0.3-SingleUser.msi"   # last build for 2020 (2023.1.0-EOL)
         PYRSETUP="$I/addins/pyrevit48/pyRevit_4.8.12.22247_signed.exe";;
   2023) LOOKUP="$I/addins/revitlookup/RevitLookup-2023.5.4-SingleUser.msi"   # GitHub release 2027.0.4
+        PYRSETUP="$I/addins/pyrevit7/pyRevit_7.0.0.26278_signed.exe";;
+  2024) LOOKUP="$I/addins/revitlookup/RevitLookup-2024.3.4-SingleUser.msi"   # GitHub release 2027.0.4
         PYRSETUP="$I/addins/pyrevit7/pyRevit_7.0.0.26278_signed.exe";;
   2025) LOOKUP="$I/addins/revitlookup/RevitLookup-2025.2.4-SingleUser.msi"     # GitHub release 2027.0.4
         PYRSETUP="$I/addins/pyrevit7/pyRevit_7.0.0.26278_signed.exe";;

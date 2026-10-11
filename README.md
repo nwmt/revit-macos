@@ -12,7 +12,7 @@ No Windows license, no virtual machine. One command builds everything.
 | **2025** | ✅ Works | 2025.5: real project work, Materials, families, saving, exports (PDF, DWG, IFC…), printing to PDF, Dynamo, pyRevit and RevitLookup. [Details](versions/2025.md) |
 | **2026** | ⚠️ Mostly works | 2026.5: modeling, 3D, text, Materials, saving, pyRevit and RevitLookup. Start screen sometimes redraws. [Details](versions/2026.md) |
 | **2027** | ⚠️ Mostly works | 2027.3: new project, modeling, 3D, text, Materials, web panels. Saving, PDF, add-ins not tested yet. [Details](versions/2027.md) |
-| **2024** | ✅ Works | 2024.3.6: real project work, Materials, saving, exports (PDF, DWG, IFC…), printing to PDF, Dynamo. [Details](versions/2024.md) |
+| **2024** | ✅ Works | 2024.3.6: real project work, Materials, saving, exports (PDF, DWG, IFC…), printing to PDF, Dynamo, pyRevit and RevitLookup. [Details](versions/2024.md) |
 | 2021, 2022 | Not tested yet | |
 
 - ✅ **Works**: the everyday basics work, roughly 90 % or more of what most users need: sign-in, open and save,
