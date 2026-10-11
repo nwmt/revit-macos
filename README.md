@@ -1,77 +1,98 @@
 # Revit on Apple Silicon Macs
 
-Run Autodesk Revit (Windows) directly on macOS with [CrossOver](https://www.codeweavers.com/crossover).
-No Windows license, no virtual machine. One command builds everything.
+Run Autodesk Revit for Windows on a Mac with [CrossOver](https://www.codeweavers.com/crossover).
+No Windows license, no virtual machine.
 
 ## Which versions work
 
-| Revit | Status | Notes |
-|---|---|---|
-| **2020** | ✅ Works | Real projects: modeling, sheets, exports, PDF printing. [Details](versions/2020.md) |
-| **2023** | ✅ Works | Modeling, 3D, Materials, PDF, exports, Dynamo, pyRevit and RevitLookup. Dynamo's node list is empty (search works). [Details](versions/2023.md) |
-| **2025** | ✅ Works | 2025.5: real project work, Materials, families, saving, exports (PDF, DWG, IFC…), printing to PDF, Dynamo, pyRevit and RevitLookup. [Details](versions/2025.md) |
-| **2026** | ⚠️ Mostly works | 2026.5: modeling, 3D, text, Materials, saving, pyRevit and RevitLookup. Start screen sometimes redraws. [Details](versions/2026.md) |
-| **2027** | ⚠️ Mostly works | 2027.3: new project, modeling, 3D, text, Materials, web panels. Saving, PDF, add-ins not tested yet. [Details](versions/2027.md) |
-| **2024** | ✅ Works | 2024.3.6: real project work, Materials, saving, exports (PDF, DWG, IFC…), printing to PDF, Dynamo, pyRevit and RevitLookup. [Details](versions/2024.md) |
-| 2021, 2022 | Not tested yet | |
+| Revit | Status | Tested on | Main gaps |
+|---|---|---|---|
+| [2020](versions/2020.md) | ✅ Works | 2020.2 | Dynamo without 3D preview |
+| [2023](versions/2023.md) | ✅ Works | 2023.0 | Dynamo node list empty |
+| [2024](versions/2024.md) | ✅ Works | 2024.3.6 | First PDF print may be empty |
+| [2025](versions/2025.md) | ✅ Works | 2025.5 | First PDF print may be empty |
+| [2026](versions/2026.md) | ⚠️ Mostly works | 2026.5 | PDF, Dynamo, exports not tested |
+| [2027](versions/2027.md) | ⚠️ Mostly works | 2027.3 | Saving, PDF, add-ins not tested |
+| 2021, 2022 | Not tested | | |
 
-- ✅ **Works**: the everyday basics work, roughly 90 % or more of what most users need: sign-in, open and save,
-  modeling, views and 3D, Materials, printing to PDF, common exports. What's left are minor issues with workarounds.
-- ⚠️ **Mostly works**: Revit runs and the core modeling works, but noticeably less than that. Some important features
-  are broken or not tested yet.
+**Works:** the everyday basics work: sign-in, open and save, modeling, views and 3D, Materials, printing to PDF,
+common exports. What is left are minor issues with workarounds.
+**Mostly works:** Revit runs and modeling works, but some important features are broken or not tested yet.
 
-Tested on an Apple M5 MacBook (16 GB), macOS 26, CrossOver 26.3.
+Tested on an Apple M5 MacBook (16 GB), macOS 26, CrossOver 26.3. Modeling takes about 1.5–2× as long as on a
+fast Windows PC ([benchmarks](docs/benchmarks.md)).
 
 ## What you need
 
-- A Mac with Apple Silicon (M1 or newer) and about 45 GB of free disk space.
+- A Mac with Apple Silicon (M1 or newer) and about 60 GB of free disk space ([per version](installers/README.md#disk-space)).
 - [CrossOver](https://www.codeweavers.com/crossover). It is paid, with a free trial.
+- Rosetta 2. If it is missing, `./revit install` tells you the command.
 - [Homebrew](https://brew.sh), then: `brew install sevenzip winetricks cabextract ghostscript python3`
-- Your own Revit license and installer from your Autodesk Account. For 2024 and newer the small "Create Installer"
-  file is enough: the install downloads Revit and its latest update from Autodesk.
+- Your own Revit license and installer from your Autodesk Account.
 - One file from any 64-bit Windows 7 or 10 PC: `C:\Windows\System32\msls31.dll`.
-
-Where to put the installer and the extra files: [installers/README.md](installers/README.md).
 
 ## Install
 
-```bash
-git clone https://github.com/nwmt/revit-macos.git
-cd revit-macos
-./install.sh 2020        # or 2023, 2024, 2025, 2026, 2027
-```
+1. Open **Terminal** (Applications → Utilities).
+2. Download this project:
+   ```bash
+   git clone https://github.com/nwmt/revit-macos.git
+   cd revit-macos
+   ```
+3. Put the Revit installer and the extra files into `installers/`: [what goes where](installers/README.md).
+4. Install, for example Revit 2025:
+   ```bash
+   ./revit install 2025
+   ```
 
-The script checks everything first and tells you exactly what is missing. Then it builds a
-CrossOver bottle with Revit and all fixes (10–30 minutes). When it finishes, start Revit from
-`~/Applications/Revit <year> (rvt<year>-a).app` and sign in with your Autodesk account.
-Revit 2020, 2023, 2024, 2025 and 2026 also get a Revit Viewer app next to it.
+The script first checks everything and tells you what is missing. Then it installs Revit and all fixes into a
+**bottle**: a separate Windows environment that CrossOver keeps for one Revit version. This takes 10–30 minutes.
+Revit and Revit Viewer appear in `~/Applications`.
 
-Want to see the plan first? `INSTALL_DRYRUN=1 ./install.sh 2026` checks and prints, changes nothing.
+## First launch
 
-## Speed
+- **Revit 2020, 2023:** sign in in Revit's own window. If Revit then hangs on the splash screen, quit it and start it again.
+- **Revit 2024 and newer:** Revit opens the Autodesk sign-in page in your browser. After you sign in, the browser
+  asks which app should open the link. Choose **Autodesk Sign-In (rvt2025-a)**, with your bottle's name.
 
-RFO Benchmark, Full_Simplified, lower is better, on one Apple M5 MacBook (16 GB):
+## Commands
 
-| Revit | Modeling | Graphics |
-|---|---:|---:|
-| 2020 | 121 s | 25 s |
-| 2023 | 115 s | 27 s |
-| 2024 | 123 s | 30 s |
-| 2025 | 128 s | 32 s |
-| 2026 | 128 s | 32 s |
-| 2027 | 99 s | 28 s |
+| Command | What it does |
+|---|---|
+| `./revit install 2025` | Install Revit 2025 |
+| `./revit check 2025` | Check what the install needs, change nothing |
+| `./revit addins 2025` | Add RevitLookup and pyRevit (2020, 2023–2026) |
+| `./revit stop 2025` | Quit a Revit that hangs |
+| `./revit logs 2025` | List the newest logs |
+| `./revit debug 2025` | Start Revit and record a log |
+| `./revit rebuild 2025` | Delete the bottle and install Revit again |
+| `./revit remove 2025` | Delete Revit, its bottle and its apps |
 
-2023, 2024, 2025 and 2027 without anti-aliasing, 2020 with it; 2026 was taken with it on and will be re-measured. Method, Windows references and caveats:
-[docs/benchmarks.md](docs/benchmarks.md).
+`rebuild` and `remove` show what they delete and ask you to type the year first.
+
+## Updating
+
+- **This project:** `git pull`. Your installed Revit keeps working. New fixes reach it after `./revit rebuild 2025`.
+- **A newer Revit update (2024 and newer):** put the new Create Installer file into `installers/revit2025/` and
+  delete the old one. Delete the folder `installers/extracted/revit2025` (it holds the old unpacked files). Then run
+  `./revit rebuild 2025`: it downloads the new update and installs it. Other bottles of the same year get the new
+  update the next time you rebuild them.
+- `rebuild` and `remove` reset Revit's settings and add-ins in the bottle. Your projects in Documents stay.
 
 ## Good to know
 
-- This is an independent project. Autodesk does not support Revit on macOS.
-  We ship no Autodesk files; you use your own installer and license.
-- Something broke? [Troubleshooting](docs/troubleshooting.md). Curious what the fixes do? [How it works](docs/how-it-works.md).
-- Tried it on your Mac? Please [open a test report](../../issues/new?template=test-report.yml),
-  whether it works or not. See [CONTRIBUTING.md](CONTRIBUTING.md).
+- **Your files:** the Documents folder in Revit is your Mac's Documents folder. Files saved anywhere else on the
+  bottle's C: drive are deleted by `rebuild` and `remove`.
+- **Look:** Revit 2024 and newer start with anti-aliasing off (Revit runs better without it) and a dark or light
+  theme to match your Mac at install time. Change both in Revit's Options, or pick the theme at install:
+  `REVIT_THEME=dark ./revit install 2025` (or `light`).
+- **Something broke?** See [Troubleshooting](docs/troubleshooting.md). Curious what the fixes do?
+  See [How it works](docs/how-it-works.md).
+- **Tried it on your Mac?** Please [open a test report](../../issues/new?template=test-report.yml), whether it
+  works or not.
 
 ## License
 
-[MIT](LICENSE). Autodesk and Revit are trademarks of Autodesk, Inc.
+[MIT](LICENSE). This is an independent project, not affiliated with Autodesk. Autodesk does not support Revit on
+macOS. The project ships no Autodesk files: you use your own installer and license. Autodesk and Revit are
+trademarks of Autodesk, Inc.
