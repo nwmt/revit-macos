@@ -5,6 +5,10 @@ Put the files the install needs here.
 **Revit installers come only from your own Autodesk Account** (manage.autodesk.com → Products and Services → Revit).
 For older versions use **Previous versions**. This project does not provide or link to any Autodesk files.
 
+**If Autodesk Account offers only "Create Installer"** (a 32 MB `Create_Installer_RVT_<year>_…_WIN64.exe`), put that
+file into `installers/revit<year>/`. `install.sh` reads from it where Autodesk keeps the full installer and downloads
+the files shown below (about 10 GB; an interrupted download resumes on the next run). By hand: `scripts/get-revit.sh <year>`.
+
 ## What goes where
 
 ```
@@ -18,6 +22,7 @@ installers/
 │   ├── …                                                  (4 × 1.97 GB + 418 MB)
 │   └── Revit_2023_G1_Win_64bit_dlm_005_005.sfx.exe
 ├── revit2026/
+│   ├── Create_Installer_RVT_2026_5_English_WIN64.exe   or: only this file, the rest is downloaded
 │   ├── RVT_2026_NA_win_db_001_002.exe            Revit 2026 download: both files
 │   └── RVT_2026_NA_win_db_002_002.7z
 ├── revit2027/

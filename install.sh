@@ -39,16 +39,19 @@ for t in 7zz:sevenzip winetricks:winetricks cabextract:cabextract gs:ghostscript
 done
 
 SRC="$(revit_installers "$YEAR")"; DST="$(revit_extracted "$YEAR")"
+# Autodesk Account now gives only "Create Installer": scripts/get-revit.sh downloads the full installer it points to
+GET=""; [ ! -d "$DST" ] && [ -n "$(find "$SRC" -maxdepth 1 -type f -iname "Create_Installer_RVT_${YEAR}_*.exe" 2>/dev/null | head -1)" ] \
+  && GET="scripts/get-revit.sh $YEAR"
 if [ ! -d "$DST" ] && [ -z "$(find "$SRC" -maxdepth 2 -type f \( -iname '*.exe' -o -iname '*.7z' -o -iname '*.zip' -o -iname '*.iso' \) 2>/dev/null | head -1)" ]; then
   need "no Revit $YEAR installer in installers/revit$YEAR/" "download it from your Autodesk Account, see installers/README.md"
 fi
 part1=$(find "$SRC" -maxdepth 2 -type f -iname '*_001_0*.sfx.exe' 2>/dev/null | head -1)
-if [ ! -d "$DST" ] && [ -n "$part1" ]; then # multi-part download (2020, 2023): every part 001…NNN of the same download
+if [ ! -d "$DST" ] && [ -z "$GET" ] && [ -n "$part1" ]; then # multi-part download (2020, 2023): every part 001…NNN of the same download
   total=$(basename "$part1" | sed -E 's/.*_001_0*([0-9]+)\.sfx\.exe$/\1/'); stem="${part1%_001_*}"; tot3=$(printf '%03d' "$total")
   gone=""; for n in $(seq -f '%03g' 1 "$total"); do [ -f "${stem}_${n}_${tot3}.sfx.exe" ] || gone+=" $n"; done
   [ -z "$gone" ] || need "installer parts missing in installers/revit$YEAR/:$gone (of $tot3)" "download all parts from your Autodesk Account"
 fi
-if [ ! -d "$DST" ] && [ -z "$part1" ] && [ -z "$(find "$SRC" -maxdepth 2 -type f -iname '*.7z' 2>/dev/null | head -1)" ]; then
+if [ ! -d "$DST" ] && [ -z "$GET" ] && [ -z "$part1" ] && [ -z "$(find "$SRC" -maxdepth 2 -type f -iname '*.7z' 2>/dev/null | head -1)" ]; then
   need "no .7z payload in installers/revit$YEAR/ (the small .exe alone is only the downloader)" \
        "download both files of the Autodesk download, see versions/$YEAR.md"
 fi
@@ -71,7 +74,8 @@ fi
 free_gb=$(osascript -l JavaScript -e 'ObjC.import("Foundation"); var r = Ref();
   $.NSURL.fileURLWithPath("/").getResourceValueForKeyError(r, $.NSURLVolumeAvailableCapacityForImportantUsageKey, null);
   Math.floor(ObjC.unwrap(r[0]) / 1e9)' 2>/dev/null) || free_gb=$(df -g "$ROOT" | awk 'NR==2 {print $4}')
-[ "${free_gb:-0}" -ge 40 ] || warn "only ${free_gb} GB free" "an install needs up to ~45 GB (installer, extracted files, bottle)"
+if [ -n "$GET" ]; then [ "${free_gb:-0}" -ge 55 ] || warn "only ${free_gb} GB free" "an install that downloads Revit needs up to ~55 GB (download, extracted files, bottle)"
+else [ "${free_gb:-0}" -ge 40 ] || warn "only ${free_gb} GB free" "an install needs up to ~45 GB (installer, extracted files, bottle)"; fi
 H="$(hostname)"
 grep -qE "[[:space:]]$H([[:space:]]|\$)" /etc/hosts \
   || warn "this Mac's name is not in /etc/hosts — Revit waits ~5 s on every lookup of it" \
@@ -100,6 +104,7 @@ else
         "scripts/make-urlhandler.sh $BOTTLE"
         "scripts/make-launcher.sh $BOTTLE $YEAR")
 fi
+[ -n "$GET" ] && PLAN=("${PLAN[0]}" "$GET" "${PLAN[@]:1}") # download before extracting
 echo; echo "Plan:"; i=1; for s in "${PLAN[@]}"; do echo "  $i. $s"; i=$((i + 1)); done
 [ "${INSTALL_DRYRUN:-0}" = 1 ] && { echo "(dry run: nothing changed)"; exit 0; }
 
