@@ -40,6 +40,18 @@ if [ "$EXTRACT" = --extract ] && [ ! -d "$DST" ]; then
   fi
   mv "$DST.partial" "$DST"
 fi
+# updates from installers/revit<year>/update/ (scripts/get-revit.sh): an update is an ODIS bundle with the same package
+# folders as the base (x64/<pkg>/, 3rdParty/), full packages, not patches. Lay them over the base, oldest first, so the
+# install steps take the updated packages. Its top-level setup.xml (the update bundle) is not copied. Done once per update.
+if [ -d "$DST" ]; then
+  root="$(revit_dist "$YEAR")"
+  for u in $(ls "$SRC"/update/*.exe 2>/dev/null | sort -V); do
+    grep -qxF "$(basename "$u")" "$root/applied-updates.txt" 2>/dev/null && continue
+    echo "== applying update $(basename "$u")"
+    7zz x -y -o"$root" "$u" x64 3rdParty >/dev/null || { echo "!! update failed: $u"; exit 1; }
+    basename "$u" >> "$root/applied-updates.txt"
+  done
+fi
 [ -d "$DST" ] || { echo "== contents (not extracted, first 60 lines):"; 7zz l "$main" | sed -n '/^-----/,$p' | head -60; exit 0; }
 
 echo "== installer markers:"

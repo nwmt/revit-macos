@@ -57,8 +57,9 @@ for s in "${STEPS[@]}"; do
         rel="$(w reg query 'HKLM\Software\Microsoft\NET Framework Setup\NDP\v4\Full' /v Release 2>/dev/null | tr -d '\r' | awk '/Release/{print $3}')"
         say netfx48 "$([ $((rel)) -ge 528040 ] && echo 0 || echo 1)" "Release=$((rel)) (528040+ = 4.8)"; continue
       fi
-      run_exe netdesk "$(ls "$DIST"/3rdParty/x64/dotNet/*/windowsdesktop-runtime-*.exe | tail -1)" /install /quiet /norestart
-      run_exe netasp "$(ls "$DIST"/3rdParty/x64/aspNetCore/*/aspnetcore-runtime-*.exe | tail -1)" /q /norestart
+      # every runtime the installer ships: an update laid over the base (inspect-installer.sh) adds a newer one (2026.5: 10.0 next to 8.0)
+      for x in $(ls "$DIST"/3rdParty/x64/dotNet/*/windowsdesktop-runtime-*.exe | sort -V); do run_exe "netdesk$(basename "$(dirname "$x")")" "$x" /install /quiet /norestart; done
+      for x in $(ls "$DIST"/3rdParty/x64/aspNetCore/*/aspnetcore-runtime-*.exe | sort -V); do run_exe "netasp$(basename "$(dirname "$x")")" "$x" /q /norestart; done
       ls "$B/drive_c/Program Files/dotnet/shared/"*/ 2>/dev/null | sed 's/^/   /' | tee -a "$LOGDIR/summary.txt" ;;
     licensing) # BitRock InstallBuilder, switches from pkg.licensing.xml
       AL="$B/drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing"

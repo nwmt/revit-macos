@@ -8,7 +8,8 @@ revit_dotnet() { # .NET that Revit is built on
   case "$1" in
     2020) echo "netfx47";;   # stock 4.7 from the installer; 4.7.2/4.8 crash Revit 2020 under Wine
     2021|2022|2023|2024) echo "netfx48";;
-    2025|2026) echo "net8";;
+    2025) echo "net8";;
+    2026) echo "net8";;      # 2026.0; the 2026.5 update moves Revit to .NET 10 and ships the runtime (both get installed)
     2027) echo "net10";;
     *) return 1;;
   esac
