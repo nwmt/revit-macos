@@ -9,8 +9,8 @@ No Windows license, no virtual machine. One command builds everything.
 |---|---|---|
 | **2020** | ✅ Works | Real projects: modeling, sheets, exports, PDF printing. [Details](versions/2020.md) |
 | **2023** | ✅ Works | Modeling, 3D, Materials, PDF, exports, Dynamo, pyRevit and RevitLookup. Dynamo's node list is empty (search works). [Details](versions/2023.md) |
-| **2026** | ⚠️ Mostly works | Modeling, 3D, Materials, saving, pyRevit and RevitLookup. Start screen sometimes redraws. [Details](versions/2026.md) |
-| **2027** | ⚠️ Mostly works | Sign-in, new project, modeling, start screen, web panels. Many features not tested yet. [Details](versions/2027.md) |
+| **2026** | ⚠️ Mostly works | 2026.5: modeling, 3D, text, Materials, saving, pyRevit and RevitLookup. Start screen sometimes redraws. [Details](versions/2026.md) |
+| **2027** | ⚠️ Mostly works | 2027.3: new project, modeling, 3D, text, Materials, web panels. Saving, PDF, add-ins not tested yet. [Details](versions/2027.md) |
 | 2021, 2022, 2024, 2025 | Not tested yet | |
 
 - ✅ **Works**: the everyday basics work, roughly 90 % or more of what most users need: sign-in, open and save,
@@ -25,7 +25,8 @@ Tested on an Apple M5 MacBook (16 GB), macOS 26, CrossOver 26.3.
 - A Mac with Apple Silicon (M1 or newer) and about 45 GB of free disk space.
 - [CrossOver](https://www.codeweavers.com/crossover). It is paid, with a free trial.
 - [Homebrew](https://brew.sh), then: `brew install sevenzip winetricks cabextract ghostscript python3`
-- Your own Revit license and installer from your Autodesk Account.
+- Your own Revit license and installer from your Autodesk Account. For 2026 and 2027 the small "Create Installer"
+  file is enough: the install downloads Revit and its latest update from Autodesk.
 - One file from any 64-bit Windows 7 or 10 PC: `C:\Windows\System32\msls31.dll`.
 
 Where to put the installer and the extra files: [installers/README.md](installers/README.md).

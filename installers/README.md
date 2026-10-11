@@ -5,9 +5,17 @@ Put the files the install needs here.
 **Revit installers come only from your own Autodesk Account** (manage.autodesk.com → Products and Services → Revit).
 For older versions use **Previous versions**. This project does not provide or link to any Autodesk files.
 
-**If Autodesk Account offers only "Create Installer"** (a 32 MB `Create_Installer_RVT_<year>_…_WIN64.exe`), put that
-file into `installers/revit<year>/`. `install.sh` reads from it where Autodesk keeps the full installer and downloads
-the files shown below (about 10 GB; an interrupted download resumes on the next run). By hand: `scripts/get-revit.sh <year>`.
+**Revit 2026 and newer: Create Installer.** Autodesk Account now offers a 32 MB `Create_Installer_RVT_<year>_…_WIN64.exe`
+(for example `Create_Installer_RVT_2027_3_English_WIN64.exe`). Put only that file into `installers/revit<year>/`.
+`install.sh` reads from it where Autodesk keeps the files and downloads:
+
+- the full installer of the base release (2026.0, 2027.0; about 10 GB) into `installers/revit<year>/`;
+- the update named in the file (2026.5, 2027.3; 1.5–3 GB) into `installers/revit<year>/update/`, checked against
+  the SHA-256 Autodesk lists for it.
+
+The update is laid over the base before installing, so Revit is installed already updated. An interrupted download
+resumes on the next run. By hand: `scripts/get-revit.sh <year>`. If you already have the two base files (below),
+they are used as they are.
 
 ## What goes where
 
@@ -22,12 +30,15 @@ installers/
 │   ├── …                                                  (4 × 1.97 GB + 418 MB)
 │   └── Revit_2023_G1_Win_64bit_dlm_005_005.sfx.exe
 ├── revit2026/
-│   ├── Create_Installer_RVT_2026_5_English_WIN64.exe   or: only this file, the rest is downloaded
-│   ├── RVT_2026_NA_win_db_001_002.exe            Revit 2026 download: both files
-│   └── RVT_2026_NA_win_db_002_002.7z
+│   ├── Create_Installer_RVT_2026_5_English_WIN64.exe   the only file you need (Autodesk Account)
+│   ├── RVT_2026_NA_win_db_001_002.exe            downloaded by the install (or the old two-file download)
+│   ├── RVT_2026_NA_win_db_002_002.7z
+│   └── update/Revit_2026_5_0.exe                 downloaded by the install
 ├── revit2027/
-│   ├── RVT_2027_NA_win_db_001_002.exe            Revit 2027 download: both files
-│   └── RVT_2027_NA_win_db_002_002.7z
+│   ├── Create_Installer_RVT_2027_3_English_WIN64.exe   the only file you need (Autodesk Account)
+│   ├── RVT_2027_NA_win_db_001_002.exe            downloaded by the install (or the old two-file download)
+│   ├── RVT_2027_NA_win_db_002_002.7z
+│   └── update/Revit_2027_3_0.exe                 downloaded by the install
 ├── redist/
 │   ├── win7sp1/x64/msls31.dll                    required for all versions (see below)
 │   ├── dotNetFx40_Full_x86_x64.exe               Revit 2020 and 2023: Microsoft .NET Framework 4.0
