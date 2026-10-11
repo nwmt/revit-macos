@@ -8,9 +8,10 @@ No Windows license, no virtual machine. One command builds everything.
 | Revit | Status | Notes |
 |---|---|---|
 | **2020** | ✅ Works | Real projects: modeling, sheets, exports, PDF printing. Faster than a comparable Windows laptop. [Details](versions/2020.md) |
+| **2023** | ⚠️ Mostly works | Modeling, 3D, Materials, saving, web panels. Start screen is blank. [Details](versions/2023.md) |
 | **2026** | ⚠️ Mostly works | Modeling, 3D, Materials, saving, pyRevit and RevitLookup. Start screen sometimes redraws. [Details](versions/2026.md) |
 | **2027** | ⚠️ Mostly works | Sign-in, new project, modeling, start screen, web panels. Many features not tested yet. [Details](versions/2027.md) |
-| 2021–2025 | Not tested yet | |
+| 2021, 2022, 2024, 2025 | Not tested yet | |
 
 Tested on an Apple M5 MacBook (16 GB), macOS 26, CrossOver 26.3.
 
@@ -29,13 +30,13 @@ Where to put the installer and the extra files: [installers/README.md](installer
 ```bash
 git clone https://github.com/nwmt/revit-macos.git
 cd revit-macos
-./install.sh 2020        # or 2026, 2027
+./install.sh 2020        # or 2023, 2026, 2027
 ```
 
 The script checks everything first and tells you exactly what is missing. Then it builds a
 CrossOver bottle with Revit and all fixes (10–30 minutes). When it finishes, start Revit from
 `~/Applications/Revit <year> (rvt<year>-a).app` and sign in with your Autodesk account.
-Revit 2020 and 2026 also get a Revit Viewer app next to it.
+Revit 2020, 2023 and 2026 also get a Revit Viewer app next to it.
 
 Want to see the plan first? `INSTALL_DRYRUN=1 ./install.sh 2026` checks and prints, changes nothing.
 

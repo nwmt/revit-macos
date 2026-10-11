@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Minimal stdlib Chrome DevTools Protocol client for inspecting the embedded AdSSO
 browser (QtWebEngine 5.9) under Wine. Needs QTWEBENGINE_REMOTE_DEBUGGING=127.0.0.1:9222 in the bottle.
+CDP_PORT=8088 instead: the CefSharp browser inside Revit 2023 (start screen), which Revit starts with that debugging port.
 
   tools/cdp.py list                        -- tabs (url, title)
   tools/cdp.py watch [seconds] [--reload]  -- subscribe to console/network/exceptions of the first tab
@@ -9,7 +10,7 @@ browser (QtWebEngine 5.9) under Wine. Needs QTWEBENGINE_REMOTE_DEBUGGING=127.0.0
 """
 import base64, json, os, socket, struct, sys, time, urllib.request
 
-HOST, PORT = "127.0.0.1", 9222
+HOST, PORT = "127.0.0.1", int(os.environ.get("CDP_PORT", "9222"))
 
 
 def targets():

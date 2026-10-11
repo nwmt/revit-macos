@@ -9,8 +9,7 @@ NAME="${1:?specify a bottle (only its wine is used, for msidb)}"; YEAR="${2:-202
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; . "$ROOT/scripts/lib/versions.sh"
 CX="/Applications/CrossOver.app/Contents/SharedSupport/CrossOver"
 B="$HOME/Library/Application Support/CrossOver/Bottles/$NAME"
-if [ "$YEAR" = 2020 ]; then DIST_UNIX="$(ls -d "$ROOT"/installers/extracted/revit2020/*/ | head -1)"; DIST_UNIX="${DIST_UNIX%/}"
-else DIST_UNIX="$(revit_extracted "$YEAR")"; fi
+DIST_UNIX="$(revit_dist "$YEAR")"
 SRC="$DIST_UNIX/x64/RVT/RVT.msi"; DST="$DIST_UNIX/x64/RVT/RVT-wine.msi"
 TMP="$B/drive_c/rvtmsi"; rm -rf "$TMP"; mkdir -p "$TMP"; trap 'rm -rf "$TMP"' EXIT
 w() { "$CX/bin/wine" --bottle "$NAME" --wait-children "$@"; }

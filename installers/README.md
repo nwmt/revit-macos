@@ -13,6 +13,10 @@ installers/
 │   ├── Revit_2020_G1_Win_64bit_r3_dlm_001_007.sfx.exe   Revit 2020 download: all 7 parts
 │   ├── …                                                  (6 × 1.97 GB + 429.8 MB)
 │   └── Revit_2020_G1_Win_64bit_r3_dlm_007_007.sfx.exe
+├── revit2023/
+│   ├── Revit_2023_G1_Win_64bit_dlm_001_005.sfx.exe      Revit 2023 download: all 5 parts
+│   ├── …                                                  (4 × 1.97 GB + 418 MB)
+│   └── Revit_2023_G1_Win_64bit_dlm_005_005.sfx.exe
 ├── revit2026/
 │   ├── RVT_2026_NA_win_db_001_002.exe            Revit 2026 download: both files
 │   └── RVT_2026_NA_win_db_002_002.7z
@@ -21,7 +25,7 @@ installers/
 │   └── RVT_2027_NA_win_db_002_002.7z
 ├── redist/
 │   ├── win7sp1/x64/msls31.dll                    required for all versions (see below)
-│   ├── dotNetFx40_Full_x86_x64.exe               Revit 2020 only: Microsoft .NET Framework 4.0
+│   ├── dotNetFx40_Full_x86_x64.exe               Revit 2020 and 2023: Microsoft .NET Framework 4.0
 │   └── webview2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe   Revit 2026+, recommended
 ├── addins/                                       optional add-ins
 │   ├── revitlookup/   RevitLookup-2020.0.0.3-SingleUser.msi, RevitLookup-2026.1.4-SingleUser.msi
@@ -38,7 +42,7 @@ Use the file names as Autodesk gives them. Only the versions you install need to
   Revit needs it to show text. Microsoft's Windows 7 SP1 package has no 64-bit copy, so it must come from a Windows machine.
 - **RichEdit DLLs** (riched20, usp10 and others). The install downloads them from Microsoft automatically
   (Windows 7 SP1 package, about 947 MB, once) into `redist/win7sp1/`.
-- **.NET Framework 4.0** (Revit 2020 only): `dotNetFx40_Full_x86_x64.exe` from Microsoft.
+- **.NET Framework 4.0** (Revit 2020 and 2023): `dotNetFx40_Full_x86_x64.exe` from Microsoft.
 - **WebView2 runtime** (Revit 2026+): the Evergreen Standalone x64 installer from Microsoft
   (go.microsoft.com/fwlink/?linkid=2124701). Without it the install uses the old runtime from the Revit download,
   and the start screen and Manage Links stay white.

@@ -1,18 +1,26 @@
 #!/usr/bin/env bash
-# Installs Revit with the ODIS installer (2026, 2027; probably 2023–2025 too) component by component, bypassing Setup.exe.
+# Installs Revit with the ODIS installer (2023, 2026, 2027; probably 2024–2025 too) component by component, bypassing Setup.exe.
 # Order and switches come from manifest/app.RVT.xml and x64/RVT/pkg.RVT.xml (Dependencies), see versions/<year>.md.
 # Usage: ./scripts/install-odis.sh <year> <bottle> [steps...]
 #   default steps: vc fonts dotnet licensing svcshim idmgr rvt pkgs asc revitini register ncryptshim webview2 d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix wv2fix
+#   2023 (sign-in through AdSSO as in 2020, no WebView2/IdentityManager/ASC packages):
+#     vc fonts dotnet licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim d3d9dxvk dpipatch richedit tlbpin warpshim gdoff
 # The installer must be extracted: ./scripts/inspect-installer.sh <year> --extract
 set -uo pipefail
 YEAR="${1:?specify a year}"; NAME="${2:?specify a bottle}"; shift 2
-STEPS=("$@"); [ ${#STEPS[@]} -eq 0 ] && STEPS=(vc fonts dotnet licensing svcshim idmgr rvt pkgs asc revitini register ncryptshim webview2 d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix wv2fix)
+STEPS=("$@")
+if [ ${#STEPS[@]} -eq 0 ]; then
+  case "$YEAR" in
+    2023) STEPS=(vc fonts dotnet licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim d3d9dxvk dpipatch richedit tlbpin warpshim gdoff) ;;
+    *)    STEPS=(vc fonts dotnet licensing svcshim idmgr rvt pkgs asc revitini register ncryptshim webview2 d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix wv2fix) ;;
+  esac
+fi
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; . "$ROOT/scripts/lib/versions.sh"
-DIST="$(revit_extracted "$YEAR")"
+DIST="$(revit_dist "$YEAR")"
 LANG_UI="${REVIT_LANG:-en-US}"
 PKGS_CORE="$(revit_pkgs_core "$YEAR")" # core set for the pkgs step (scripts/lib/versions.sh)
 for s in "${STEPS[@]}"; do # only steps that install from the installer need it; workarounds (rvtfix, wv2fix, …) don't
-  case "$s" in vc|dotnet|net8|licensing|idmgr|rvt|pkgs|asc|register)
+  case "$s" in vc|dotnet|net8|licensing|idmgr|adsso|rvt|pkgs|asc|register)
     [ -f "$DIST/setup.xml" ] || { echo "no extracted installer at $DIST (step $s)" >&2; exit 1; } ;; esac
 done
 LOGDIR="$ROOT/logs/install-$NAME-$(date +%Y%m%d-%H%M%S)"; mkdir -p "$LOGDIR"
@@ -27,13 +35,28 @@ for s in "${STEPS[@]}"; do
         api-ms-win-crt-locale-l1-1-0 api-ms-win-crt-math-l1-1-0 api-ms-win-crt-runtime-l1-1-0 \
         api-ms-win-crt-stdio-l1-1-0 api-ms-win-crt-time-l1-1-0 atl140 concrt140 msvcp140 msvcp140_1 \
         msvcp140_2 msvcp140_atomic_wait ucrtbase vcamp140 vcomp140 vccorlib140 vcruntime140 vcruntime140_1
-      run_exe vc22x86 "$DIST/3rdParty/x86/VCRedist/2022/VC_redist.x86.exe" /install /quiet /norestart
-      run_exe vc22x64 "$DIST/3rdParty/x64/VCRedist/2022/VC_redist.x64.exe" /install /quiet /norestart ;;
+      if [ -d "$DIST/3rdParty/x64/VCRedist/2022" ]; then
+        run_exe vc22x86 "$DIST/3rdParty/x86/VCRedist/2022/VC_redist.x86.exe" /install /quiet /norestart
+        run_exe vc22x64 "$DIST/3rdParty/x64/VCRedist/2022/VC_redist.x64.exe" /install /quiet /norestart
+      else # 2023: 2012, 2013, (2017 x86), 2019 — every one the installer ships, oldest first, switches from its pkg.*.xml
+        for x in "$DIST"/3rdParty/x86/VCRedist/*/pkg.*.xml "$DIST"/3rdParty/x64/VCRedist/*/pkg.*.xml; do
+          f="$(grep -o 'file="[^"]*"' "$x" | head -1 | cut -d'"' -f2)"; p="$(grep -o 'installParams="[^"]*"' "$x" | head -1 | cut -d'"' -f2)"
+          read -r -a args <<< "${p%% /l *}" # drop "/l %temp%\…log": %temp% is not expanded here
+          v="$(basename "$(dirname "$x")")"; arch="${x#"$DIST"/3rdParty/}"; arch="${arch%%/*}"
+          run_exe "vc${v:2:2}$arch" "$DIST/$f" "${args[@]}"
+        done
+      fi ;;
     fonts) # corefonts + msxml6 (like d2 for 2020)
       WINE="$ROOT/scripts/lib/cxwine" WINESERVER="$CX/bin/wineserver" CX_BOTTLE="$NAME" WINEPREFIX="$B" \
         winetricks -q --unattended corefonts msxml6 >>"$LOGDIR/winetricks.log" 2>&1
       say fonts "$?" "winetricks corefonts msxml6" ;;
     dotnet|net8) # .NET Desktop + ASP.NET Core from the installer (2026: 8.0, folders 80; 2027: 10.0, folders 100; switches from pkg.dotnet*.xml / pkg.aspnet*.xml)
+      if [ "$(revit_dotnet "$YEAR")" = netfx48 ]; then # 2021–2024: .NET Framework 4.8 from the installer on top of real 4.0 (as 4.7 for 2020)
+        "$ROOT/scripts/d3-dotnet47.sh" "$NAME" "$DIST/3rdParty/dotNetFramework/48/dotNetFx48_Full_x86_x64.exe" >>"$LOGDIR/netfx48.log" 2>&1
+        w wineboot -r >>"$LOGDIR/wine.log" 2>&1 # the MSI asks for a reboot (pending file renames)
+        rel="$(w reg query 'HKLM\Software\Microsoft\NET Framework Setup\NDP\v4\Full' /v Release 2>/dev/null | tr -d '\r' | awk '/Release/{print $3}')"
+        say netfx48 "$([ $((rel)) -ge 528040 ] && echo 0 || echo 1)" "Release=$((rel)) (528040+ = 4.8)"; continue
+      fi
       run_exe netdesk "$(ls "$DIST"/3rdParty/x64/dotNet/*/windowsdesktop-runtime-*.exe | tail -1)" /install /quiet /norestart
       run_exe netasp "$(ls "$DIST"/3rdParty/x64/aspNetCore/*/aspnetcore-runtime-*.exe | tail -1)" /q /norestart
       ls "$B/drive_c/Program Files/dotnet/shared/"*/ 2>/dev/null | sed 's/^/   /' | tee -a "$LOGDIR/summary.txt" ;;
@@ -70,7 +93,19 @@ for s in "${STEPS[@]}"; do
         [ "$st" = RUNNING ] && break; sleep 2
       done
       say svcshim "${st:-?}" "AdskLicensingService → $AL\\svcshim.exe" ;;
-    idmgr) # AdskIdentityManager (Autodesk sign-in, separate from Revit since 2023), switches from pkg.identity_manager.xml
+    adsso) # 2023: Autodesk sign-in is AdSSO (QtWebEngine), as in 2020; from pkg.adsso.xml
+      msi_win adsso "$(win "$DIST")\\x64\\AdSSO\\AdSSO.msi" ;;
+    ssoenv) # AdSSO sign-in window (QtWebEngine): loads forever under Wine with GPU rendering, works without it (as in 2020)
+      "$ROOT/scripts/bottle-env.sh" "$NAME" 'QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu --disable-gpu-compositing' \
+        | sed 's/^/   ssoenv     /' | tee -a "$LOGDIR/summary.txt" ;;
+    wbemshim) # WMI shim: several async queries on one IWbemServices (tools/wbem-shim), as in 2020.
+              # Affects all 64-bit processes in the bottle (changes the CLSID_WbemLocator registration).
+      [ -f "$ROOT/build/wbem-shim/wbemshim.dll" ] || "$ROOT/scripts/build-wbem-shim.sh" >>"$LOGDIR/wbemshim.log" 2>&1
+      cp "$ROOT/build/wbem-shim/wbemshim.dll" "$B/drive_c/windows/system32/wbem/wbemshim.dll"
+      w reg add 'HKLM\Software\Classes\CLSID\{4590F811-1D3A-11D0-891F-00AA004B2E24}\InprocServer32' /ve \
+        /d 'C:\windows\system32\wbem\wbemshim.dll' /f >>"$LOGDIR/wbemshim.log" 2>&1
+      say wbemshim "$?" "CLSID_WbemLocator (x64) -> system32\\wbem\\wbemshim.dll" ;;
+    idmgr) # AdskIdentityManager (Autodesk sign-in in 2026+; 2023 uses AdSSO), switches from pkg.identity_manager.xml
       run_exe idmgr "$DIST/x64/AdskIdentityManager/AdskIdentityManager-Installer.exe" --mode unattended
       ls "$B/drive_c/Program Files/Autodesk/" 2>/dev/null | sed 's/^/   Program Files\\Autodesk\\/' | tee -a "$LOGDIR/summary.txt" ;;
     rvt) # RVT.msi: LaunchCondition "Installed or ADSK_SETUP_EXE or ADSK_ODIS_SETUP"; properties from pkg.RVT.xml.

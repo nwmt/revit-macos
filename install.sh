@@ -4,17 +4,17 @@
 #   ./install.sh 2020             → bottle rvt2020-a, app ~/Applications/Revit 2020 (rvt2020-a).app
 #   INSTALL_DRYRUN=1 ./install.sh 2026   checks and prints the plan, changes nothing
 #   CX_RECREATE=1 ./install.sh 2026 [bottle]   deletes and rebuilds an existing bottle
-# Supported: 2020, 2026, 2027. Everything else is untested — see README.md.
+# Supported: 2020, 2023, 2026, 2027. Everything else is untested — see README.md.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"; . "$ROOT/scripts/lib/versions.sh"
 YEAR="${1:-}"; BOTTLE="${2:-}"
 CX="/Applications/CrossOver.app/Contents/SharedSupport/CrossOver"
 
 case "$YEAR" in
-  2020|2026|2027) ;;
+  2020|2023|2026|2027) ;;
   "") sed -n '2,7s/^# \{0,1\}//p' "$0"; exit 1 ;;
   *) echo "Revit $YEAR is not supported yet (expectation: $(revit_expect "$YEAR" 2>/dev/null || echo unknown))." >&2
-     echo "Working versions: 2020, 2026, 2027. See README.md." >&2; exit 1 ;;
+     echo "Working versions: 2020, 2023, 2026, 2027. See README.md." >&2; exit 1 ;;
 esac
 BOTTLE="${BOTTLE:-$(revit_bottle_default "$YEAR")}"
 # the name ends up in shell commands, AppleScript and app names: keep it plain
@@ -43,21 +43,22 @@ if [ ! -d "$DST" ] && [ -z "$(find "$SRC" -maxdepth 2 -type f \( -iname '*.exe' 
   need "no Revit $YEAR installer in installers/revit$YEAR/" "download it from your Autodesk Account, see installers/README.md"
 fi
 part1=$(find "$SRC" -maxdepth 2 -type f -iname '*_001_0*.sfx.exe' 2>/dev/null | head -1)
-if [ ! -d "$DST" ] && [ -n "$part1" ]; then # multi-part download (2020): every part 001…NNN of the same download
+if [ ! -d "$DST" ] && [ -n "$part1" ]; then # multi-part download (2020, 2023): every part 001…NNN of the same download
   total=$(basename "$part1" | sed -E 's/.*_001_0*([0-9]+)\.sfx\.exe$/\1/'); stem="${part1%_001_*}"; tot3=$(printf '%03d' "$total")
   gone=""; for n in $(seq -f '%03g' 1 "$total"); do [ -f "${stem}_${n}_${tot3}.sfx.exe" ] || gone+=" $n"; done
   [ -z "$gone" ] || need "installer parts missing in installers/revit$YEAR/:$gone (of $tot3)" "download all parts from your Autodesk Account"
 fi
-if [ ! -d "$DST" ] && [ "$YEAR" != 2020 ] && [ -z "$(find "$SRC" -maxdepth 2 -type f -iname '*.7z' 2>/dev/null | head -1)" ]; then
+if [ ! -d "$DST" ] && [ -z "$part1" ] && [ -z "$(find "$SRC" -maxdepth 2 -type f -iname '*.7z' 2>/dev/null | head -1)" ]; then
   need "no .7z payload in installers/revit$YEAR/ (the small .exe alone is only the downloader)" \
        "download both files of the Autodesk download, see versions/$YEAR.md"
 fi
 RX="$ROOT/installers/redist/win7sp1/x64"
 [ -f "$RX/msls31.dll" ] || need "installers/redist/win7sp1/x64/msls31.dll missing" "copy C:\\Windows\\System32\\msls31.dll from any Windows 7/10 x64, see installers/README.md"
-if [ "$YEAR" = 2020 ]; then
+if [ "$YEAR" = 2020 ] || [ "$YEAR" = 2023 ]; then # .NET Framework 4.7/4.8 goes on top of a real 4.0
   [ -f "$ROOT/installers/redist/dotNetFx40_Full_x86_x64.exe" ] \
     || need "installers/redist/dotNetFx40_Full_x86_x64.exe missing" ".NET Framework 4.0 offline installer from Microsoft, see installers/README.md"
-else
+fi
+if [ "$YEAR" -ge 2026 ]; then
   [ -f "$ROOT/installers/redist/webview2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe" ] \
     || warn "no fresh WebView2 runtime in installers/redist/webview2/" \
             "optional but recommended: without it the start screen and Manage Links stay blank (installers/README.md)"
@@ -85,6 +86,12 @@ if [ "$YEAR" = 2020 ]; then
         "scripts/inspect-installer.sh 2020 --extract"
         "scripts/build-bottle.sh $BOTTLE"
         "scripts/make-launcher.sh $BOTTLE 2020")
+elif [ "$YEAR" = 2023 ]; then # sign-in in Revit's own window (AdSSO): no link handler
+  PLAN=("scripts/get-shims.sh"
+        "scripts/inspect-installer.sh 2023 --extract"
+        "scripts/cx-bottle.sh $BOTTLE"
+        "scripts/install-odis.sh 2023 $BOTTLE"
+        "scripts/make-launcher.sh $BOTTLE 2023")
 else
   PLAN=("scripts/get-shims.sh"
         "scripts/inspect-installer.sh $YEAR --extract"
@@ -128,7 +135,7 @@ echo
 echo "Done in $(((SECONDS - t0) / 60)) min."
 echo "Start Revit from ~/Applications/Revit $YEAR ($BOTTLE).app"
 [ -d "$HOME/Applications/Revit Viewer $YEAR ($BOTTLE).app" ] && echo "Revit Viewer (free, no license needed): ~/Applications/Revit Viewer $YEAR ($BOTTLE).app"
-if [ "$YEAR" = 2020 ]; then
+if [ "$YEAR" = 2020 ] || [ "$YEAR" = 2023 ]; then
   echo "First launch: sign in to Autodesk. If Revit hangs on the splash screen, quit it and start again."
 else
   echo "First launch: Revit opens Autodesk sign-in in your browser. After signing in, when the browser asks"
