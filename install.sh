@@ -1,24 +1,25 @@
 #!/usr/bin/env bash
-# One-command install of Autodesk Revit into a CrossOver bottle.
+# One-command install of Autodesk Revit into a CrossOver bottle. Users run it as ./revit install <year>.
 # Usage: ./install.sh <year> [bottle]
 #   ./install.sh 2020             → bottle rvt2020-a, app ~/Applications/Revit 2020 (rvt2020-a).app
-#   INSTALL_DRYRUN=1 ./install.sh 2026   checks and prints the plan, changes nothing
-#   CX_RECREATE=1 ./install.sh 2026 [bottle]   deletes and rebuilds an existing bottle
-# Supported: 2020, 2023, 2024, 2025, 2026, 2027. Everything else is untested — see README.md.
+#   INSTALL_DRYRUN=1 ./install.sh 2026   checks and prints the plan, changes nothing (./revit check 2026)
+#   CX_RECREATE=1 ./install.sh 2026 [bottle]   deletes and rebuilds an existing bottle (./revit rebuild 2026)
+# Supported: REVIT_SUPPORTED in scripts/lib/versions.sh. Everything else is untested — see README.md.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"; . "$ROOT/scripts/lib/versions.sh"
 YEAR="${1:-}"; BOTTLE="${2:-}"
-CX="/Applications/CrossOver.app/Contents/SharedSupport/CrossOver"
+CX="${REVIT_CX:-/Applications/CrossOver.app/Contents/SharedSupport/CrossOver}"   # REVIT_CX: tests only
 
-case "$YEAR" in
-  2020|2023|2024|2025|2026|2027) ;;
-  "") sed -n '2,7s/^# \{0,1\}//p' "$0"; exit 1 ;;
-  *) echo "Revit $YEAR is not supported yet (expectation: $(revit_expect "$YEAR" 2>/dev/null || echo unknown))." >&2
-     echo "Working versions: 2020, 2023, 2024, 2025, 2026, 2027. See README.md." >&2; exit 1 ;;
-esac
+if [ -z "$YEAR" ]; then sed -n '2,7s/^# \{0,1\}//p' "$0"; exit 1
+elif ! in_list "$YEAR" "${REVIT_SUPPORTED[@]}"; then
+  echo "Revit $YEAR is not supported yet (expectation: $(revit_expect "$YEAR" 2>/dev/null || echo unknown))." >&2
+  echo "Working versions: $(printf '%s, ' "${REVIT_SUPPORTED[@]}" | sed 's/, $//'). See README.md." >&2; exit 1
+fi
 BOTTLE="${BOTTLE:-$(revit_bottle_default "$YEAR")}"
-# the name ends up in shell commands, AppleScript and app names: keep it plain
-[[ "$BOTTLE" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "Bottle name may contain only letters, digits, - and _: \"$BOTTLE\"" >&2; exit 1; }
+revit_bottle_name_ok "$BOTTLE" \
+  || { echo "Bottle name may contain only letters, digits, - and _, and cannot be \"default\": \"$BOTTLE\"" >&2; exit 1; }
+SFX=""; [ "$BOTTLE" = "$(revit_bottle_default "$YEAR")" ] || SFX=" $BOTTLE"   # hints name the bottle only when it is not the default
+B="$HOME/Library/Application Support/CrossOver/Bottles/$BOTTLE"
 export REVIT_YEAR="$YEAR"
 
 # ---- preflight: report every problem at once, with the fix ----
@@ -67,8 +68,8 @@ if [ "$YEAR" -ge 2024 ]; then
             "optional but recommended: without it the start screen and Manage Links stay blank (installers/README.md)"
 fi
 
-if [ -d "$HOME/Library/Application Support/CrossOver/Bottles/$BOTTLE" ] && [ "${CX_RECREATE:-0}" != 1 ]; then
-  need "bottle $BOTTLE already exists" "pick another name (./install.sh $YEAR rvt$YEAR-b) or rebuild it: CX_RECREATE=1 ./install.sh $YEAR $BOTTLE"
+if [ -d "$B" ] && [ "${CX_RECREATE:-0}" != 1 ]; then
+  need "bottle $BOTTLE already exists" "pick another name (./revit install $YEAR rvt$YEAR-b) or rebuild it: ./revit rebuild $YEAR$SFX"
 fi
 # what Finder and System Settings call "available": includes purgeable space that df does not count
 free_gb=$(osascript -l JavaScript -e 'ObjC.import("Foundation"); var r = Ref();
@@ -81,7 +82,7 @@ grep -qE "[[:space:]]$H([[:space:]]|\$)" /etc/hosts \
   || warn "this Mac's name is not in /etc/hosts — Revit waits ~5 s on every lookup of it" \
           "sudo sh -c 'printf \"127.0.0.1\\t$H\\n::1\\t$H\\n\" >> /etc/hosts'"
 
-[ $missing -eq 0 ] || { echo; echo "Fix the items marked ✗ and run ./install.sh $YEAR again."; exit 1; }
+[ $missing -eq 0 ] || { echo; echo "Fix the items marked ✗ and run ./revit install $YEAR$SFX again."; exit 1; }
 echo "  ✓ ready"
 
 # ---- plan ----
@@ -119,16 +120,16 @@ for s in "${PLAN[@]}"; do
     last="$(ls -td "$ROOT"/logs/* 2>/dev/null | head -1)"; [ -d "$last" ] && last="$last/summary.txt"
     echo; echo "Step failed: $s" >&2
     [ -f "$last" ] && { echo "Last log: $last" >&2; tail -15 "$last" | sed 's/^/  | /' >&2; }
-    echo "See docs/troubleshooting.md. To start over: CX_RECREATE=1 ./install.sh $YEAR $BOTTLE" >&2
+    again="./revit install $YEAR$SFX"; [ -d "$B" ] && again="./revit rebuild $YEAR$SFX"
+    echo "See docs/troubleshooting.md. To start over: $again" >&2
     exit 1
   }
   i=$((i + 1))
 done
 
 # installers report errors in their own way; check the result instead of trusting exit codes
-B="$HOME/Library/Application Support/CrossOver/Bottles/$BOTTLE"
 if [ ! -f "$(revit_dir_unix "$B" "$YEAR")/Revit.exe" ]; then
-  echo; echo "Install finished, but Revit.exe is not in the bottle. Logs: logs/. To start over: CX_RECREATE=1 ./install.sh $YEAR $BOTTLE" >&2
+  echo; echo "Install finished, but Revit.exe is not in the bottle. Logs: ./revit logs $YEAR$SFX. To start over: ./revit rebuild $YEAR$SFX" >&2
   exit 1
 fi
 sum="$(ls -td "$ROOT"/logs/{d6,install}-"$BOTTLE"-*/ 2>/dev/null | head -1)summary.txt"
@@ -147,4 +148,5 @@ else
   echo "First launch: Revit opens Autodesk sign-in in your browser. After signing in, when the browser asks"
   echo "which app should open the link, choose \"Autodesk Sign-In ($BOTTLE)\"."
 fi
-case "$YEAR" in 2020|2023|2024|2025|2026) echo "Optional add-ins (RevitLookup, pyRevit): REVIT_YEAR=$YEAR ./scripts/d8-addins.sh $BOTTLE" ;; esac
+in_list "$YEAR" "${REVIT_ADDIN_YEARS[@]}" && echo "Optional add-ins (RevitLookup, pyRevit): ./revit addins $YEAR$SFX"
+echo "Everyday commands: ./revit"

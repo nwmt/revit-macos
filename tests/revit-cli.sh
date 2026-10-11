@@ -102,5 +102,14 @@ check "install passes the year and the default bottle" called "install.sh 2024 r
 reset; run "" check 2025 rvt2025-b;  expect "check runs install.sh" 0 ""
 check "check is a dry run of the named bottle" called "install.sh 2025 rvt2025-b | REVIT_YEAR= INSTALL_DRYRUN=1"
 
+# ---- install.sh ----
+reset; run_install "" 2024 default;  expect "install.sh refuses the bottle name default" 1 'cannot be "default"'
+reset; run_install "" 2021;          expect "install.sh lists the supported years" 1 "Working versions: 2020, 2023, 2024, 2025, 2026, 2027."
+reset; bottle rvt2024-b 2024 2024; run_install INSTALL_DRYRUN=1 2024 rvt2024-b
+expect "install.sh: rebuild hint names the bottle" 1 "rebuild it: ./revit rebuild 2024 rvt2024-b"
+expect "install.sh: final hint names the bottle" 1 "run ./revit install 2024 rvt2024-b again"
+reset; bottle rvt2024-a 2024 2024; run_install INSTALL_DRYRUN=1 2024
+check "install.sh: default bottle is not named" grep -qx '      fix: pick another name (./revit install 2024 rvt2024-b) or rebuild it: ./revit rebuild 2024' <<<"$OUT"
+
 # ---- end ----
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]
