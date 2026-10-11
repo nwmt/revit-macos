@@ -25,7 +25,7 @@
  *    "--in-process-gpu" keeps the GPU thread inside Revit. Revit sets CefSettings itself, but CEF also reads the
  *    browser process command line (GetCommandLineW), so give it ours plus the flag: replace the GetCommandLineW exports
  *    of kernelbase and kernel32 (Wine's returns its own copy, not the PEB string) before libcef.dll loads.
- *    Only if CefSharp\libcef.dll sits next to Revit.exe.
+ *    Only if libcef.dll sits next to Revit.exe (2025) or in its CefSharp folder (2023).
  *    Custom flags: RVTFIX_CEF_ARGS; empty disables.
  */
 #include <windows.h>
@@ -199,7 +199,10 @@ static void fix_cef(void)
     if (!args[0]) { trace("[rvtfix] CefSharp: disabled (RVTFIX_CEF_ARGS is empty)\n"); return; }
     if (!GetModuleFileNameW(NULL, path, MAX_PATH) || !(slash = wcsrchr(path, L'\\'))) return;
     lstrcpyW(slash + 1, L"CefSharp\\libcef.dll");
-    if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) return; /* no CefSharp in this Revit */
+    if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) {
+        lstrcpyW(slash + 1, L"libcef.dll");
+        if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) return; /* no CefSharp in this Revit */
+    }
     const WCHAR *cur = GetCommandLineW();
     cef_cmdline = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (lstrlenW(cur) + 2 + lstrlenW(args)) * sizeof(WCHAR)); /* never freed */
     if (!cef_cmdline) return;
