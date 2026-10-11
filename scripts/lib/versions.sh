@@ -19,7 +19,8 @@ revit_expect() { # expectation before trying (not a fact!)
   case "$1" in
     2020) echo "works";;
     2023) echo "works";;
-    2021|2022|2024) echo "candidate: .NET Framework 4.8 works with Revit 2023";;
+    2021|2022) echo "candidate: .NET Framework 4.8 works with Revit 2023";;
+    2024) echo "candidate: .NET Framework 4.8 like 2023, sign-in and RealDWG like 2025";;
     2025|2026) echo "candidate: CoreCLR 8 works under Wine";;
     2027) echo "candidate: like 2026, but .NET 10 (untested under Wine)";;
   esac
@@ -36,15 +37,18 @@ revit_dist() { # the installer root (setup.xml): the extracted folder (2026+) or
 }
 revit_bottle_default() { echo "rvt$1-a"; }                                    # name of the version's first bottle
 revit_dynamo() { # Dynamo for Revit version: its settings folder %APPDATA%\Dynamo\Dynamo Revit\<version>
-  case "$1" in 2020) echo 2.3;; 2023) echo 2.13;; 2025) echo 3.3;; *) return 1;; esac
+  case "$1" in 2020) echo 2.3;; 2023) echo 2.13;; 2024) echo 2.19;; 2025) echo 3.3;; *) return 1;; esac
 }
 revit_prodkey() { # ADLM_PRODKEY from the RVT.msi Property table
-  case "$1" in 2020) echo 829L1;; 2023) echo 829O1;; 2025) echo 829Q1;; 2026) echo 829R1;; 2027) echo 829S1;; *) return 1;; esac
+  case "$1" in 2020) echo 829L1;; 2023) echo 829O1;; 2024) echo 829P1;; 2025) echo 829Q1;; 2026) echo 829R1;; 2027) echo 829S1;; *) return 1;; esac
 }
 revit_pkgs_core() { # core ODIS packages for install-odis.sh pkgs (names from manifest/app.RVT.xml): no Dynamo, Twinmotion, other languages
   case "$1" in
     # 2023: Revit itself is in RVT.msi (no ADIX packages); materials CM2023/…2023
     2023) echo "RCLC|RCLCRVT|RVTCPSTLCON|REX Framework|REX Revit|RSA CommonData|RSA COM|RSA Interop|RSA RoReinf|CM2023|CMILB2023|PrismBaseImageLibrary2023|PrismLowImageLibrary2023|PrismMediumImageLibrary2023|UNITSCHEMAS|RCLEENU|RET|GenerativeDesign";;
+    # 2024: Revit in RVT.msi as in 2023 (+ the update's RVTSP*.msp), sign-in, HIVE and RealDWG as in 2025; the rest of Revit
+    # (CefSharp, ATF, shared and cloud parts with Dynamo) in the MSM_* ADIX packages
+    2024) echo "RCLC|RCLCRVT|RVTCPSTLCON|HIVE|DWGSHARED|REX Framework|REX Revit|RSA CommonData|RSA COM|RSA Interop|RSA RoReinf|CM4|CMILB4|PrismBaseImageLibrary4|PrismLowImageLibrary4|PrismMediumImageLibrary4|UNITSCHEMAS|RCLEENU|MSM_CEFSHARP|MSM_ATF|MSM_EXT|MSM_CLOUD|RET|GenerativeDesign";;
     # 2025: like 2026 without OpenUSD; adds RSA Interop and CEFSHARP (CefSharp, as in 2023); no ASC package; Dynamo 3.3 (ADIX)
     2025) echo "RCLC|RCLCRVT|RVTCPSTLCON|HIVE|DWGSHARED|REX Framework|REX Revit|RSA CommonData|RSA COM|RSA Interop|RSA RoReinf|CM4|CMILB4|PrismBaseImageLibrary4|PrismLowImageLibrary4|PrismMediumImageLibrary4|UNITSCHEMAS|RCLEENU|ATF|CORE|CLOUD|SHARED|RVTONLY|CEFSHARP|RET|GenerativeDesign|DYNAMO_CORE|DYNAMO_DOCS";;
     2026) echo "RCLC|RCLCRVT|RVTCPSTLCON|HIVE|DWGSHARED|REX Framework|REX Revit|RSA CommonData|RSA COM|RSA RoReinf|CM4|CMILB4|PrismBaseImageLibrary4|PrismLowImageLibrary4|PrismMediumImageLibrary4|UNITSCHEMAS|RCLEENU|ATF|CORE|CLOUD|SHARED|RVTONLY|RET|OpenUSD|GenerativeDesign";;

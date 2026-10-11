@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Installs Revit with the ODIS installer (2023, 2026, 2027; probably 2024–2025 too) component by component, bypassing Setup.exe.
+# Installs Revit with the ODIS installer (2023–2027) component by component, bypassing Setup.exe.
 # Order and switches come from manifest/app.RVT.xml and x64/RVT/pkg.RVT.xml (Dependencies), see versions/<year>.md.
 # Usage: ./scripts/install-odis.sh <year> <bottle> [steps...]
 #   default steps: vc fonts dotnet licensing svcshim idmgr rvt pkgs asc revitini register ncryptshim webview2 d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix wv2fix
 #   2025: the default + pdfprinter dynamo
 #   2023 (sign-in through AdSSO as in 2020, no WebView2/IdentityManager/ASC packages):
 #     vc fonts dotnet licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix pdfprinter dynamo
+#   2024 (.NET Framework 4.8 as 2023; IdentityManager, WebView2 and RealDWG as 2025):
+#     vc fonts dotnet licensing svcshim idmgr rvt pkgs revitini register ncryptshim webview2 wbemshim d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix wv2fix pdfprinter dynamo
 # The installer must be extracted: ./scripts/inspect-installer.sh <year> --extract
 set -uo pipefail
 YEAR="${1:?specify a year}"; NAME="${2:?specify a bottle}"; shift 2
@@ -13,6 +15,7 @@ STEPS=("$@")
 if [ ${#STEPS[@]} -eq 0 ]; then
   case "$YEAR" in
     2023) STEPS=(vc fonts dotnet licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix pdfprinter dynamo) ;;
+    2024) STEPS=(vc fonts dotnet licensing svcshim idmgr rvt pkgs revitini register ncryptshim webview2 wbemshim d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix wv2fix pdfprinter dynamo) ;;
     2025) STEPS=(vc fonts dotnet licensing svcshim idmgr rvt pkgs asc revitini register ncryptshim webview2 d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix wv2fix pdfprinter dynamo) ;;
     *)    STEPS=(vc fonts dotnet licensing svcshim idmgr rvt pkgs asc revitini register ncryptshim webview2 d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix wv2fix) ;;
   esac
@@ -37,10 +40,11 @@ for s in "${STEPS[@]}"; do
         api-ms-win-crt-locale-l1-1-0 api-ms-win-crt-math-l1-1-0 api-ms-win-crt-runtime-l1-1-0 \
         api-ms-win-crt-stdio-l1-1-0 api-ms-win-crt-time-l1-1-0 atl140 concrt140 msvcp140 msvcp140_1 \
         msvcp140_2 msvcp140_atomic_wait ucrtbase vcamp140 vcomp140 vccorlib140 vcruntime140 vcruntime140_1
-      if [ -d "$DIST/3rdParty/x64/VCRedist/2022" ]; then
+      if [ -f "$DIST/3rdParty/x64/VCRedist/2022/VC_redist.x64.exe" ]; then
         run_exe vc22x86 "$DIST/3rdParty/x86/VCRedist/2022/VC_redist.x86.exe" /install /quiet /norestart
         run_exe vc22x64 "$DIST/3rdParty/x64/VCRedist/2022/VC_redist.x64.exe" /install /quiet /norestart
-      else # 2023: 2012, 2013, (2017 x86), 2019 — every one the installer ships, oldest first, switches from its pkg.*.xml
+      else # 2023: 2012, 2013, (2017 x86), 2019; 2024: 2012, 2013, 2019, 2022 (as vcredist_x64.exe) — every one the installer
+           # ships, oldest first, switches from its pkg.*.xml
         for x in "$DIST"/3rdParty/x86/VCRedist/*/pkg.*.xml "$DIST"/3rdParty/x64/VCRedist/*/pkg.*.xml; do
           f="$(grep -o 'file="[^"]*"' "$x" | head -1 | cut -d'"' -f2)"; p="$(grep -o 'installParams="[^"]*"' "$x" | head -1 | cut -d'"' -f2)"
           read -r -a args <<< "${p%% /l *}" # drop "/l %temp%\…log": %temp% is not expanded here
@@ -117,10 +121,18 @@ for s in "${STEPS[@]}"; do
          # which no longer exists (exit 100 → 1603) → CLM_SKIP_REGISTER=1, register in the register step.
          # REVITLANGUAGE is a three-letter code (RVT.msi Property: ENU); hypothesis: Revit.ini [Language] Select comes from it. With en-US
          # Revit 2027 couldn't find template paths (revitini step). A fresh install with ENU is not yet verified.
+         # 2024: the update (inspect-installer.sh lays it over the base) is a patch to RVT.msi, x64/RVTSP*.msp (pkg.RVTSP.xml,
+         # InstallFile type MSP), not a new RVT.msi as in 2026+ → applied in the same install with PATCH=.
       [ -f "$DIST/x64/RVT/RVT-wine.msi" ] || "$ROOT/scripts/patch-rvt-msi.sh" "$NAME" "$YEAR" >>"$LOGDIR/patch.log" 2>&1
+      patch=(); x="$(grep -l 'InstallFile type="MSP"' "$DIST"/x64/pkg.*.xml 2>/dev/null | head -1)"
+      if [ -n "$x" ]; then
+        f="$(grep -o 'InstallFile type="MSP"[^>]* file="[^"]*"' "$x" | sed 's/.* file="//; s/"$//')"
+        [ -f "$DIST/$f" ] && patch=("PATCH=$(win "$DIST/$f")")
+      fi
       msi_win rvt "$(win "$DIST")\\x64\\RVT\\RVT-wine.msi" "TRANSFORMS=:$LANG_UI.mst;:all.mst" \
         ADSK_SETUP_EXE=1 ADSK_EULA_STATUS=#1 "ADLM_PRODKEY=$(revit_prodkey "$YEAR")" ADLM_EULA_COUNTRY=US \
-        REVITLANGUAGE=ENU CLM_SKIP_SVCCHECK=1 CLM_SKIP_REGISTER=1 "INSTALLDIR=C:\\Program Files\\Autodesk\\Revit $YEAR"
+        REVITLANGUAGE=ENU CLM_SKIP_SVCCHECK=1 CLM_SKIP_REGISTER=1 "INSTALLDIR=C:\\Program Files\\Autodesk\\Revit $YEAR" \
+        ${patch[@]+"${patch[@]}"}
       ls "$B/drive_c/Program Files/Autodesk/Revit $YEAR/Revit.exe" >/dev/null 2>&1 && say rvt 0 "Revit.exe is in place" ;;
     pkgs) # product packages from manifest/app.RVT.xml (except RVT — rvt step): ADIX via tools/adix.py, MSI via msiexec.
           # List from ODIS_PKGS (names separated by |); default is the core without Dynamo, Twinmotion, other languages. Generative Design is needed:
@@ -341,17 +353,17 @@ PY
     revitini) # Revit takes template and library paths from [Directories<Select>] in Revit.ini. After installing 2027
               # [Language] Select=en-US (2026 has ENU) → there's no [Directoriesen-US] section → "The path specified for default
               # family templates is empty or invalid", empty template and library lists. Set Select=ENU.
-              # Defaults for new users (2025+, values as Revit writes them after changing Options by hand):
+              # Defaults for new users (2024+, values as Revit writes them after changing Options by hand):
               #   [Graphics] Antialiasing=0 AntialiasingOptions=1 — anti-aliasing off: smoother under Wine, and DXMT draws
               #   a black view with it; [AppFrame] Theme, [Colors] CanvasTheme — 0 dark, 1 light (Revit API UITheme/CanvasTheme),
               #   from the macOS appearance at install time, or REVIT_THEME=dark|light.
-              # 2025: Revit finds RealDWG Shared (DWG import/export, needed at startup) through the HIVE host, which asks ODIS's
+              # 2024, 2025: Revit finds RealDWG Shared (DWG import/export, needed at startup) through the HIVE host, which asks ODIS's
               #   install database; we install packages without ODIS, so Revit says "Cannot load the required component Autodesk
               #   RealDWG Shared" and exits. Revit first takes the path it cached in [Interoperability] → give it the path.
               # Revit.ini lives in ProgramData (seed for new users) and in the user profile; Revit must be closed.
       keys=(Language.Select=ENU)
-      [ "$YEAR" = 2025 ] && keys+=("Interoperability.RealDWGInstalledLocation=C:\\Program Files\\Autodesk\\RealDWG Shared $YEAR\\")
-      if [ "$YEAR" -ge 2025 ]; then
+      case "$YEAR" in 2024|2025) keys+=("Interoperability.RealDWGInstalledLocation=C:\\Program Files\\Autodesk\\RealDWG Shared $YEAR\\");; esac
+      if [ "$YEAR" -ge 2024 ]; then
         theme="${REVIT_THEME:-$(defaults read -g AppleInterfaceStyle 2>/dev/null | grep -qi dark && echo dark || echo light)}"
         t=1; [ "$theme" = dark ] && t=0; theme+=", from ${REVIT_THEME:+REVIT_THEME}"; [ -n "${REVIT_THEME:-}" ] || theme+="macOS"
         keys+=(Graphics.Antialiasing=0 Graphics.AntialiasingOptions=1 AppFrame.Theme=$t AppFrame.FollowSystemColorTheme=0 Colors.CanvasTheme=$t)

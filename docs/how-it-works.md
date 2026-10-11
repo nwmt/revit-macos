@@ -22,7 +22,7 @@ Revit is a Windows x64 program. On an Apple Silicon Mac it runs like this:
 | `tools/wbem-shim` | Revit 2020 crashes on New Project and in Options: Wine's WMI handles only one async query at a time. The shim runs them one by one. |
 | `tools/tlbpin` | Views with text are 2–3× slower: RichEdit reloads a type library for every text element. The shim keeps it cached. |
 | `tools/d3d11-warp-shim` | Materials dialog does not open: it asks for a software D3D11 (WARP) device that D3DMetal lacks. The shim gives it the normal device. |
-| `tools/rvtfix` | Revit 2026+: crash from a drag-and-drop call on the browser's window, and white web panels with high CPU. Revit 2023 and 2025: blank start screen (CefSharp). The shim fixes the call and adds browser flags. |
+| `tools/rvtfix` | Revit 2026+: crash from a drag-and-drop call on the browser's window, and white web panels with high CPU. Revit 2023–2025: blank start screen (CefSharp). The shim fixes the call and adds browser flags. |
 | `tools/wv2fix` | Revit 2026+: the built-in web browser (WebView2) crashes on clicks and resizes. The shim flushes pending drawing before such window changes and skips changes that change nothing. |
 | `tools/pdf-printer` | The bottle has no printers. Adds a "Revit PDF" printer; Ghostscript turns its output into PDFs in `~/Documents/Revit-PDF`. |
 | `tools/win_shortcut.py` | Reads the Start Menu shortcuts the installer creates and builds the macOS apps from them, with the same command line and icon. |

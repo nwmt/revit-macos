@@ -12,7 +12,8 @@ No Windows license, no virtual machine. One command builds everything.
 | **2025** | ✅ Works | 2025.5: real project work, Materials, families, saving, exports (PDF, DWG, IFC…), printing to PDF, Dynamo, pyRevit and RevitLookup. [Details](versions/2025.md) |
 | **2026** | ⚠️ Mostly works | 2026.5: modeling, 3D, text, Materials, saving, pyRevit and RevitLookup. Start screen sometimes redraws. [Details](versions/2026.md) |
 | **2027** | ⚠️ Mostly works | 2027.3: new project, modeling, 3D, text, Materials, web panels. Saving, PDF, add-ins not tested yet. [Details](versions/2027.md) |
-| 2021, 2022, 2024 | Not tested yet | |
+| **2024** | ✅ Works | 2024.3.6: real project work, Materials, saving, exports (PDF, DWG, IFC…), printing to PDF, Dynamo. [Details](versions/2024.md) |
+| 2021, 2022 | Not tested yet | |
 
 - ✅ **Works**: the everyday basics work, roughly 90 % or more of what most users need: sign-in, open and save,
   modeling, views and 3D, Materials, printing to PDF, common exports. What's left are minor issues with workarounds.
@@ -26,7 +27,7 @@ Tested on an Apple M5 MacBook (16 GB), macOS 26, CrossOver 26.3.
 - A Mac with Apple Silicon (M1 or newer) and about 45 GB of free disk space.
 - [CrossOver](https://www.codeweavers.com/crossover). It is paid, with a free trial.
 - [Homebrew](https://brew.sh), then: `brew install sevenzip winetricks cabextract ghostscript python3`
-- Your own Revit license and installer from your Autodesk Account. For 2025, 2026 and 2027 the small "Create Installer"
+- Your own Revit license and installer from your Autodesk Account. For 2024 and newer the small "Create Installer"
   file is enough: the install downloads Revit and its latest update from Autodesk.
 - One file from any 64-bit Windows 7 or 10 PC: `C:\Windows\System32\msls31.dll`.
 
@@ -37,13 +38,13 @@ Where to put the installer and the extra files: [installers/README.md](installer
 ```bash
 git clone https://github.com/nwmt/revit-macos.git
 cd revit-macos
-./install.sh 2020        # or 2023, 2025, 2026, 2027
+./install.sh 2020        # or 2023, 2024, 2025, 2026, 2027
 ```
 
 The script checks everything first and tells you exactly what is missing. Then it builds a
 CrossOver bottle with Revit and all fixes (10–30 minutes). When it finishes, start Revit from
 `~/Applications/Revit <year> (rvt<year>-a).app` and sign in with your Autodesk account.
-Revit 2020, 2023, 2025 and 2026 also get a Revit Viewer app next to it.
+Revit 2020, 2023, 2024, 2025 and 2026 also get a Revit Viewer app next to it.
 
 Want to see the plan first? `INSTALL_DRYRUN=1 ./install.sh 2026` checks and prints, changes nothing.
 

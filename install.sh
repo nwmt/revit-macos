@@ -4,17 +4,17 @@
 #   ./install.sh 2020             → bottle rvt2020-a, app ~/Applications/Revit 2020 (rvt2020-a).app
 #   INSTALL_DRYRUN=1 ./install.sh 2026   checks and prints the plan, changes nothing
 #   CX_RECREATE=1 ./install.sh 2026 [bottle]   deletes and rebuilds an existing bottle
-# Supported: 2020, 2023, 2025, 2026, 2027. Everything else is untested — see README.md.
+# Supported: 2020, 2023, 2024, 2025, 2026, 2027. Everything else is untested — see README.md.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"; . "$ROOT/scripts/lib/versions.sh"
 YEAR="${1:-}"; BOTTLE="${2:-}"
 CX="/Applications/CrossOver.app/Contents/SharedSupport/CrossOver"
 
 case "$YEAR" in
-  2020|2023|2025|2026|2027) ;;
+  2020|2023|2024|2025|2026|2027) ;;
   "") sed -n '2,7s/^# \{0,1\}//p' "$0"; exit 1 ;;
   *) echo "Revit $YEAR is not supported yet (expectation: $(revit_expect "$YEAR" 2>/dev/null || echo unknown))." >&2
-     echo "Working versions: 2020, 2023, 2025, 2026, 2027. See README.md." >&2; exit 1 ;;
+     echo "Working versions: 2020, 2023, 2024, 2025, 2026, 2027. See README.md." >&2; exit 1 ;;
 esac
 BOTTLE="${BOTTLE:-$(revit_bottle_default "$YEAR")}"
 # the name ends up in shell commands, AppleScript and app names: keep it plain
@@ -57,11 +57,11 @@ if [ ! -d "$DST" ] && [ -z "$GET" ] && [ -z "$part1" ] && [ -z "$(find "$SRC" -m
 fi
 RX="$ROOT/installers/redist/win7sp1/x64"
 [ -f "$RX/msls31.dll" ] || need "installers/redist/win7sp1/x64/msls31.dll missing" "copy C:\\Windows\\System32\\msls31.dll from any Windows 7/10 x64, see installers/README.md"
-if [ "$YEAR" = 2020 ] || [ "$YEAR" = 2023 ]; then # .NET Framework 4.7/4.8 goes on top of a real 4.0
+case "$(revit_dotnet "$YEAR")" in netfx47|netfx48) # .NET Framework 4.7/4.8 goes on top of a real 4.0
   [ -f "$ROOT/installers/redist/dotNetFx40_Full_x86_x64.exe" ] \
-    || need "installers/redist/dotNetFx40_Full_x86_x64.exe missing" ".NET Framework 4.0 offline installer from Microsoft, see installers/README.md"
-fi
-if [ "$YEAR" -ge 2025 ]; then
+    || need "installers/redist/dotNetFx40_Full_x86_x64.exe missing" ".NET Framework 4.0 offline installer from Microsoft, see installers/README.md" ;;
+esac
+if [ "$YEAR" -ge 2024 ]; then
   [ -f "$ROOT/installers/redist/webview2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe" ] \
     || warn "no fresh WebView2 runtime in installers/redist/webview2/" \
             "optional but recommended: without it the start screen and Manage Links stay blank (installers/README.md)"
