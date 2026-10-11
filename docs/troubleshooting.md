@@ -4,7 +4,7 @@ Each entry: what you see → what to do. `<bottle>` is the bottle name, for exam
 
 ## Sign-in
 
-**Revit 2020 hangs on the splash screen right after the first sign-in.**
+**Revit 2020 or 2023 hangs on the splash screen right after the first sign-in.**
 → Quit Revit and start it again. Sign-in then comes from the cache. If Revit will not quit, stop the bottle:
 
 ```bash
@@ -43,7 +43,7 @@ Measured on Revit 2020. The install script for 2020 warns when the line is missi
 **Revit 2027: "default family templates is empty or invalid", no templates.**
 → Re-run the `revitini` step: `./scripts/install-odis.sh 2027 <bottle> revitini`.
 
-## Printing (Revit 2020)
+## Printing (Revit 2020, 2023)
 
 **"You need to install a printer".**
 → Use the **Revit PDF** printer. The install adds it. PDFs go to `~/Documents/Revit-PDF`. It needs Ghostscript:

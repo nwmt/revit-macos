@@ -4,14 +4,14 @@
 # Usage: ./scripts/install-odis.sh <year> <bottle> [steps...]
 #   default steps: vc fonts dotnet licensing svcshim idmgr rvt pkgs asc revitini register ncryptshim webview2 d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix wv2fix
 #   2023 (sign-in through AdSSO as in 2020, no WebView2/IdentityManager/ASC packages):
-#     vc fonts dotnet licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix
+#     vc fonts dotnet licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix pdfprinter
 # The installer must be extracted: ./scripts/inspect-installer.sh <year> --extract
 set -uo pipefail
 YEAR="${1:?specify a year}"; NAME="${2:?specify a bottle}"; shift 2
 STEPS=("$@")
 if [ ${#STEPS[@]} -eq 0 ]; then
   case "$YEAR" in
-    2023) STEPS=(vc fonts dotnet licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix) ;;
+    2023) STEPS=(vc fonts dotnet licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix pdfprinter) ;;
     *)    STEPS=(vc fonts dotnet licensing svcshim idmgr rvt pkgs asc revitini register ncryptshim webview2 d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix wv2fix) ;;
   esac
 fi
@@ -279,6 +279,22 @@ PY2
       rm -f "$B/drive_c/Program Files (x86)/Microsoft/EdgeWebView/Application/"[0-9]*/version*.dll # previous variant (runtime folder)
       w reg add 'HKCU\Software\Wine\AppDefaults\msedgewebview2.exe\DllOverrides' /v version /d native,builtin /f >>"$LOGDIR/wv2fix.log" 2>&1
       say wv2fix "$?" "version.dll (+version_orig.dll) → system32; AppDefaults msedgewebview2.exe version=native,builtin" ;;
+    pdfprinter) # "Revit PDF" printer, as in 2020: Wine PostScript driver + tools/pdf-printer/revitpdf.ppd (A4…A0, ARCH),
+                # port REVITPDF: → |scripts/ps2pdf-port.sh (Ghostscript → ~/Documents/Revit-PDF). The Mac has no CUPS queues,
+                # and without a printer Revit won't open Print/Page Setup.
+      "$ROOT/scripts/build-add-printer.sh" >>"$LOGDIR/pdfprinter.log" 2>&1
+      mkdir -p "$B/drive_c/rvt-pdf" "$B/drive_c/windows/system32/spool/drivers/x64/3"
+      cp "$ROOT/build/pdf-printer/add_printer.exe" "$ROOT/tools/pdf-printer/revitpdf.ppd" "$B/drive_c/rvt-pdf/"
+      # Wine's AddPrinterDriverEx copies only wineps.drv, and wineps looks for the PPD in the driver directory — copy it ourselves.
+      cp "$ROOT/tools/pdf-printer/revitpdf.ppd" "$B/drive_c/windows/system32/spool/drivers/x64/3/revitpdf.ppd"
+      command -v gs >/dev/null || [ -x /opt/homebrew/bin/gs ] || echo "   warning: no Ghostscript (brew install ghostscript) — you will get .ps instead of .pdf" >&2
+      {
+        w reg add 'HKLM\Software\Microsoft\Windows NT\CurrentVersion\Ports' /v 'REVITPDF:' /t REG_SZ /d '' /f
+        w reg add 'HKCU\Software\Wine\Printing\Spooler' /v 'REVITPDF:' /t REG_SZ /d "|$ROOT/scripts/ps2pdf-port.sh" /f
+        w regsvr32 /s wineps.drv
+        w 'C:\rvt-pdf\add_printer.exe' 'Revit PDF' 'C:\rvt-pdf\revitpdf.ppd' 'REVITPDF:'
+      } >>"$LOGDIR/pdfprinter.log" 2>&1
+      say pdfprinter "$?" "Revit PDF → REVITPDF: → scripts/ps2pdf-port.sh" ;;
     revitini) # Revit takes template and library paths from [Directories<Select>] in Revit.ini. After installing 2027
               # [Language] Select=en-US (2026 has ENU) → there's no [Directoriesen-US] section → "The path specified for default
               # family templates is empty or invalid", empty template and library lists. Set Select=ENU.
