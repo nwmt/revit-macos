@@ -4,7 +4,8 @@
 # Usage: tests/revit-cli.sh
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-TOP="$(cd "$(mktemp -d)" && pwd -P)"   # /var → /private/var: lsof reports real paths
+TMP="$(mktemp -d)" && [ -d "$TMP" ] || { echo "mktemp failed" >&2; exit 1; }   # an empty TOP would be the current folder
+TOP="$(cd "$TMP" && pwd -P)" || exit 1   # /var → /private/var: lsof reports real paths
 T="$TOP/sand box"                      # a space in every path: quoting bugs show up here
 R="$T/repo"; H="$T/home"; CXF="$T/cx"; CALLS="$T/calls"
 BOTTLES="$H/Library/Application Support/CrossOver/Bottles"
@@ -76,6 +77,13 @@ run() { # $1 = what to type at the prompt; rest = ./revit arguments. Sets OUT an
 run_install() { # real install.sh in the sandbox; $1 = extra env (VAR=value or ""), rest = arguments
   local extra="$1"; shift; cp "$REPO/install.sh" "$R/install.sh"
   OUT="$(cd / && env -u INSTALL_DRYRUN -u CX_RECREATE HOME="$H" REVIT_CX="$CXF" $extra /bin/bash "$R/install.sh" "$@" 2>&1)"; RC=$?
+}
+run_racing() { # like run, but runs shell code $1 while ./revit waits at its prompt, then types $2
+  local act="$1" input="$2" i; shift 2; : > "$CALLS"; : > "$T/out"
+  { for i in $(seq 1 100); do grep -q "to continue" "$T/out" 2>/dev/null && break; sleep 0.1; done
+    eval "$act"; printf '%s\n' "$input"; } \
+    | (cd / && env -u REVIT_YEAR -u INSTALL_DRYRUN -u CX_RECREATE HOME="$H" REVIT_CX="$CXF" /bin/bash "$R/revit" "$@" > "$T/out" 2>&1)
+  RC=$?; OUT="$(cat "$T/out")"
 }
 expect() { # $1 = test name, $2 = exit code, $3 = text the output contains ("" = anything)
   if [ "$RC" = "$2" ] && { [ -z "$3" ] || grep -qF -- "$3" <<<"$OUT"; }; then ok "$1"
@@ -202,6 +210,10 @@ check "failed delete: apps kept" test -d "$H/Applications/Revit 2024 (rvt2024-a)
 reset; apps 2024 rvt2024-a; run "2024" remove 2024; expect "remove finishes a partial remove" 0 "Removed Revit 2024 (rvt2024-a)."
 check "partial remove: apps gone" test ! -d "$H/Applications/Revit Viewer 2024 (rvt2024-a).app"
 reset; run "" remove 2024;           expect "nothing to remove" 0 "Nothing to remove for Revit 2024 (rvt2024-a)."
+reset; apps 2024 rvt2024-a; run_racing 'bottle rvt2024-a 2024 2024' 2024 remove 2024
+expect "a bottle that appears during the prompt stops remove" 1 "Nothing was removed."
+check "appeared bottle: not deleted" test -d "$BOTTLES/rvt2024-a"
+check "appeared bottle: apps kept" test -d "$H/Applications/Revit 2024 (rvt2024-a).app"
 reset; rm -rf "$CXF"; bottle rvt2024-a 2024 2024; run "2024" remove 2024; expect "remove without CrossOver" 1 "CrossOver not found"
 
 # ---- end ----

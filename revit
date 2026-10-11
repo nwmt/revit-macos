@@ -175,18 +175,21 @@ case "$CMD" in
     if [ -d "$B" ]; then need_crossover; fi
     verify
     extracted_plan
-    if [ ! -d "$B" ] && [ "$NA" -eq 0 ] && [ "$DROP_X" = 0 ]; then echo "Nothing to remove for Revit $YEAR ($NAME)."; exit 0; fi
+    HAD_B=0; [ -d "$B" ] && HAD_B=1
+    if [ "$HAD_B" = 0 ] && [ "$NA" -eq 0 ] && [ "$DROP_X" = 0 ]; then echo "Nothing to remove for Revit $YEAR ($NAME)."; exit 0; fi
     echo "This deletes:"
-    [ -d "$B" ] && printf '  %-48s %s\n' "bottle $NAME" "$(size "$B")"
+    [ "$HAD_B" = 1 ] && printf '  %-48s %s\n' "bottle $NAME" "$(size "$B")"
     [ "$DROP_X" = 1 ] && printf '  %-48s %s\n' "installers/extracted/revit$YEAR (unpacked files)" "$(size "$X")"
     for a in ${APPS[@]+"${APPS[@]}"}; do echo "  $(tilde "$a")"; done
-    [ -d "$B" ] && docs_note
+    [ "$HAD_B" = 1 ] && docs_note
     echo "Kept: installers/revit$YEAR (your downloads)."
     [ -n "$KEEP_X" ] && echo "Kept: installers/extracted/revit$YEAR ($KEEP_X)."
     confirm
     # again, right before deleting: the bottle may have changed, or Revit or an install started, while the user was reading
     verify
     # the second look may only shrink what was confirmed, never add to it
+    [ "$HAD_B" = 1 ] || [ ! -e "$B" ] \
+      || die "Bottle $NAME appeared while you were reading. Nothing was removed. Run ./revit remove $YEAR$SFX again."
     want_x="$DROP_X"; extracted_plan
     if [ "$want_x" = 1 ] && [ "$DROP_X" = 0 ]; then echo "Kept: installers/extracted/revit$YEAR ($KEEP_X)."; fi
     [ "$want_x" = 1 ] || DROP_X=0
