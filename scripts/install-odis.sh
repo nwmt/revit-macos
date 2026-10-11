@@ -146,6 +146,7 @@ for s in "${STEPS[@]}"; do
     asc) # Autodesk Shared Components (pkg ASC, type EXE): an ODIS bundle itself — 7z subpackages into one folder
          # %COMMONPROGRAMFILES%\Autodesk Shared\Components\<year>\<version> + ASCRegistryTool --registry set (postInstall).
          # Without it Revit 2026 fails at startup: "Autodesk Shared Components bundle is missing" (ASC status 6).
+      python3 -I "$ROOT/tools/odis.py" list "$DIST" | cut -f1 | grep -qx ASC || { say asc skip "no ASC package (2025)"; continue; }
       AE="$DIST/$(python3 -I "$ROOT/tools/odis.py" get "$DIST" ASC | cut -f4)"; AX="$(dirname "$AE")/x" # 2026: x64/ASC, 2027: x64/ASC2
       [ -f "$AX/setup.xml" ] || 7zz x -y -o"$AX" "$AE" >>"$LOGDIR/asc.log" 2>&1
       ver="$(grep -oE '<BuildNumber[^>]*>[0-9.]+' "$AX/setup.xml" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
@@ -330,13 +331,13 @@ PY
     revitini) # Revit takes template and library paths from [Directories<Select>] in Revit.ini. After installing 2027
               # [Language] Select=en-US (2026 has ENU) → there's no [Directoriesen-US] section → "The path specified for default
               # family templates is empty or invalid", empty template and library lists. Set Select=ENU.
-              # Defaults for new users (2026+, values as Revit writes them after changing Options by hand):
+              # Defaults for new users (2025+, values as Revit writes them after changing Options by hand):
               #   [Graphics] Antialiasing=0 AntialiasingOptions=1 — anti-aliasing off: smoother under Wine, and DXMT draws
               #   a black view with it; [AppFrame] Theme, [Colors] CanvasTheme — 0 dark, 1 light (Revit API UITheme/CanvasTheme),
               #   from the macOS appearance at install time, or REVIT_THEME=dark|light.
               # Revit.ini lives in ProgramData (seed for new users) and in the user profile; Revit must be closed.
       keys=(Language.Select=ENU)
-      if [ "$YEAR" -ge 2026 ]; then
+      if [ "$YEAR" -ge 2025 ]; then
         theme="${REVIT_THEME:-$(defaults read -g AppleInterfaceStyle 2>/dev/null | grep -qi dark && echo dark || echo light)}"
         t=1; [ "$theme" = dark ] && t=0; theme+=", from ${REVIT_THEME:+REVIT_THEME}"; [ -n "${REVIT_THEME:-}" ] || theme+="macOS"
         keys+=(Graphics.Antialiasing=0 Graphics.AntialiasingOptions=1 AppFrame.Theme=$t Colors.CanvasTheme=$t)
