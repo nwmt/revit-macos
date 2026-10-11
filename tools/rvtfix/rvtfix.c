@@ -26,6 +26,9 @@
  *    browser process command line (GetCommandLineW), so give it ours plus the flag: replace the GetCommandLineW exports
  *    of kernelbase and kernel32 (Wine's returns its own copy, not the PEB string) before libcef.dll loads.
  *    Only if libcef.dll sits next to Revit.exe (2025) or in its CefSharp folder (2023).
+ *    2025 also gets "--disable-gpu": with only --in-process-gpu its start screen turns black after a few
+ *    maximize/restore toggles (until the window is resized); software drawing keeps it right at the same speed.
+ *    Not tried on 2023 yet, so 2023 keeps the flag it was tested with.
  *    Custom flags: RVTFIX_CEF_ARGS; empty disables.
  */
 #include <windows.h>
@@ -191,18 +194,20 @@ static LPWSTR WINAPI hook_getcmdline(void) { return cef_cmdline; }
 
 static void fix_cef(void)
 {
-    WCHAR args[1024] = L"--in-process-gpu", path[MAX_PATH], *slash;
+    WCHAR args[1024], path[MAX_PATH], *slash;
+    const WCHAR *def = L"--in-process-gpu";                  /* 2023: CefSharp\libcef.dll */
     char msg[1600];
-    DWORD n = GetEnvironmentVariableW(L"RVTFIX_CEF_ARGS", args, 1024);
-    if (!n && GetLastError() != ERROR_ENVVAR_NOT_FOUND) args[0] = 0;
-    else if (!n) lstrcpyW(args, L"--in-process-gpu");
-    if (!args[0]) { trace("[rvtfix] CefSharp: disabled (RVTFIX_CEF_ARGS is empty)\n"); return; }
     if (!GetModuleFileNameW(NULL, path, MAX_PATH) || !(slash = wcsrchr(path, L'\\'))) return;
     lstrcpyW(slash + 1, L"CefSharp\\libcef.dll");
     if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) {
         lstrcpyW(slash + 1, L"libcef.dll");
         if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) return; /* no CefSharp in this Revit */
+        def = L"--in-process-gpu --disable-gpu";             /* 2025: libcef.dll next to Revit.exe */
     }
+    DWORD n = GetEnvironmentVariableW(L"RVTFIX_CEF_ARGS", args, 1024);
+    if (!n && GetLastError() != ERROR_ENVVAR_NOT_FOUND) args[0] = 0;
+    else if (!n || n >= 1024) lstrcpyW(args, def);
+    if (!args[0]) { trace("[rvtfix] CefSharp: disabled (RVTFIX_CEF_ARGS is empty)\n"); return; }
     const WCHAR *cur = GetCommandLineW();
     cef_cmdline = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (lstrlenW(cur) + 2 + lstrlenW(args)) * sizeof(WCHAR)); /* never freed */
     if (!cef_cmdline) return;
