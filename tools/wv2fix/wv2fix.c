@@ -24,6 +24,11 @@
  * Chromium resizes the panel, CrossOver copies it into a new, fully dirty surface, then resizing the panel's child
  * window takes the parent's surface and flushes it under the lock). PeekMessage both before and after the change.
  * Disable: WV2FIX=0 environment variable.
+ *
+ * In a program that embeds WebView2 (AppDefaults <exe> version=native,builtin; Enscape.RendererHost.exe for its Asset
+ * Library) this DLL also loads tools/rvtfix if rvtfix.dll sits next to the exe: rvtfix gives the browser the same
+ * arguments as in Revit, and it has to be in place before the program creates its WebView2 environment. The program
+ * reads its own file version at startup, which loads version.dll early enough.
  */
 #include <windows.h>
 
@@ -198,7 +203,14 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
 {
     if (reason == DLL_PROCESS_ATTACH) {
         char v[8];
+        WCHAR p[MAX_PATH], *slash;
         DisableThreadLibraryCalls(inst);
+        if (GetModuleFileNameW(NULL, p, MAX_PATH) && (slash = wcsrchr(p, L'\\')) && slash - p < MAX_PATH - 12 &&
+            lstrcmpiW(slash + 1, L"msedgewebview2.exe")) {
+            lstrcpyW(slash + 1, L"rvtfix.dll");
+            if (GetFileAttributesW(p) != INVALID_FILE_ATTRIBUTES)
+                trace(LoadLibraryW(p) ? "[wv2fix] rvtfix.dll next to the exe: loaded\n" : "[wv2fix] rvtfix.dll next to the exe: failed\n");
+        }
         if (GetEnvironmentVariableA("WV2FIX", v, sizeof(v)) && v[0] == '0') return TRUE;
         GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
                            (LPCWSTR)DllMain, &(HMODULE){0}); /* thunks point here, so never unload */

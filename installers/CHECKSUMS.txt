@@ -26,4 +26,5 @@ a5e760f77cf581d6a26f9d12c5b408dbded5c0a6dc4c955316e7de29e62843d3  addins/revitlo
 81c61845d01f3990edaa7f7a6ea796a27c37cb7c5e8ca85032afb2969cf8a996  addins/revitlookup/RevitLookup-2026.1.4-SingleUser.msi  (optional; GitHub lookup-foundation/RevitLookup release 2027.0.4)
 bf242d23f3ca8ae214f430aa29764f63e02756e7fcb620b21ca85965c8ee4476  addins/pyrevit7/pyRevit_7.0.0.26278_signed.exe  (optional; GitHub pyrevitlabs/pyRevit v7.0.0.26278+2233)
 d31f576cc4fb5bf0734efc3b424778e57e27f702f5440974ccd0f1ce438398eb  addins/enscape/Enscape-3.4.4-94564.msi  (optional; Enscape 3.4.4 from Chaos, build 94564)
+da4ae6323154772bc94524b94c773dd69097a173789981542fd44be8a4451845  addins/enscape/Enscape-4.18.2.1657-lts.exe  (optional; Enscape 4.18 LTS from Chaos, build 4.18.2.1657)
 9e21fa9767d4e76bc0cee065c1d40cc34384a114bfec4d70e6c981168a926802  redist/nuget/system.valuetuple.4.5.0.nupkg  (optional, for Enscape; nuget.org System.ValueTuple 4.5.0)

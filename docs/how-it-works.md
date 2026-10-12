@@ -69,20 +69,21 @@ Some fixes were carried over from another version as they are, without checking 
 | `trust` | Revit asks "This signed add-in has been found" on every start: under Wine it cannot save **Always Load** | Trust the add-ins' publishers ahead, as **Always Load** would |
 | `wpfsw` (2023–2026) | Black rectangles across Revit after add-ins load | WPF draws in software; `wpfhw` turns it back |
 | `enscape` (not by default; 2020) | Pressing Start in Enscape 3.4.4 crashes Revit; once past that, black models, a hang when its window is resized, and keys and mouse that do not move the view | Install Enscape with a `System.ValueTuple` that fits .NET 4.7; `tools/vkshim` as `vulkan-1.dll` in `system32`, loaded by Revit.exe only; Metal argument buffers and synchronous queue submits in MoltenVK, set in the bottle's environment |
+| `enscape` (not by default; 2027) | Enscape 4.18 turns down the Mac GPU and fails its license check; once past that, its menus hang it, Asset Library stays blank, and the Chaos sign-in and Asset Library services do not start | Install Enscape without its UI; `wminet_utils.dll` from the .NET 4.8 installer Enscape ships; for `Enscape.RendererHost.exe`: `tools/vkshim` as `vulkan-1.dll`, no `d3d11` (its interface draws in software), `tools/wv2fix` loading `tools/rvtfix` for its browser; the MoltenVK settings as for 2020; the two Chaos services through `tools/svcshim` |
 | `enscape-off` (not by default) | — | Remove the Enscape manifest so Enscape does not load; `enscape-on` restores it |
 
 ## Our shims in tools/
 
 | Tool | What it fixes |
 |---|---|
-| `tools/svcshim` (2023+), `tools/AdskSvcShim.cs` (2020, built in the bottle) | Autodesk licensing service does not register as a Windows service under Wine. The shim runs as the service and keeps the real one running. |
+| `tools/svcshim` (2023+), `tools/AdskSvcShim.cs` (2020, built in the bottle) | Autodesk licensing service does not register as a Windows service under Wine. The shim runs as the service and keeps the real one running. For Enscape 4.18 (2027) it runs Chaos sign-in and Asset Library as services, so they start with the bottle. |
 | `tools/ncrypt-shim` | Revit crashes on start and on save: Wine cannot import or sign with Revit's ECDSA key. The shim does it through Wine's bcrypt. |
 | `tools/wbem-shim` | Revit crashes on New Project and in Options: Wine's WMI handles only one async query at a time. The shim runs them one by one. |
 | `tools/tlbpin` | Views with text are 2–3× slower: RichEdit reloads a type library for every text element. The shim keeps it cached. |
 | `tools/d3d11-warp-shim` | Materials dialog does not open: it asks for a software D3D11 (WARP) device that D3DMetal lacks. The shim gives it the normal device. |
-| `tools/rvtfix` | Revit 2026+: crash from a drag-and-drop call on the browser's window, and white web panels with high CPU. Revit 2023–2025: blank start screen (CefSharp). The shim fixes the call and adds browser flags. |
-| `tools/wv2fix` | Revit 2024+: the built-in web browser (WebView2) crashes on clicks and resizes. The shim flushes pending drawing before such window changes and skips changes that change nothing. |
-| `tools/vkshim` | Enscape 3.4.4 in Revit 2020: Enscape turns down the Mac GPU (it asks for a Windows memory-sharing extension and a blend feature that MoltenVK lacks), creates a query type that MoltenVK refuses, and under Wine its view never gets the keyboard focus. The shim reports the missing pieces, gives it a query type MoltenVK has, and on a click activates Enscape's view as Windows does. DXVK, which draws Revit's own interface, sees Vulkan unchanged. |
+| `tools/rvtfix` | Revit 2026+: crash from a drag-and-drop call on the browser's window, and white web panels with high CPU. Revit 2023–2025: blank start screen (CefSharp). The shim fixes the call and adds browser flags. Enscape 4.18 (2027) gets the same browser flags for its Asset Library. |
+| `tools/wv2fix` | Revit 2024+: the built-in web browser (WebView2) crashes on clicks and resizes. The shim flushes pending drawing before such window changes and skips changes that change nothing. In Enscape 4.18 (2027) it loads `tools/rvtfix` as soon as Enscape starts. |
+| `tools/vkshim` | Enscape 3.4.4 in Revit 2020 and 4.18 in 2027: Enscape turns down the Mac GPU (it asks for a Windows memory-sharing extension and a blend feature that MoltenVK lacks), creates a query type that MoltenVK refuses, and under Wine its view never gets the keyboard focus. The shim reports the missing pieces, gives it a query type MoltenVK has, and on a click activates Enscape's view as Windows does. DXVK, which draws Revit's own interface, sees Vulkan unchanged. |
 | `tools/pdf-printer` | The bottle has no printers. Adds the **Revit PDF** printer; Ghostscript turns its output into PDFs in `~/Documents/Revit-PDF`. |
 | `tools/revitini.py` | Writes the `Revit.ini` settings of the `revitini` step (UTF-16, as Revit keeps it). |
 | `tools/win_shortcut.py` | Reads the Start Menu shortcuts the installer creates and builds the macOS apps from them, with the same command line and icon. |

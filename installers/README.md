@@ -50,10 +50,11 @@ github.com/pyrevitlabs/pyRevit.
 | pyRevit 4.8.12 | 2020 | `pyRevit_4.8.12.22247_signed.exe` | `installers/addins/pyrevit48/` |
 | pyRevit 7.0.0 | 2023–2026 | `pyRevit_7.0.0.26278_signed.exe` | `installers/addins/pyrevit7/` |
 | Enscape 3.4.4 | 2020 | `Enscape-3.4.4-94564.msi` | `installers/addins/enscape/` |
+| Enscape 4.18 LTS | 2027 | `Enscape-4.18.2.1657-lts.exe` | `installers/addins/enscape/` |
 | System.ValueTuple 4.5.0, for Enscape | 2020 | `system.valuetuple.4.5.0.nupkg` | `installers/redist/nuget/` |
 
-`./revit addins` does not install Enscape; [Revit 2020](../versions/2020.md) says how. Enscape comes from your Chaos
-account, System.ValueTuple from nuget.org.
+`./revit addins` does not install Enscape; [Revit 2020](../versions/2020.md) and [Revit 2027](../versions/2027.md)
+say how. Enscape comes from your Chaos account, System.ValueTuple from nuget.org.
 
 ## Disk space
 
@@ -125,7 +126,9 @@ installers/
 │   ├── revitlookup/RevitLookup-<year>….msi
 │   ├── pyrevit48/pyRevit_4.8.12.22247_signed.exe          2020
 │   ├── pyrevit7/pyRevit_7.0.0.26278_signed.exe            2023–2026
-│   └── enscape/Enscape-3.4.4-94564.msi                    2020
+│   └── enscape/
+│       ├── Enscape-3.4.4-94564.msi                        2020
+│       └── Enscape-4.18.2.1657-lts.exe                    2027
 └── extracted/                                             created by ./revit install; safe to delete afterwards
 ```
 
