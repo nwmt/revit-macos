@@ -49,7 +49,7 @@ In install order. Normal install steps have "—" in What breaks.
 | `d3d9dxvk` | UI, Dynamo and Direct3D 9 panels hang or are unreliable | DXVK for Direct3D 9 | all |
 | `dpipatch` | Crash when opening a view (a Windows function Wine lacks) | Patch one import in a copy of the DLL | 2023+ |
 | `richedit` | Text in views and dialogs fails; crash on text when creating a project | Microsoft RichEdit DLLs for Revit | all |
-| `tlbpin` | Creating views with text is 2–3× slower | Cache for a type library | all |
+| `tlbpin` | Creating views with text is 2–3× slower; long edits poll the mouse slowly | Cache for a type library and for the cursor position | all |
 | `warpshim` | Materials dialog does not open | Software D3D11 device → normal device | all |
 | `gdoff` | Generative Design error on start | Turn the add-in off | 2023+ |
 | `rvtfix` | Start screen blank or white; 2026+: the browser uses about 60% CPU and the view is slow | Browser draws inside Revit, with flags that make it draw | 2023+ |
@@ -79,7 +79,7 @@ Some fixes were carried over from another version as they are, without checking 
 | `tools/svcshim` (2023+), `tools/AdskSvcShim.cs` (2020, built in the bottle) | Autodesk licensing service does not register as a Windows service under Wine. The shim runs as the service and keeps the real one running. For Enscape 4.18 (2027) it runs Chaos sign-in and Asset Library as services, so they start with the bottle. |
 | `tools/ncrypt-shim` | Revit crashes on start and on save: Wine cannot import or sign with Revit's ECDSA key. The shim does it through Wine's bcrypt. |
 | `tools/wbem-shim` | Revit crashes on New Project and in Options: Wine's WMI handles only one async query at a time. The shim runs them one by one. |
-| `tools/tlbpin` | Views with text are 2–3× slower: RichEdit reloads a type library for every text element. The shim keeps it cached. |
+| `tools/tlbpin` | Views with text are 2–3× slower: RichEdit reloads a type library for every text element. Long edits check the mouse hundreds of thousands of times, and while the mouse is still each check asks macOS (~12 us instead of under 1 us). The shim caches the type library and reuses the cursor position for 10 ms. |
 | `tools/d3d11-warp-shim` | Materials dialog does not open: it asks for a software D3D11 (WARP) device that D3DMetal lacks. The shim gives it the normal device. |
 | `tools/rvtfix` | Revit 2026+: crash from a drag-and-drop call on the browser's window, and white web panels with high CPU. Revit 2023–2025: blank start screen (CefSharp). The shim fixes the call and adds browser flags. Enscape 4.18 (2027) gets the same browser flags for its Asset Library. |
 | `tools/wv2fix` | Revit 2024+: the built-in web browser (WebView2) crashes on clicks and resizes. The shim flushes pending drawing before such window changes and skips changes that change nothing. In Enscape 4.18 (2027) it loads `tools/rvtfix` as soon as Enscape starts. |

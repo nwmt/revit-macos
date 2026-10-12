@@ -236,6 +236,7 @@ PY
       printf '   %-10s exit=%-5s %s\n' samples "$?" "Samples\\rac_basic_sample_* → C:\\rvt-tests" | tee -a "$LOGDIR/summary.txt" ;;
     tlbpin) # hook oleaut32!LoadRegTypeLib for the TOM typelib in Revit.exe: otherwise native riched20 re-parses it for every text
             # (Wine doesn't cache released ITypeLibs) — view creation is 2–3x slower than on Windows.
+            # Also reuses win32u!NtUserGetCursorPos for 10 ms: long edits poll the mouse, ~12 us per call while it is still.
             # The msls31.dll shim (tools/tlbpin) forwards everything to the real msls31_ms.dll. Run after richedit.
       "$ROOT/scripts/build-tlbpin.sh" >/dev/null
       RX="$ROOT/installers/redist/win7sp1/x64"
@@ -247,7 +248,7 @@ PY
         w reg delete 'HKLM\Software\Microsoft\Windows NT\CurrentVersion\Windows' /v LoadAppInit_DLLs /f
         rm -f "$B/drive_c/windows/system32/tlbpin.dll"
       } >>"$LOGDIR/tlbpin.log" 2>&1
-      printf '   %-10s exit=%-5s %s\n' tlbpin 0 "msls31.dll (shim + TOM LoadRegTypeLib cache) → msls31_ms.dll" | tee -a "$LOGDIR/summary.txt" ;;
+      printf '   %-10s exit=%-5s %s\n' tlbpin 0 "msls31.dll (shim + TOM LoadRegTypeLib and cursor position caches) → msls31_ms.dll" | tee -a "$LOGDIR/summary.txt" ;;
     *) echo "unknown step $s" >&2 ;;
   esac
 done

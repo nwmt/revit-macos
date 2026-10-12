@@ -1,6 +1,6 @@
 /*
  * SPDX-License-Identifier: MIT
- * tlbpin -- TOM type library (riched20) cache for Revit.exe; built as msls31.dll.
+ * tlbpin -- Revit.exe speedups: TOM type library (riched20) cache and cursor position cache; built as msls31.dll.
  *
  * Problem: native riched20 calls LoadRegTypeLib(LIBID_tom) for every text element and releases the
  * ITypeLib right away. Wine's typelib cache only lives while a reference is held, so the .tlb from
@@ -12,6 +12,12 @@
  * LIBID_tom with the same version/lcid is served from the cache (AddRef); other calls behave as in Wine:
  * QueryPathOfRegTypeLib + LoadTypeLib (neither is hooked). riched20 gets LoadRegTypeLib via
  * GetProcAddress, so the hook patches the function itself rather than the import table.
+ *
+ * Cursor position cache (Revit 2027): revitmfc polls the mouse during long edits (GetWindowRect, GetCursorPos,
+ * GetAsyncKeyState, PtInRect) -- ~21 % of "modifying the group by adding a curtain wall". While the mouse is still,
+ * Wine asks the macOS driver on every GetCursorPos (~12 us; on Windows < 1 us). win32u!NtUserGetCursorPos is
+ * hooked the same way (its 32-byte syscall stub is position-independent and is copied to a trampoline); a position
+ * is reused for CURSOR_TTL_MS. When the mouse moves, Wine updates the position from events anyway.
  *
  * Loading: a Line Services shim that riched20 loads on its own (delay import); all 79 exports are
  * PE forwarders to the real msls31_ms.dll (msls31.def). AppInit_DLLs does not work in CrossOver 26.
@@ -82,6 +88,68 @@ static HRESULT WINAPI hook_LoadRegTypeLib(REFGUID guid, WORD maj, WORD min, LCID
     return hr;
 }
 
+#define CURSOR_TTL_MS 10
+static BYTE *cursor_tramp;                 /* copy of the original win32u!NtUserGetCursorPos stub */
+static volatile LONG64 cursor_xy;          /* x in the low half, y in the high half */
+static volatile ULONGLONG cursor_at;       /* GetTickCount64 of the last real query */
+static LONG cursor_hits;
+
+static BOOL WINAPI hook_NtUserGetCursorPos(POINT *pt)
+{
+    ULONGLONG now = GetTickCount64();
+    BOOL ret;
+    if (pt && now - cursor_at < CURSOR_TTL_MS) {
+        LONG64 v = cursor_xy;
+        pt->x = (LONG)v;
+        pt->y = (LONG)(v >> 32);
+        InterlockedIncrement(&cursor_hits);
+        return TRUE;
+    }
+    ret = ((BOOL (WINAPI *)(POINT *))cursor_tramp)(pt);
+    if (ret && pt) {
+        cursor_xy = (LONG64)(ULONG)pt->x | ((LONG64)pt->y << 32);
+        cursor_at = now;
+    }
+    return ret;
+}
+
+/* mov r10, rcx; mov eax, <n>; then Wine's fixed syscall tail (no RIP-relative addressing) */
+static const BYTE stub_tail[24] = {0xf6, 0x04, 0x25, 0x08, 0x03, 0xfe, 0x7f, 0x01, 0x75, 0x03, 0x0f, 0x05,
+                                   0xc3, 0xeb, 0x01, 0xc3, 0xff, 0x14, 0x25, 0x00, 0x10, 0xfe, 0x7f, 0xc3};
+
+static void patch_jump(void *target, void *dest)
+{
+    BYTE patch[12] = {0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xe0}; /* mov rax, imm64; jmp rax */
+    DWORD old;
+    CopyMemory(patch + 2, &dest, sizeof(dest));
+    if (!VirtualProtect(target, sizeof(patch), PAGE_EXECUTE_READWRITE, &old)) {
+        trace("[tlbpin] VirtualProtect failed %lu\n", GetLastError());
+        return;
+    }
+    CopyMemory(target, patch, sizeof(patch));
+    VirtualProtect(target, sizeof(patch), old, &old);
+    FlushInstructionCache(GetCurrentProcess(), target, sizeof(patch));
+}
+
+static void install_cursor_hook(void)
+{
+    BYTE *stub = (BYTE *)GetProcAddress(GetModuleHandleW(L"win32u.dll"), "NtUserGetCursorPos");
+    DWORD old;
+    if (!stub || stub[0] != 0x4c || stub[1] != 0x8b || stub[2] != 0xd1 || stub[3] != 0xb8 ||
+        memcmp(stub + 8, stub_tail, sizeof(stub_tail))) {
+        trace("[tlbpin] win32u!NtUserGetCursorPos: unknown stub, not hooked\n");
+        return;
+    }
+    cursor_tramp = VirtualAlloc(NULL, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!cursor_tramp) return;
+    CopyMemory(cursor_tramp, stub, 32);
+    VirtualProtect(cursor_tramp, 4096, PAGE_EXECUTE_READ, &old);
+    FlushInstructionCache(GetCurrentProcess(), cursor_tramp, 32);
+    patch_jump(stub, (void *)hook_NtUserGetCursorPos);
+    trace("[tlbpin] win32u!NtUserGetCursorPos %p -> hook %p (cache %u ms)\n", stub, (void *)hook_NtUserGetCursorPos,
+          CURSOR_TTL_MS);
+}
+
 static void install_hook(void)
 {
     BYTE patch[12] = {0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xe0}; /* mov rax, imm64; jmp rax */
@@ -112,9 +180,10 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
             GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
                                (LPCWSTR)DllMain, &(HMODULE){0}); /* the hook code must never be unloaded */
             install_hook();
+            install_cursor_hook();
         }
-    } else if (reason == DLL_PROCESS_DETACH && hits) {
-        trace("[tlbpin] LIBID_tom cache hits: %ld\n", hits);
+    } else if (reason == DLL_PROCESS_DETACH && (hits || cursor_hits)) {
+        trace("[tlbpin] LIBID_tom cache hits: %ld, cursor cache hits: %ld\n", hits, cursor_hits);
     }
     return TRUE;
 }
