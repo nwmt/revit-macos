@@ -90,13 +90,14 @@ for s in "${STEPS[@]}"; do
     ;;
   trust)
     # "This signed add-in has been found" → "Always Load" adds the signer's certificate to the user's TrustedPublisher
-    # store; under Wine that write doesn't happen, so Revit asks again on every start. Do it for the add-ins in our
-    # Addins folder: the assemblies their .addin manifests name (absolute, or relative to the manifest).
+    # store; under Wine that write doesn't happen, so Revit asks again on every start. Do it for the add-ins in the user
+    # and all-users Addins folders (pyRevit 4.8 installs for all users): the assemblies their .addin manifests name
+    # (absolute, or relative to the manifest).
     files=()
-    for m in "$ADDINS"/*.addin; do
+    for m in "$ADDINS"/*.addin "$B/drive_c/ProgramData/Autodesk/Revit/Addins/$YEAR"/*.addin; do
       [ -f "$m" ] || continue
       while IFS= read -r a; do
-        case "$a" in [A-Za-z]:\\*) f="$B/drive_c/$(echo "${a:3}" | tr '\\' /)";; *) f="$ADDINS/$(echo "$a" | tr '\\' /)";; esac
+        case "$a" in [A-Za-z]:\\*) f="$B/drive_c/$(echo "${a:3}" | tr '\\' /)";; *) f="$(dirname "$m")/$(echo "$a" | tr '\\' /)";; esac
         [ -f "$f" ] && files+=("$f")
       done < <(grep -o '<Assembly>[^<]*' "$m" | sed 's/<Assembly>//' | tr -d '\r')
     done
