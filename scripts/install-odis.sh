@@ -228,10 +228,10 @@ PY2
     richedit) # native x64 RichEdit (Win7 SP1) for Revit.exe only: TOM in Wine's RichEdit is stubs → text in views crashes.
               # 2026: TextEngine loads MsftEdit.dll (2020 used riched20); Revit journal: "Failed to set default tab size"
               # (RichTextFormattingUtils.cpp) → captureTryCrash 0xc0000005 in generateViewSpecificGRep when creating a project.
-              # msftedit/riched20 delay-load msls31 and usp10; x64 msls31 comes from any Windows 7/10 x64 install (installers/README.md).
+              # msftedit/riched20 delay-load msls31 and usp10; x64 msls31 comes from a licensed Windows 7/10 x64 install (installers/README.md).
       RX="$ROOT/installers/redist/win7sp1/x64"
       [ -f "$RX/riched20.dll" ] || "$ROOT/scripts/get-win7-richedit.sh" >>"$LOGDIR/richedit.log" 2>&1
-      [ -f "$RX/msls31.dll" ] || { echo "no $RX/msls31.dll (x64, copy from any Windows 7/10 x64 install)" >&2; exit 1; }
+      [ -f "$RX/msls31.dll" ] || { echo "no $RX/msls31.dll (x64, copy from a licensed Windows 7/10 x64 install)" >&2; exit 1; }
       # msftedit goes only to system32: Revit looks in its own folder first, but the system32 copy is already loaded by then;
       # a second copy fails to register window classes, DllMain → FALSE, "Revit could not load …\MsftEdit.dll".
       rm -f "$B/drive_c/Program Files/Autodesk/Revit $YEAR/msftedit.dll"

@@ -1,7 +1,7 @@
 # Revit on Apple Silicon Macs
 
 Run Autodesk Revit for Windows on a Mac with [CrossOver](https://www.codeweavers.com/crossover).
-No Windows license, no virtual machine.
+No virtual machine, no Windows installation.
 
 ## Which versions work
 
@@ -32,8 +32,8 @@ fast Windows PC ([benchmarks](docs/benchmarks.md)).
 - Rosetta 2. If it is missing, `./revit install` tells you the command.
 - [Homebrew](https://brew.sh). The install steps below set it up.
 - Your own Revit license and installer from your Autodesk Account.
-- One file from any 64-bit Windows 7 or 10 PC: `C:\Windows\System32\msls31.dll`. A USB stick or an email to
-  yourself brings it to the Mac.
+- One file from a 64-bit Windows 7 or 10 PC with a Windows license: `C:\Windows\System32\msls31.dll`. A USB stick
+  or an email to yourself brings it to the Mac.
 
 ## Install
 
@@ -110,5 +110,5 @@ Run them in Terminal, in the project folder. In a new Terminal window, first typ
 ## License
 
 [MIT](LICENSE). This is an independent project, not affiliated with Autodesk. Autodesk does not support Revit on
-macOS. The project ships no Autodesk files: you use your own installer and license. Autodesk and Revit are
-trademarks of Autodesk, Inc.
+macOS. The project ships no Autodesk or Microsoft files: you use your own Revit installer and license. Autodesk and
+Revit are trademarks of Autodesk, Inc.

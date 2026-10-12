@@ -130,11 +130,11 @@ for s in "${STEPS[@]}"; do
       printf '   %-10s exit=%-5s %s\n' wbemshim "$?" "CLSID_WbemLocator (x64) -> system32\\wbem\\wbemshim.dll" | tee -a "$LOGDIR/summary.txt" ;;
     richedit) # native x64 RichEdit (Win7 SP1) for Revit.exe only: TOM in Wine's riched20 is stubs,
               # so RtfData == NULL and text in views crashes. riched20 delay-loads msls31.dll
-              # (Line Services); Win7 SP1 has no x64 build — copy it manually from any Windows 7/10 x64 install
+              # (Line Services); Win7 SP1 has no x64 build — copy it manually from a licensed Windows 7/10 x64 install
               # (C:\Windows\System32\msls31.dll) to installers/redist/win7sp1/x64/.
       RX="$ROOT/installers/redist/win7sp1/x64"
       [ -f "$RX/riched20.dll" ] || "$ROOT/scripts/get-win7-richedit.sh" >/dev/null
-      [ -f "$RX/msls31.dll" ] || { echo "no $RX/msls31.dll (x64, copy from any Windows 7/10 x64 install)" >&2; exit 1; }
+      [ -f "$RX/msls31.dll" ] || { echo "no $RX/msls31.dll (x64, copy from a licensed Windows 7/10 x64 install)" >&2; exit 1; }
       for dll in riched20 usp10 msls31; do
         cp "$RX/$dll.dll" "$B/drive_c/Program Files/Autodesk/Revit 2020/$dll.dll"
         # Revit loads riched20 by its full system32 path → put it there too; Wine's builtin stub goes to .wine-fake.

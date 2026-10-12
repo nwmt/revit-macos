@@ -57,7 +57,7 @@ if [ ! -d "$DST" ] && [ -z "$GET" ] && [ -z "$part1" ] && [ -z "$(find "$SRC" -m
        "download both files of the Autodesk download, see versions/$YEAR.md"
 fi
 RX="$ROOT/installers/redist/win7sp1/x64"
-[ -f "$RX/msls31.dll" ] || need "installers/redist/win7sp1/x64/msls31.dll missing" "copy C:\\Windows\\System32\\msls31.dll from any Windows 7/10 x64, see installers/README.md"
+[ -f "$RX/msls31.dll" ] || need "installers/redist/win7sp1/x64/msls31.dll missing" "copy C:\\Windows\\System32\\msls31.dll from a licensed Windows 7/10 x64 PC, see installers/README.md"
 case "$(revit_dotnet "$YEAR")" in netfx47|netfx48) # .NET Framework 4.7/4.8 goes on top of a real 4.0
   [ -f "$ROOT/installers/redist/dotNetFx40_Full_x86_x64.exe" ] \
     || need "installers/redist/dotNetFx40_Full_x86_x64.exe missing" ".NET Framework 4.0 offline installer from Microsoft, see installers/README.md" ;;
