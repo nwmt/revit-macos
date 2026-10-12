@@ -1,7 +1,7 @@
 # Our shim DLLs: the pinned prebuilt release and the "prebuilt or compile" rule. Source with . "$ROOT/scripts/lib/shims.sh"
 # After publishing a new release (git tag vX.Y.Z → .github/workflows/release.yml), bump both values below.
-SHIMS_VERSION=0.1.1
-SHIMS_SHA256=9dcdc322c9771c9399813c4236c9883df4c26f39e609bd9b8cd00bd01283a98c
+SHIMS_VERSION=0.2.0
+SHIMS_SHA256=322e8da4b3063eef6f40a357ddc9e73d9018fbb19b8e70c32ed3ed5be868f6a3
 SHIMS_REPO="${SHIMS_REPO:-nwmt/revit-macos}"
 # sources that end up in the DLLs: if any differ from the pinned tag, the release no longer matches them
 SHIMS_SOURCES=(tools/d3d11-warp-shim tools/ncrypt-shim tools/pdf-printer tools/rvtfix tools/svcshim tools/tlbpin tools/vkshim tools/wbem-shim tools/wv2fix)
