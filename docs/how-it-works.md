@@ -68,7 +68,8 @@ Some fixes were carried over from another version as they are, without checking 
 |---|---|---|
 | `trust` | Revit asks "This signed add-in has been found" on every start: under Wine it cannot save **Always Load** | Trust the add-ins' publishers ahead, as **Always Load** would |
 | `wpfsw` (2023–2026) | Black rectangles across Revit after add-ins load | WPF draws in software; `wpfhw` turns it back |
-| `enscape-off` (not by default) | Pressing Start in Enscape crashes Revit 2020 | Remove the Enscape manifest; `enscape-on` restores it |
+| `enscape` (not by default; 2020) | Pressing Start in Enscape 3.4.4 crashes Revit; once past that, black models, a hang when its window is resized, and keys and mouse that do not move the view | Install Enscape with a `System.ValueTuple` that fits .NET 4.7; `tools/vkshim` as `vulkan-1.dll` in `system32`, loaded by Revit.exe only; Metal argument buffers and synchronous queue submits in MoltenVK, set in the bottle's environment |
+| `enscape-off` (not by default) | — | Remove the Enscape manifest so Enscape does not load; `enscape-on` restores it |
 
 ## Our shims in tools/
 
@@ -81,6 +82,7 @@ Some fixes were carried over from another version as they are, without checking 
 | `tools/d3d11-warp-shim` | Materials dialog does not open: it asks for a software D3D11 (WARP) device that D3DMetal lacks. The shim gives it the normal device. |
 | `tools/rvtfix` | Revit 2026+: crash from a drag-and-drop call on the browser's window, and white web panels with high CPU. Revit 2023–2025: blank start screen (CefSharp). The shim fixes the call and adds browser flags. |
 | `tools/wv2fix` | Revit 2024+: the built-in web browser (WebView2) crashes on clicks and resizes. The shim flushes pending drawing before such window changes and skips changes that change nothing. |
+| `tools/vkshim` | Enscape 3.4.4 in Revit 2020: Enscape turns down the Mac GPU (it asks for a Windows memory-sharing extension and a blend feature that MoltenVK lacks), creates a query type that MoltenVK refuses, and under Wine its view never gets the keyboard focus. The shim reports the missing pieces, gives it a query type MoltenVK has, and on a click activates Enscape's view as Windows does. DXVK, which draws Revit's own interface, sees Vulkan unchanged. |
 | `tools/pdf-printer` | The bottle has no printers. Adds the **Revit PDF** printer; Ghostscript turns its output into PDFs in `~/Documents/Revit-PDF`. |
 | `tools/revitini.py` | Writes the `Revit.ini` settings of the `revitini` step (UTF-16, as Revit keeps it). |
 | `tools/win_shortcut.py` | Reads the Start Menu shortcuts the installer creates and builds the macOS apps from them, with the same command line and icon. |

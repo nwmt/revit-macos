@@ -5,7 +5,8 @@
 #   trust — trust the publishers of the add-ins in your Addins\<year> folder, as "Always Load" does (under Wine Revit
 #           can't save that choice and asks on every start); trust is per publisher, so it covers their other add-ins too
 #   net472 / net48 — available, but Revit 2020 crashes in clr.dll on them; don't use
-#   enscape-off / enscape-on — remove/restore the Enscape manifest (Start crashes Revit)
+#   enscape — Enscape 3.4.4 for Revit 2020 with its Vulkan fixes (not default: bring your own installer)
+#   enscape-off / enscape-on — remove/restore the Enscape manifest (Enscape does not load / loads again)
 #   wpfsw / wpfhw — software-rendered WPF (fixes black boxes from add-in windows) / revert
 #   check — only show state (.NET Release, .addin manifests)
 # Requires (installers/, see CHECKSUMS.txt):
@@ -118,6 +119,7 @@ for s in "${STEPS[@]}"; do
     echo "   $s: $(w reg query "$K" /v DisableHWAcceleration 2>/dev/null | tr -d '\r' | awk '/DisableHW/{print $3}')"
     ;;
   enscape)
+    [ "$YEAR" = 2020 ] || { echo "enscape: set up and tested for Revit 2020 only" >&2; exit 1; }
     # Enscape 3.4.4 (Revit 2019–2023); without UI the MSI needs ACCEPTEULA=1 (LaunchCondition, otherwise silent exit 67 = 1603).
     # ACCEPTEULA=1 accepts the Enscape EULA — run this step only if you accept it.
     cp "$I/addins/enscape/Enscape-3.4.4-94564.msi" "$B/drive_c/Enscape.msi"
@@ -129,10 +131,21 @@ for s in "${STEPS[@]}"; do
     VT="$B/drive_c/Program Files/Enscape/Bin64/System.ValueTuple.dll"
     [ -f "$VT.orig" ] || cp "$VT" "$VT.orig"
     unzip -p "$I/redist/nuget/system.valuetuple.4.5.0.nupkg" lib/net47/System.ValueTuple.dll > "$VT"
-    echo "   enscape exit=$RC; System.ValueTuple → net47 facade ($(wc -c <"$VT" | tr -d ' ') bytes)  $(( $(date +%s) - t0 ))s"
+    # Vulkan fixes (tools/vkshim): Enscape's GPU check, its query pools and the focus of its view under Wine/MoltenVK.
+    # Into system32: at Revit start DXVK (d3d9dxvk) loads vulkan-1.dll from there before Enscape does. Wine takes a
+    # native DLL from system32 only where native,builtin is set, here for Revit.exe. Wine's file is kept as .wine-fake.
+    [ -f "$ROOT/build/vkshim/vulkan-1.dll" ] || "$ROOT/scripts/build-vkshim.sh" >>"$LOGDIR/vkshim.log" 2>&1
+    S32="$B/drive_c/windows/system32"
+    [ -f "$S32/vulkan-1.dll.wine-fake" ] || cp "$S32/vulkan-1.dll" "$S32/vulkan-1.dll.wine-fake"
+    cp "$ROOT/build/vkshim/vulkan-1.dll" "$S32/vulkan-1.dll.new" && mv -f "$S32/vulkan-1.dll.new" "$S32/vulkan-1.dll"
+    w reg add 'HKCU\Software\Wine\AppDefaults\Revit.exe\DllOverrides' /v vulkan-1 /d native,builtin /f >>"$LOGDIR/wine.log" 2>&1
+    # CrossOver builds MoltenVK with Metal argument buffers off (Enscape's shaders do not compile: black geometry) and
+    # with asynchronous queue submits (Enscape hangs when its window is resized). Back to MoltenVK's own defaults.
+    "$ROOT/scripts/bottle-env.sh" "$NAME" MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=1 MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS=1 >/dev/null
+    echo "   enscape exit=$RC; System.ValueTuple → net47 facade ($(wc -c <"$VT" | tr -d ' ') bytes); Vulkan fixes in system32\\vulkan-1.dll  $(( $(date +%s) - t0 ))s"
     ;;
   enscape-off|enscape-on)
-    # Enscape Start crashes Revit — move the 2020 manifest to Addins\2020.off, leave the files alone.
+    # Turn Enscape off without uninstalling: move the 2020 manifest to Addins\2020.off, leave the files alone.
     AD="$B/drive_c/ProgramData/Autodesk/Revit/Addins/2020"; mkdir -p "$AD.off"
     if [ "$s" = enscape-off ]; then mv "$AD/0_Enscape.addin" "$AD.off/" 2>/dev/null; else mv "$AD.off/0_Enscape.addin" "$AD/" 2>/dev/null; fi
     echo "   $s: $(ls "$AD"/0_Enscape.addin 2>/dev/null || echo 'manifest disabled')"

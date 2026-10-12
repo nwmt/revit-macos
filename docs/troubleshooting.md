@@ -158,7 +158,12 @@ Revit 2020 only runs on the .NET 4.7 from its own installer.
 
 Tested on Revit 2020; other versions are not tested.
 
-Not supported: Enscape needs graphics features that CrossOver on a Mac does not have.
+Enscape needs graphics features that CrossOver on a Mac does not have. The `enscape` step installs Enscape 3.4.4
+together with fixes that give it what it needs.
+
+**Solution:** put the installer in place ([where](../installers/README.md#add-ins-optional)) and run
+`REVIT_YEAR=2020 ./scripts/d8-addins.sh rvt2020-a enscape trust`. If Enscape is already installed, this installs it
+again with the fixes.
 
 <details>
 <summary>Advanced: turn Enscape off so it does not load</summary>

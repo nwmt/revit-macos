@@ -4,7 +4,7 @@ SHIMS_VERSION=0.1.1
 SHIMS_SHA256=9dcdc322c9771c9399813c4236c9883df4c26f39e609bd9b8cd00bd01283a98c
 SHIMS_REPO="${SHIMS_REPO:-nwmt/revit-macos}"
 # sources that end up in the DLLs: if any differ from the pinned tag, the release no longer matches them
-SHIMS_SOURCES=(tools/d3d11-warp-shim tools/ncrypt-shim tools/pdf-printer tools/rvtfix tools/svcshim tools/tlbpin tools/wbem-shim tools/wv2fix)
+SHIMS_SOURCES=(tools/d3d11-warp-shim tools/ncrypt-shim tools/pdf-printer tools/rvtfix tools/svcshim tools/tlbpin tools/vkshim tools/wbem-shim tools/wv2fix)
 
 # For build-*.sh: $1 = the file it builds. Without the compiler, use the release DLL that get-shims.sh
 # unpacked; otherwise fetch the compiler and build. A developer with the toolchain always builds from source.

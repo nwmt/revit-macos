@@ -49,6 +49,11 @@ github.com/pyrevitlabs/pyRevit.
 | RevitLookup | 2026 | `RevitLookup-2026.1.4-SingleUser.msi` | `installers/addins/revitlookup/` |
 | pyRevit 4.8.12 | 2020 | `pyRevit_4.8.12.22247_signed.exe` | `installers/addins/pyrevit48/` |
 | pyRevit 7.0.0 | 2023–2026 | `pyRevit_7.0.0.26278_signed.exe` | `installers/addins/pyrevit7/` |
+| Enscape 3.4.4 | 2020 | `Enscape-3.4.4-94564.msi` | `installers/addins/enscape/` |
+| System.ValueTuple 4.5.0, for Enscape | 2020 | `system.valuetuple.4.5.0.nupkg` | `installers/redist/nuget/` |
+
+`./revit addins` does not install Enscape; [Revit 2020](../versions/2020.md) says how. Enscape comes from your Chaos
+account, System.ValueTuple from nuget.org.
 
 ## Disk space
 
@@ -114,11 +119,13 @@ installers/
 ├── redist/
 │   ├── win7sp1/x64/msls31.dll                             all versions
 │   ├── dotNetFx40_Full_x86_x64.exe                        2020, 2023, 2024
-│   └── webview2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe   2024 and newer, recommended
+│   ├── webview2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe   2024 and newer, recommended
+│   └── nuget/system.valuetuple.4.5.0.nupkg                Enscape, 2020
 ├── addins/                                                optional
 │   ├── revitlookup/RevitLookup-<year>….msi
 │   ├── pyrevit48/pyRevit_4.8.12.22247_signed.exe          2020
-│   └── pyrevit7/pyRevit_7.0.0.26278_signed.exe            2023–2026
+│   ├── pyrevit7/pyRevit_7.0.0.26278_signed.exe            2023–2026
+│   └── enscape/Enscape-3.4.4-94564.msi                    2020
 └── extracted/                                             created by ./revit install; safe to delete afterwards
 ```
 
