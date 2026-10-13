@@ -1,6 +1,6 @@
 # Shared wrappers for install steps in a CrossOver bottle. Source after setting NAME, ROOT, LOGDIR:
 #   . "$ROOT/scripts/lib/bottle.sh"
-# Provides: CX, B (bottle path), w (wine with wait), say (summary line), run_exe, msi_win, override.
+# Provides: CX, B (bottle path), w (wine with wait), say (summary line), run_exe, msi_win, override, sh_path.
 CX="/Applications/CrossOver.app/Contents/SharedSupport/CrossOver"
 B="$HOME/Library/Application Support/CrossOver/Bottles/$NAME"
 [ -d "$B" ] || { echo "no bottle $NAME" >&2; exit 1; }
@@ -39,4 +39,9 @@ msi_win() { # $1 = step, $2 = Windows path to MSI, rest = KEY=VALUE properties.
   # Wine returns the msiexec code as its low byte: 67 = 1603, 103 = 1639, 194 = 3010 (ok + reboot)
   say "$step" "$rc" "$msi ($((SECONDS - t0)) s)"
   return $rc
+}
+
+sh_path() { # a path inside a command that Wine runs with /bin/sh -c (the PDF printer port). Quoted only when it has to be,
+  # so a plain path is written exactly as before
+  case "$1" in *[!A-Za-z0-9/._-]*) printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")" ;; *) printf '%s' "$1" ;; esac
 }

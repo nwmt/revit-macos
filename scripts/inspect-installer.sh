@@ -45,7 +45,8 @@ fi
 # install steps take the updated packages. Its top-level setup.xml (the update bundle) is not copied. Done once per update.
 if [ -d "$DST" ]; then
   root="$(revit_dist "$YEAR")"
-  for u in $(ls "$SRC"/update/*.exe 2>/dev/null | sort -V); do
+  ups=(); while IFS= read -r u; do ups+=("$u"); done < <(ls "$SRC"/update/*.exe 2>/dev/null | sort -V)   # not $(ls): spaces
+  for u in ${ups[@]+"${ups[@]}"}; do
     grep -qxF "$(basename "$u")" "$root/applied-updates.txt" 2>/dev/null && continue
     echo "== applying update $(basename "$u")"
     7zz x -y -o"$root" "$u" x64 3rdParty >/dev/null || { echo "!! update failed: $u"; exit 1; }

@@ -64,8 +64,11 @@ for s in "${STEPS[@]}"; do
         say netfx48 "$([ $((rel)) -ge 528040 ] && echo 0 || echo 1)" "Release=$((rel)) (528040+ = 4.8)"; continue
       fi
       # every runtime the installer ships: an update laid over the base (inspect-installer.sh) adds a newer one (2026.5: 10.0 next to 8.0)
-      for x in $(ls "$DIST"/3rdParty/x64/dotNet/*/windowsdesktop-runtime-*.exe | sort -V); do run_exe "netdesk$(basename "$(dirname "$x")")" "$x" /install /quiet /norestart; done
-      for x in $(ls "$DIST"/3rdParty/x64/aspNetCore/*/aspnetcore-runtime-*.exe | sort -V); do run_exe "netasp$(basename "$(dirname "$x")")" "$x" /q /norestart; done
+      # into arrays first: a for over $(ls) splits a path with spaces, and a while-read loop would give wine its stdin
+      desk=(); while IFS= read -r x; do desk+=("$x"); done < <(ls "$DIST"/3rdParty/x64/dotNet/*/windowsdesktop-runtime-*.exe | sort -V)
+      asp=(); while IFS= read -r x; do asp+=("$x"); done < <(ls "$DIST"/3rdParty/x64/aspNetCore/*/aspnetcore-runtime-*.exe | sort -V)
+      for x in ${desk[@]+"${desk[@]}"}; do run_exe "netdesk$(basename "$(dirname "$x")")" "$x" /install /quiet /norestart; done
+      for x in ${asp[@]+"${asp[@]}"}; do run_exe "netasp$(basename "$(dirname "$x")")" "$x" /q /norestart; done
       ls "$B/drive_c/Program Files/dotnet/shared/"*/ 2>/dev/null | sed 's/^/   /' | tee -a "$LOGDIR/summary.txt" ;;
     licensing) # BitRock InstallBuilder, switches from pkg.licensing.xml
       AL="$B/drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing"
@@ -301,7 +304,7 @@ for s in "${STEPS[@]}"; do
       command -v gs >/dev/null || [ -x /opt/homebrew/bin/gs ] || echo "   warning: no Ghostscript (brew install ghostscript) — you will get .ps instead of .pdf" >&2
       {
         w reg add 'HKLM\Software\Microsoft\Windows NT\CurrentVersion\Ports' /v 'REVITPDF:' /t REG_SZ /d '' /f
-        w reg add 'HKCU\Software\Wine\Printing\Spooler' /v 'REVITPDF:' /t REG_SZ /d "|$ROOT/scripts/ps2pdf-port.sh" /f
+        w reg add 'HKCU\Software\Wine\Printing\Spooler' /v 'REVITPDF:' /t REG_SZ /d "|$(sh_path "$ROOT/scripts/ps2pdf-port.sh")" /f
         w regsvr32 /s wineps.drv
         w 'C:\rvt-pdf\add_printer.exe' 'Revit PDF' 'C:\rvt-pdf\revitpdf.ppd' 'REVITPDF:'
       } >>"$LOGDIR/pdfprinter.log" 2>&1

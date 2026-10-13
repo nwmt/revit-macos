@@ -17,7 +17,7 @@ DIST_UNIX="$(ls -d "$ROOT"/installers/extracted/revit2020/*/ | head -1)"
 DIST="Z:$(echo "${DIST_UNIX%/}" | tr '/' '\\')"
 RUN="$(date +%Y%m%d-%H%M%S)"
 LOGDIR="$ROOT/logs/d6-$NAME-$RUN"; mkdir -p "$LOGDIR"
-w() { "$CX/bin/wine" --bottle "$NAME" --wait-children "$@"; }
+. "$ROOT/scripts/lib/bottle.sh"   # w, sh_path
 # What the Setup.exe wizard normally passes to the MSIs. Without ADSK_SETUP_EXE the
 # LaunchCondition "Installed or ADSK_SETUP_EXE" fails (msiexec exit=67, silently).
 # Setup.exe builds INSTALLDIR from INSTALL_PATH (Setup.ini) + ADSK_INSTALL_PATH; in the MSI it is relative.
@@ -234,7 +234,7 @@ PY
       command -v gs >/dev/null || [ -x /opt/homebrew/bin/gs ] || echo "   warning: no Ghostscript (brew install ghostscript) — you will get .ps instead of .pdf" >&2
       {
         w reg add 'HKLM\Software\Microsoft\Windows NT\CurrentVersion\Ports' /v 'REVITPDF:' /t REG_SZ /d '' /f
-        w reg add 'HKCU\Software\Wine\Printing\Spooler' /v 'REVITPDF:' /t REG_SZ /d "|$ROOT/scripts/ps2pdf-port.sh" /f
+        w reg add 'HKCU\Software\Wine\Printing\Spooler' /v 'REVITPDF:' /t REG_SZ /d "|$(sh_path "$ROOT/scripts/ps2pdf-port.sh")" /f
         w regsvr32 /s wineps.drv
         w 'C:\rvt-pdf\add_printer.exe' 'Revit PDF' 'C:\rvt-pdf\revitpdf.ppd' 'REVITPDF:'
       } >>"$LOGDIR/pdfprinter.log" 2>&1
