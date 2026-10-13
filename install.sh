@@ -105,13 +105,16 @@ echo; echo "Plan:"; i=1; for s in "${PLAN[@]}"; do echo "  $i. $s"; i=$((i + 1))
 
 # ---- run ----
 export CX_DESC="Revit $YEAR"
+# logs/ holds every run of every bottle: the reports below look only at what this run wrote
+mkdir -p "$ROOT/logs"; START="$(mktemp)" || exit 1; trap 'rm -f "$START"' EXIT
+run_logs() { find "$ROOT/logs" -mindepth 1 -maxdepth 1 -newer "$START" -exec ls -td {} + 2>/dev/null; }   # newest first
 t0=$SECONDS; i=1
 for s in "${PLAN[@]}"; do
   echo; echo "==> [$i/${#PLAN[@]}] $s"
   # shellcheck disable=SC2086
   # entries are a script path plus plain words (the bottle name is validated above)
   "$ROOT"/$s || {
-    last="$(ls -td "$ROOT"/logs/* 2>/dev/null | head -1)"; [ -d "$last" ] && last="$last/summary.txt"
+    last="$(run_logs | head -1)"; [ -d "$last" ] && last="$last/summary.txt"
     echo; echo "Step failed: $s" >&2
     [ -f "$last" ] && { echo "Last log: $last" >&2; tail -15 "$last" | sed 's/^/  | /' >&2; }
     again="./revit install $YEAR$SFX"; [ -d "$B" ] && again="./revit rebuild $YEAR$SFX"
@@ -126,7 +129,7 @@ if [ ! -f "$(revit_dir_unix "$B" "$YEAR")/Revit.exe" ]; then
   echo; echo "Install finished, but Revit.exe is not in the bottle. Logs: ./revit logs $YEAR$SFX. To start over: ./revit rebuild $YEAR$SFX" >&2
   exit 1
 fi
-sum="$(ls -td "$ROOT"/logs/{d6,install}-"$BOTTLE"-*/ 2>/dev/null | head -1)summary.txt"
+sum="$(run_logs | grep -E "/(d6|install)-$BOTTLE-[0-9]{8}-[0-9]{6}\$" | head -1)"; sum="${sum:+$sum/summary.txt}"
 # not problems: a running service, and AdskLicensing's 84 (its service can't start under Wine; the licensing step fixes that up)
 if [ -f "$sum" ] && bad="$(grep -E 'exit=' "$sum" | grep -Ev 'exit=(0|3010|skip|ok|RUNNING)[[:space:]]|^ *licensing +exit=84 ')"; then
   echo; echo "Some steps reported problems (Revit may still work; details in $sum):"; printf '%s\n' "$bad" | sed 's/^/  /'

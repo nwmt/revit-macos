@@ -149,9 +149,11 @@ expect "a bottle that is a link is refused" 1 "Bottle rvt2024-t is a link to ano
 reset; rm -rf "$CXF"; bottle rvt2024-a 2024 2024; run "" stop 2024; expect "stop without CrossOver" 1 "CrossOver not found"
 reset; run "" logs 2024;             expect "logs when there are none" 1 "No logs for rvt2024-a yet."
 reset; mkdir -p "$R/logs/install-rvt2024-a-20261011-100000" "$R/logs/d7-rvt2024-a-default-20261011-110000" \
-  "$R/logs/install-rvt2025-a-20261011-120000" "$R/logs/install-rvt2024-a-test-20261011-130000"
+  "$R/logs/install-rvt2025-a-20261011-120000" "$R/logs/install-rvt2024-a-test-20261011-130000" \
+  "$R/logs/install-rvt2024-a-2-20261011-140000"; touch "$R/logs/d3-rvt2024-a-20261011-090000.log"
 run "" logs 2024;                    expect "logs works without a bottle" 0 "d7-rvt2024-a-default-20261011-110000"
-check "logs leaves out other bottles" eval '! grep -q -e rvt2025-a -e rvt2024-a-test <<<"$OUT"'
+check "logs lists log files too" grep -qF "logs/d3-rvt2024-a-20261011-090000.log" <<<"$OUT"
+check "logs leaves out other bottles" eval '! grep -q -e rvt2025-a -e rvt2024-a-test -e rvt2024-a-2- <<<"$OUT"'
 reset; ln -s "$BOTTLES/elsewhere" "$BOTTLES/rvt2024-a"; mkdir -p "$R/logs/install-rvt2024-a-20261011-100000"
 run "" logs 2024;                    expect "logs is not blocked by a bottle link" 0 "install-rvt2024-a-20261011-100000"
 reset; bottle rvt2024-a 2024 2024; run "" debug 2024; expect "debug starts Revit with logging" 0 "then run ./revit logs 2024."

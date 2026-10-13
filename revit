@@ -146,8 +146,11 @@ case "$CMD" in
     echo "Stopped Revit and everything else in $NAME. Start Revit again from ~/Applications." ;;
   logs)
     found=""
-    while IFS= read -r f; do   # <step>-<bottle>-<timestamp> or d7-<bottle>-<backend>-<timestamp>; not <bottle>-other
-      case "${f##*-"$NAME"-}" in [0-9]*|default-*|d3dmetal-*|dxmt-*|wined3d-*|dxvk-*) found="$found$f"$'\n' ;; esac
+    ts='[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]'
+    while IFS= read -r f; do   # <step>-<bottle>-<timestamp>[.log] or d7-<bottle>-<backend>-<timestamp>; step names have no "-",
+      # so the bottle name is matched whole: not the logs of <bottle>-2 or <bottle>-other
+      rest="${f##*/}"; rest="${rest#*-}"; [ "${rest#"$NAME"-}" != "$rest" ] || continue
+      case "${rest#"$NAME"-}" in $ts|$ts.log|default-$ts|d3dmetal-$ts|dxmt-$ts|wined3d-$ts|dxvk-$ts) found="$found$f"$'\n' ;; esac
     done < <(ls -td "$ROOT"/logs/*-"$NAME"-* 2>/dev/null)
     found="$(printf '%s' "$found" | head -8)"
     [ -n "$found" ] || die "No logs for $NAME yet. ./revit install and ./revit debug write them to logs/."
