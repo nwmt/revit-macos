@@ -116,9 +116,10 @@ for s in "${STEPS[@]}"; do
       run_exe idmgr "$DIST/x64/AdskIdentityManager/AdskIdentityManager-Installer.exe" --mode unattended
       ls "$B/drive_c/Program Files/Autodesk/" 2>/dev/null | sed 's/^/   Program Files\\Autodesk\\/' | tee -a "$LOGDIR/summary.txt" ;;
     rvt) # RVT.msi: LaunchCondition "Installed or ADSK_SETUP_EXE or ADSK_ODIS_SETUP"; properties from pkg.RVT.xml.
-         # licIsSvcUpgraded runs `InstHelper upgrade isUpgraded`; we run it first. Exit 0 (2027 after the svcshim step:
-         # "upgraded successfully" inside the MSI) → Autodesk's RVT.msi as it is. Otherwise (2020 once gave exit 100)
-         # → RVT-wine.msi (scripts/patch-rvt-msi.sh), where CLM_SKIP_SVCCHECK=1 skips that check.
+         # licIsSvcUpgraded runs `InstHelper upgrade isUpgraded` from the version folder; we run the same first. Exit 0
+         # (2027 after the svcshim step: "upgraded successfully" inside the MSI) → Autodesk's RVT.msi as it is. Otherwise
+         # → RVT-wine.msi (scripts/patch-rvt-msi.sh), where CLM_SKIP_SVCCHECK=1 skips that check. The helper in Current
+         # can pass where the one in the version folder fails (2020: the service answers /hubversion with "Current").
          # licRegister calls `InstHelper register --upgrade`, which in AdskLicensing 15 looks for FNP_Act_Installer.dll,
          # which no longer exists (exit 100 → 1603) → CLM_SKIP_REGISTER=1, register in the register step.
          # REVITLANGUAGE is a three-letter code (RVT.msi Property: ENU); hypothesis: Revit.ini [Language] Select comes from it. With en-US
@@ -126,7 +127,8 @@ for s in "${STEPS[@]}"; do
          # 2024: the update (inspect-installer.sh lays it over the base) is a patch to RVT.msi, x64/RVTSP*.msp (pkg.RVTSP.xml,
          # InstallFile type MSP), not a new RVT.msi as in 2026+ → applied in the same install with PATCH=.
       rvtmsi=RVT.msi; svccheck=()
-      if ! w 'C:\Program Files (x86)\Common Files\Autodesk Shared\AdskLicensing\Current\helper\AdskLicensingInstHelper.exe' \
+      ver="$(readlink "$B/drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing/Current")"; [ -n "$ver" ] || ver=Current
+      if ! w "C:\\Program Files (x86)\\Common Files\\Autodesk Shared\\AdskLicensing\\$ver\\helper\\AdskLicensingInstHelper.exe" \
            upgrade isUpgraded >>"$LOGDIR/svccheck.log" 2>&1; then
         [ -f "$DIST/x64/RVT/RVT-wine.msi" ] || "$ROOT/scripts/patch-rvt-msi.sh" "$NAME" "$YEAR" >>"$LOGDIR/patch.log" 2>&1
         rvtmsi=RVT-wine.msi; svccheck=(CLM_SKIP_SVCCHECK=1)

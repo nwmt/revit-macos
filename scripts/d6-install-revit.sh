@@ -76,8 +76,13 @@ for s in "${STEPS[@]}"; do
       [ -f "$SHIM_DIR/AdskSvcShim.exe" ] || { echo "   svcshim   build failed, see $LOGDIR/svcshim.log"; continue; }
       # sc config binPath= doesn't change the path under Wine → write ImagePath to the registry directly.
       # SCM reads service config only at startup → restart wineserver.
+      # The service is started from its version folder, not through Current: AdskLicensing 9.2 takes its version from
+      # the folder name, so through Current it answers /hubversion with "Current", and RVT.msi's licIsSvcUpgraded
+      # (the helper from the version folder) fails with exit 100.
+      ver="$(readlink "$SHIM_DIR/Current")"; [ -n "$ver" ] || ver=Current
       w reg add 'HKLM\System\CurrentControlSet\Services\AdskLicensingService' /v ImagePath /t REG_EXPAND_SZ \
-        /d '"C:\Program Files (x86)\Common Files\Autodesk Shared\AdskLicensing\AdskSvcShim.exe"' /f >>"$LOGDIR/svcshim.log" 2>&1
+        /d "\"C:\\Program Files (x86)\\Common Files\\Autodesk Shared\\AdskLicensing\\AdskSvcShim.exe\" \"C:\\Program Files (x86)\\Common Files\\Autodesk Shared\\AdskLicensing\\$ver\\AdskLicensingService\\AdskLicensingService.exe\"" \
+        /f >>"$LOGDIR/svcshim.log" 2>&1
       WINEPREFIX="$B" "$CX/bin/wineserver" -k 2>/dev/null
       # no --wait-children: the service never exits, we'd hang
       "$CX/bin/wine" --bottle "$NAME" sc start AdskLicensingService >>"$LOGDIR/svcshim.log" 2>&1 &
@@ -89,11 +94,12 @@ for s in "${STEPS[@]}"; do
     adsso)     msi adsso     'x64\AdSSO\AdSSO.msi' ;;
     rcl)       msi rcl       'x64\RCL\RCL.msi' "TRANSFORMS=:$LANG_UI.mst" "${SETUP_PROPS[@]}" \
                  'INSTALLDIR=C:\Program Files\Autodesk\Revit Content 2020' ;;
-    rvt) # licIsSvcUpgraded runs `InstHelper upgrade isUpgraded`; we run it first. Exit 0 → Autodesk's RVT.msi as it is.
-         # Otherwise (it once gave exit 100 here) → RVT-wine.msi (scripts/patch-rvt-msi.sh), where CLM_SKIP_SVCCHECK=1
-         # skips that check.
+    rvt) # licIsSvcUpgraded runs `InstHelper upgrade isUpgraded` from the version folder; we run the same first.
+         # Exit 0 → Autodesk's RVT.msi as it is. Otherwise (exit 100 when the service runs through Current, see svcshim)
+         # → RVT-wine.msi (scripts/patch-rvt-msi.sh), where CLM_SKIP_SVCCHECK=1 skips that check.
       rvtmsi=RVT.msi; svccheck=()
-      if ! w 'C:\Program Files (x86)\Common Files\Autodesk Shared\AdskLicensing\Current\helper\AdskLicensingInstHelper.exe' \
+      ver="$(readlink "$B/drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing/Current")"; [ -n "$ver" ] || ver=Current
+      if ! w "C:\\Program Files (x86)\\Common Files\\Autodesk Shared\\AdskLicensing\\$ver\\helper\\AdskLicensingInstHelper.exe" \
            upgrade isUpgraded >>"$LOGDIR/svccheck.log" 2>&1; then
         [ -f "$DIST_UNIX/x64/RVT/RVT-wine.msi" ] || "$ROOT/scripts/patch-rvt-msi.sh" "$NAME"
         rvtmsi=RVT-wine.msi; svccheck=(CLM_SKIP_SVCCHECK=1)
