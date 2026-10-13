@@ -25,8 +25,8 @@ branch_help() {
 # so the denylist itself cannot leak. Extra words: one per line in .git/info/denylist.
 personal_patterns() {
   printf '%s\n' "$HOME"
-  # stock Apple names ("MacBook", "MacBook-Pro", "iMac") identify no one and appear in docs
-  hostname -s 2>/dev/null | grep -Eiv '^(macbook|macbook-air|macbook-pro|imac|mac-mini|mac-studio|mac-pro|localhost)$'
+  # stock Apple names ("Mac", "MacBook", "MacBook-Pro", "iMac") identify no one and appear in docs
+  hostname -s 2>/dev/null | grep -Eiv '^(mac|macbook|macbook-air|macbook-pro|imac|mac-mini|mac-studio|mac-pro|localhost)$'
   git config user.email 2>/dev/null | grep -v 'users.noreply.github.com'
   [ -f "$(git rev-parse --git-dir)/info/denylist" ] && grep -v '^\s*\(#\|$\)' "$(git rev-parse --git-dir)/info/denylist"
   return 0
