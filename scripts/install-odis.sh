@@ -2,22 +2,22 @@
 # Installs Revit with the ODIS installer (2023–2027) component by component, bypassing Setup.exe.
 # Order and switches come from manifest/app.RVT.xml and x64/RVT/pkg.RVT.xml (Dependencies), see versions/<year>.md.
 # Usage: ./scripts/install-odis.sh <year> <bottle> [steps...]
-#   default steps: vc fonts dotnet licensing svcshim idmgr rvt pkgs asc revitini register ncryptshim webview2 d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix wv2fix
+#   default steps: vc fonts dotnet licensing svcshim idmgr rvt pkgs asc revitini register ncryptshim webview2 d3d9dxvk richedit tlbpin warpshim gdoff rvtfix wv2fix
 #   2025: the default + pdfprinter dynamo
 #   2023 (sign-in through AdSSO as in 2020, no WebView2/IdentityManager/ASC packages):
-#     vc fonts dotnet licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix pdfprinter dynamo
+#     vc fonts dotnet licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim d3d9dxvk richedit tlbpin warpshim gdoff rvtfix pdfprinter dynamo
 #   2024 (.NET Framework 4.8 as 2023; IdentityManager, WebView2 and RealDWG as 2025):
-#     vc fonts dotnet licensing svcshim idmgr rvt pkgs revitini register ncryptshim webview2 wbemshim d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix wv2fix pdfprinter dynamo
+#     vc fonts dotnet licensing svcshim idmgr rvt pkgs revitini register ncryptshim webview2 wbemshim d3d9dxvk richedit tlbpin warpshim gdoff rvtfix wv2fix pdfprinter dynamo
 # The installer must be extracted: ./scripts/inspect-installer.sh <year> --extract
 set -uo pipefail
 YEAR="${1:?specify a year}"; NAME="${2:?specify a bottle}"; shift 2
 STEPS=("$@")
 if [ ${#STEPS[@]} -eq 0 ]; then
   case "$YEAR" in
-    2023) STEPS=(vc fonts dotnet licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix pdfprinter dynamo) ;;
-    2024) STEPS=(vc fonts dotnet licensing svcshim idmgr rvt pkgs revitini register ncryptshim webview2 wbemshim d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix wv2fix pdfprinter dynamo) ;;
-    2025) STEPS=(vc fonts dotnet licensing svcshim idmgr rvt pkgs asc revitini register ncryptshim webview2 d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix wv2fix pdfprinter dynamo) ;;
-    *)    STEPS=(vc fonts dotnet licensing svcshim idmgr rvt pkgs asc revitini register ncryptshim webview2 d3d9dxvk dpipatch richedit tlbpin warpshim gdoff rvtfix wv2fix) ;;
+    2023) STEPS=(vc fonts dotnet licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim d3d9dxvk richedit tlbpin warpshim gdoff rvtfix pdfprinter dynamo) ;;
+    2024) STEPS=(vc fonts dotnet licensing svcshim idmgr rvt pkgs revitini register ncryptshim webview2 wbemshim d3d9dxvk richedit tlbpin warpshim gdoff rvtfix wv2fix pdfprinter dynamo) ;;
+    2025) STEPS=(vc fonts dotnet licensing svcshim idmgr rvt pkgs asc revitini register ncryptshim webview2 d3d9dxvk richedit tlbpin warpshim gdoff rvtfix wv2fix pdfprinter dynamo) ;;
+    *)    STEPS=(vc fonts dotnet licensing svcshim idmgr rvt pkgs asc revitini register ncryptshim webview2 d3d9dxvk richedit tlbpin warpshim gdoff rvtfix wv2fix) ;;
   esac
 fi
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; . "$ROOT/scripts/lib/versions.sh"
@@ -208,23 +208,6 @@ for s in "${STEPS[@]}"; do
       cp "$DX" "$S32"
       w reg add 'HKCU\Software\Wine\AppDefaults\Revit.exe\DllOverrides' /v d3d9 /d native,builtin /f >>"$LOGDIR/d3d9dxvk.log" 2>&1
       say d3d9dxvk "$?" "DXVK d3d9.dll → Revit $YEAR + system32 (AppDefaults Revit.exe d3d9=native,builtin)" ;;
-    dpipatch) # DesktopMFC.dll imports USER32!SetDialogControlDpiChangeBehavior (Win10 1703+), missing in CrossOver 26.3 Wine →
-              # the loader inserts a stub; opening a view raises EXCEPTION_WINE_STUB (Revit journal: captureTryCrash 0x80000100),
-              # the project closes, Revit crashes (0xe0434352). Rename the import to USER32!IsWindow: same registers,
-              # no side effects, TRUE for a live window. Original kept as DesktopMFC.dll.orig.
-      RD="$B/drive_c/Program Files/Autodesk/Revit $YEAR"
-      if [ ! -f "$RD/DesktopMFC.dll.orig" ] && ! LC_ALL=C grep -q -a SetDialogControlDpiChangeBehavior "$RD/DesktopMFC.dll"; then
-        say dpipatch skip "DesktopMFC.dll does not import SetDialogControlDpiChangeBehavior"; continue; fi
-      [ -f "$RD/DesktopMFC.dll.orig" ] || cp "$RD/DesktopMFC.dll" "$RD/DesktopMFC.dll.orig"
-      python3 -I - "$RD/DesktopMFC.dll.orig" "$RD/DesktopMFC.dll" >>"$LOGDIR/dpipatch.log" 2>&1 <<'PY2'
-import sys
-d = bytearray(open(sys.argv[1], "rb").read())
-old = b"SetDialogControlDpiChangeBehavior\0"; new = b"IsWindow\0".ljust(len(old), b"\0")
-n = d.count(old); assert n == 1, f"expected 1 occurrence, found {n}"
-i = d.find(old); d[i:i+len(old)] = new
-open(sys.argv[2], "wb").write(d); print("patched at", hex(i))
-PY2
-      say dpipatch "$?" "DesktopMFC.dll: import SetDialogControlDpiChangeBehavior -> IsWindow" ;;
     richedit) # native x64 RichEdit (Win7 SP1) for Revit.exe only: TOM in Wine's RichEdit is stubs → text in views crashes.
               # 2026: TextEngine loads MsftEdit.dll (2020 used riched20); Revit journal: "Failed to set default tab size"
               # (RichTextFormattingUtils.cpp) → captureTryCrash 0xc0000005 in generateViewSpecificGRep when creating a project.
@@ -255,20 +238,10 @@ PY2
       say tlbpin "$?" "msls31.dll (shim + TOM cache) → msls31_ms.dll" ;;
     warpshim) # the material browser requires D3D11 WARP, which D3DMetal lacks → "Can't get OGS device … Material Browser dialog
               # can't be created", the window doesn't open (as in 2020). d3dwp.dll (tools/d3d11-warp-shim): WARP → HARDWARE;
-              # in OGSDeviceDX11.dll L"D3D11.dll" → L"d3dwp.dll" (same length). Original kept as OGSDeviceDX11.dll.orig.
-      RD="$B/drive_c/Program Files/Autodesk/Revit $YEAR"
+              # the rvtfix step makes the loaded OGSDeviceDX11.dll load it instead of D3D11.dll.
       [ -f "$ROOT/build/d3dwp/d3dwp.dll" ] || "$ROOT/scripts/build-d3dwp.sh" >>"$LOGDIR/warpshim.log" 2>&1
-      cp "$ROOT/build/d3dwp/d3dwp.dll" "$RD/d3dwp.dll"
-      [ -f "$RD/OGSDeviceDX11.dll.orig" ] || cp "$RD/OGSDeviceDX11.dll" "$RD/OGSDeviceDX11.dll.orig"
-      python3 -I - "$RD/OGSDeviceDX11.dll.orig" "$RD/OGSDeviceDX11.dll" >>"$LOGDIR/warpshim.log" 2>&1 <<'PY2'
-import sys
-d = bytearray(open(sys.argv[1], "rb").read())
-old, new = "D3D11.dll\0".encode("utf-16le"), "d3dwp.dll\0".encode("utf-16le")
-n = d.count(old); assert n == 1, f"expected 1 occurrence of L'D3D11.dll', found {n}"
-i = d.find(old); d[i:i+len(old)] = new
-open(sys.argv[2], "wb").write(d); print("patched at", hex(i))
-PY2
-      say warpshim "$?" "d3dwp.dll + OGSDeviceDX11.dll: L\"D3D11.dll\" -> L\"d3dwp.dll\"" ;;
+      cp "$ROOT/build/d3dwp/d3dwp.dll" "$B/drive_c/Program Files/Autodesk/Revit $YEAR/d3dwp.dll"
+      say warpshim "$?" "d3dwp.dll → Revit $YEAR (rvtfix points OGSDeviceDX11.dll at it)" ;;
     wv2env) # HYPOTHESIS: Revit's embedded WebView2 (start screen, Manage Links) shows a blank window, msedgewebview2 processes
             # quietly exit without crashing. Like Qt WebEngine in 2020 (ssoenv) — no GPU compositing. For all processes in the bottle.
       "$ROOT/scripts/bottle-env.sh" "$NAME" 'WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--disable-gpu --disable-gpu-compositing' \
@@ -285,8 +258,13 @@ PY2
             # Wine's ole32 crashes with AccessViolation, Windows returns DRAGDROP_E_INVALIDHWND. Patching the ole32 name in the
             # ModelBrowser assembly isn't possible: Revit verifies add-in signatures ("Verify failed!") and won't load it.
             # 2023: adds --in-process-gpu for the CefSharp start screen, which stays blank otherwise.
+            # In memory, never on disk: OGSDeviceDX11.dll loads d3dwp.dll (warpshim step); DesktopMFC.dll gets USER32!IsWindow
+            # for SetDialogControlDpiChangeBehavior, which Wine lacks (opening a view crashed Revit).
+            # Bottles from before patched these two files on disk: put the originals (.orig) back.
+      RD="$B/drive_c/Program Files/Autodesk/Revit $YEAR"
+      for f in OGSDeviceDX11.dll DesktopMFC.dll; do [ ! -f "$RD/$f.orig" ] || mv -f "$RD/$f.orig" "$RD/$f"; done
       "$ROOT/scripts/build-ncrypt-shim.sh" >>"$LOGDIR/rvtfix.log" 2>&1; "$ROOT/scripts/build-rvtfix.sh" >>"$LOGDIR/rvtfix.log" 2>&1
-      cp "$ROOT/build/ncrypt-shim/ncrypt.dll" "$ROOT/build/rvtfix/rvtfix.dll" "$B/drive_c/Program Files/Autodesk/Revit $YEAR/"
+      cp "$ROOT/build/ncrypt-shim/ncrypt.dll" "$ROOT/build/rvtfix/rvtfix.dll" "$RD/"
       say rvtfix "$?" "rvtfix.dll + ncrypt.dll (loads rvtfix) → Revit $YEAR" ;;
     wv2fix) # the WebView2 browser crashes inside Revit: "err:system:user_check_not_lock BUG: holding USER lock" when WS_VISIBLE
             # is restored on a window nested in a Revit window (Chromium redraw lock; CrossOver 26.3) → start screen "reloads", empty

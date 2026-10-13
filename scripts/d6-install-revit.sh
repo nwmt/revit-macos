@@ -198,21 +198,16 @@ print("ok", p)
 PY
       printf '   %-10s exit=%-5s %s\n' dynamo "$?" "DynamoSettings.xml: UseHardwareAcceleration=false, IsBackgroundPreviewActive=false" | tee -a "$LOGDIR/summary.txt" ;;
     warpshim) # the material browser requires D3D11 WARP ("Dx11_WARP"), which D3DMetal lacks → Materials won't open.
-              # d3dwp.dll (tools/d3d11-warp-shim) replaces WARP with HARDWARE; in OGSDeviceDX11.dll the name L"D3D11.dll"
-              # is replaced with L"d3dwp.dll" (same length). Original kept as OGSDeviceDX11.dll.orig.
+              # d3dwp.dll (tools/d3d11-warp-shim) replaces WARP with HARDWARE; tools/rvtfix (loaded by our ncrypt.dll) makes the
+              # loaded OGSDeviceDX11.dll load it instead of D3D11.dll, in memory. Bottles from before patched OGSDeviceDX11.dll
+              # on disk: put the original (.orig) back. rvtfix's CefSharp flag (2023) is off here: 2020 uses CefSharp for
+              # the Dynamo library and other panels that work without it, and the flag was never tried on them.
       RD="$B/drive_c/Program Files/Autodesk/Revit 2020"
       [ -f "$ROOT/build/d3dwp/d3dwp.dll" ] || "$ROOT/scripts/build-d3dwp.sh" >/dev/null
-      cp "$ROOT/build/d3dwp/d3dwp.dll" "$RD/d3dwp.dll"
-      [ -f "$RD/OGSDeviceDX11.dll.orig" ] || cp "$RD/OGSDeviceDX11.dll" "$RD/OGSDeviceDX11.dll.orig"
-      python3 -I - "$RD/OGSDeviceDX11.dll.orig" "$RD/OGSDeviceDX11.dll" >>"$LOGDIR/warpshim.log" 2>&1 <<'PY'
-import sys
-d = bytearray(open(sys.argv[1], "rb").read())
-old, new = "D3D11.dll\0".encode("utf-16le"), "d3dwp.dll\0".encode("utf-16le")
-n = d.count(old); assert n == 1, f"expected 1 occurrence of L'D3D11.dll', found {n}"
-i = d.find(old); d[i:i+len(old)] = new
-open(sys.argv[2], "wb").write(d); print("patched at", hex(i))
-PY
-      printf '   %-10s exit=%-5s %s\n' warpshim "$?" "d3dwp.dll + OGSDeviceDX11.dll: L\"D3D11.dll\" -> L\"d3dwp.dll\"" | tee -a "$LOGDIR/summary.txt" ;;
+      "$ROOT/scripts/build-rvtfix.sh" >/dev/null # always: a DLL left in build/ may be older than the sources
+      [ ! -f "$RD/OGSDeviceDX11.dll.orig" ] || mv -f "$RD/OGSDeviceDX11.dll.orig" "$RD/OGSDeviceDX11.dll"
+      cp "$ROOT/build/d3dwp/d3dwp.dll" "$ROOT/build/rvtfix/rvtfix.dll" "$RD/" && "$ROOT/scripts/bottle-env.sh" "$NAME" RVTFIX_CEF_ARGS=
+      printf '   %-10s exit=%-5s %s\n' warpshim "$?" "d3dwp.dll + rvtfix.dll (points OGSDeviceDX11.dll at d3dwp.dll; RVTFIX_CEF_ARGS empty)" | tee -a "$LOGDIR/summary.txt" ;;
     pdfprinter) # "Revit PDF" printer: Wine PostScript driver + tools/pdf-printer/revitpdf.ppd (A4…A0, ARCH),
                 # port REVITPDF: → |scripts/ps2pdf-port.sh (Ghostscript → ~/Documents/Revit-PDF). The Mac has no CUPS queues,
                 # and without a printer Revit won't open Print/Page Setup.
