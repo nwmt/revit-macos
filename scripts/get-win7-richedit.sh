@@ -4,6 +4,7 @@
 # NOTE: riched20/msftedit delay-load msls31.dll (Line Services); SP1 has no x64 build of it.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT/scripts/lib/common.sh"; lock_take "get-win7-richedit.sh"
 D="$ROOT/installers/redist/win7sp1"; mkdir -p "$D/x64"; cd "$D"
 PKG=windows6.1-KB976932-X64.exe
 SHA=f4d1d418d91b1619688a482680ee032ffd2b65e420c6d2eaecf8aa3762aa64c8

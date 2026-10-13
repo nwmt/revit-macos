@@ -2,6 +2,7 @@
 # Builds tools/d3d11-warp-shim → build/d3dwp/d3dwp.dll (x86_64). Needs scripts/get-toolchain.sh.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT/scripts/lib/common.sh"; lock_take "build-d3dwp.sh"
 CC="$ROOT/toolchain/llvm-mingw/bin/x86_64-w64-mingw32-clang"
 . "$ROOT/scripts/lib/shims.sh"; cc_or_prebuilt "$ROOT/build/d3dwp/d3dwp.dll"
 SRC="$ROOT/tools/d3d11-warp-shim"; OUT="$ROOT/build/d3dwp"; mkdir -p "$OUT"

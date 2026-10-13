@@ -2,6 +2,7 @@
 # Builds tools/svcshim → build/svcshim/svcshim.exe (x86_64, no .NET). Needs scripts/get-toolchain.sh.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT/scripts/lib/common.sh"; lock_take "build-svcshim.sh"
 CC="$ROOT/toolchain/llvm-mingw/bin/x86_64-w64-mingw32-clang"
 . "$ROOT/scripts/lib/shims.sh"; cc_or_prebuilt "$ROOT/build/svcshim/svcshim.exe"
 SRC="$ROOT/tools/svcshim"; OUT="$ROOT/build/svcshim"; mkdir -p "$OUT"

@@ -4,6 +4,7 @@
 set -euo pipefail
 VER="${1:?specify a version, e.g. 0.1.0}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT/scripts/lib/common.sh"; lock_take "build-release.sh"
 "$ROOT/scripts/get-toolchain.sh"
 rm -rf "$ROOT/build"   # clean build: no stale probes or old DLLs in the package
 for s in "$ROOT"/scripts/build-{add-printer,d3dwp,ncrypt-shim,rvtfix,svcshim,tlbpin,vkshim,wbem-shim,wv2fix}.sh; do

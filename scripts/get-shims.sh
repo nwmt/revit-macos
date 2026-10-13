@@ -4,7 +4,7 @@
 # The release is built by GitHub Actions from tag v$SHIMS_VERSION; its SHA-256 is pinned in scripts/lib/shims.sh,
 # so a changed or corrupt download is rejected. Saves the ~760 MB compiler download for most users.
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"; . "$ROOT/scripts/lib/shims.sh"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"; . "$ROOT/scripts/lib/common.sh"; . "$ROOT/scripts/lib/shims.sh"; lock_take "get-shims.sh"
 from_source() { echo "$1 — building from source"; rm -f "$ROOT/build/.prebuilt"; exec "$ROOT/scripts/get-toolchain.sh"; }
 
 [ "${SHIMS_FROM_SOURCE:-0}" = 1 ] && from_source "SHIMS_FROM_SOURCE=1"

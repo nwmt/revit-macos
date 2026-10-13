@@ -309,4 +309,32 @@ expect "revitlookup: not set up for 2027 is a skip" 0 ""; check "revitlookup: in
 reset; mkbottle rvt2024-t 2024 2024; run_steps 2024 rvt2024-t enscape
 expect "enscape: not set up for 2024" 1 "enscape"
 
+# ---- scripts around the install ----
+reset; cat > "$CXF/bin/cxbottle" <<EOF
+#!/bin/bash
+echo "cxbottle \$*" >> "$CALLS"
+b=""; while [ \$# -gt 0 ]; do case "\$1" in --bottle) b="\$2"; shift ;; --description) d="\$2"; shift ;; --create) c=1 ;; --delete) x=1 ;; esac; shift; done
+[ -n "\${x:-}" ] && rm -rf "$BOTTLES/\$b"
+[ -n "\${c:-}" ] && { mkdir -p "$BOTTLES/\$b/drive_c"; printf '[Bottle]\n"Description" = "%s"\n' "\$d" > "$BOTTLES/\$b/cxbottle.conf"; }
+exit 0
+EOF
+chmod +x "$CXF/bin/cxbottle"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" /bin/bash "$R/scripts/new-bottle.sh" 2024 rvt2024-t 2>&1)"; RC=$?
+expect "new-bottle creates the bottle" 0 "done"
+check "new-bottle describes it as Revit <year>" grep -q '"Description" = "Revit 2024"' "$BOTTLES/rvt2024-t/cxbottle.conf"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" /bin/bash "$R/scripts/new-bottle.sh" 2024 rvt2024-t 2>&1)"; RC=$?
+expect "new-bottle refuses an existing bottle" 1 "already exists"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" CX_RECREATE=1 /bin/bash "$R/scripts/new-bottle.sh" 2025 rvt2024-t 2>&1)"; RC=$?
+expect "new-bottle: CX_RECREATE checks the year first" 1 "is for Revit 2024, not 2025"
+# the fake "Revit" is the fake wine itself: Revit.exe in its arguments and the bottle's drive_c as its folder, so
+# revit_running sees it, as it sees the real one
+reset; mkbottle rvt2024-t 2024 2024; rule "Revit.exe" 0 "sleep 4"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" REVIT_LAUNCH_WAIT=3 /bin/bash "$R/scripts/launch.sh" 2024 rvt2024-t 2>&1)"; RC=$?
+expect "launch.sh starts Revit and returns once it runs" 0 "Revit 2024 started (backend default)"
+in_repo 'lock_free && echo free'; expect "launch.sh: the Revit it started does not hold the lock" 0 "free"
+sleep 4
+reset; mkdir -p "$R/installers/revit2025/update"; touch "$R/installers/revit2025/update/Revit_2025_5_0.exe"
+python3 -I -c 'import sys, zipfile; z = zipfile.ZipFile(sys.argv[1], "w"); z.writestr("setup.xml", "<Setup/>"); z.close()' "$R/installers/revit2025/RVT_2025_NA_win_db_002_002.zip"
+in_repo 'revit_main_installer 2025'; expect "the main installer is not an update" 0 "RVT_2025_NA_win_db_002_002.zip"
+
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]

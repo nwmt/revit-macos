@@ -2,6 +2,7 @@
 # Builds tools/wv2fix → build/wv2fix/version.dll (x86_64, loaded by msedgewebview2.exe). Needs scripts/get-toolchain.sh.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT/scripts/lib/common.sh"; lock_take "build-wv2fix.sh"
 CC="$ROOT/toolchain/llvm-mingw/bin/x86_64-w64-mingw32-clang"
 . "$ROOT/scripts/lib/shims.sh"; cc_or_prebuilt "$ROOT/build/wv2fix/version.dll"
 SRC="$ROOT/tools/wv2fix"; OUT="$ROOT/build/wv2fix"; mkdir -p "$OUT"

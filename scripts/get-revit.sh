@@ -11,7 +11,7 @@
 # (update: from its manifest; base: installers/CHECKSUMS.txt).
 set -uo pipefail
 YEAR="${1:?specify a year, e.g. 2027}"
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"; . "$ROOT/scripts/lib/versions.sh"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"; . "$ROOT/scripts/lib/common.sh"; lock_take "get-revit.sh $YEAR"
 SRC="$(revit_installers "$YEAR")"
 command -v 7zz >/dev/null || { echo "7zz required: brew install sevenzip" >&2; exit 1; }
 

@@ -3,6 +3,7 @@
 # fetches the Vulkan headers (Khronos, pinned by SHA-256) into toolchain/vulkan-headers once.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT/scripts/lib/common.sh"; lock_take "build-vkshim.sh"
 CC="$ROOT/toolchain/llvm-mingw/bin/x86_64-w64-mingw32-clang"
 . "$ROOT/scripts/lib/shims.sh"; cc_or_prebuilt "$ROOT/build/vkshim/vulkan-1.dll"
 VKH_TAG=vulkan-sdk-1.4.363.0

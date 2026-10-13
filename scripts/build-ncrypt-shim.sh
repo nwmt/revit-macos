@@ -2,6 +2,7 @@
 # Builds tools/ncrypt-shim → build/ncrypt-shim/ncrypt.dll (x86_64). Needs scripts/get-toolchain.sh.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT/scripts/lib/common.sh"; lock_take "build-ncrypt-shim.sh"
 CC="$ROOT/toolchain/llvm-mingw/bin/x86_64-w64-mingw32-clang"
 . "$ROOT/scripts/lib/shims.sh"; cc_or_prebuilt "$ROOT/build/ncrypt-shim/ncrypt.dll"
 SRC="$ROOT/tools/ncrypt-shim"; OUT="$ROOT/build/ncrypt-shim"; mkdir -p "$OUT"

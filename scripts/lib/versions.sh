@@ -30,6 +30,15 @@ revit_dist() { # the installer root (setup.xml): the unpacked folder (2023+) or 
   [ -f "$d/setup.xml" ] || [ -f "$d/Setup.ini" ] || d="$(ls -d "$d"/*/ 2>/dev/null | head -1)"
   echo "${d%/}"
 }
+revit_main_installer() { # $1 = year: the installer's main file in installers/revit<year>/, not an update in update/:
+  # part 001 of a multi-part download (2020, the 2024 base), else the largest archive (in 2023+ downloads
+  # *_001_002.exe is a 16 MB bootstrapper and the payload is *_002_002.7z)
+  local src first; src="$(revit_installers "$1")"
+  first="$(find "$src" -maxdepth 2 -path "$src/update" -prune -o -type f -iname '*_001_0*.sfx.exe' -print 2>/dev/null | sort | head -1)"
+  if [ -n "$first" ]; then echo "$first"; return 0; fi
+  find "$src" -maxdepth 2 -path "$src/update" -prune -o -type f \( -iname '*.exe' -o -iname '*.iso' -o -iname '*.zip' -o -iname '*.7z' \) \
+    -exec stat -f '%z %N' {} + 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-
+}
 
 # Until stage 1 is done: the old scripts (install-odis.sh, d8-addins.sh, inspect-installer.sh, get-redist.sh,
 # install.sh, revit) still ask for these. Removed in the commit that deletes their last caller.

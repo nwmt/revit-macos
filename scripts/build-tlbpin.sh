@@ -2,6 +2,7 @@
 # Builds tools/tlbpin → build/tlbpin/msls31.dll (x86_64): msls31 shim → msls31_ms.dll + pins the TOM typelib.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT/scripts/lib/common.sh"; lock_take "build-tlbpin.sh"
 CC="$ROOT/toolchain/llvm-mingw/bin/x86_64-w64-mingw32-clang"
 . "$ROOT/scripts/lib/shims.sh"; cc_or_prebuilt "$ROOT/build/tlbpin/msls31.dll"
 mkdir -p "$ROOT/build/tlbpin"
