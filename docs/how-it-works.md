@@ -13,7 +13,8 @@ Revit is a Windows x64 program. On an Apple Silicon Mac it runs like this:
   `tools/`; GitHub Actions builds them for each release, and `./revit install` downloads that build, checksum-checked.
   A clone whose shim sources differ from the release builds them itself. No Autodesk files are redistributed, and
   no Autodesk EXE or DLL is changed: fixes inside Revit's own DLLs are made in memory by `tools/rvtfix`. The steps
-  below do change Revit's settings and add-ins, and install Revit's main MSI package from a copy (step `rvt`).
+  below do change Revit's settings and add-ins. Revit's main MSI package is installed as Autodesk ships it; only if
+  its licensing check fails under Wine, from a copy where that check can be skipped (step `rvt`).
 
 ## What ./revit install does
 
@@ -39,7 +40,7 @@ In install order. Normal install steps have "—" in What breaks.
 | `adsso`, `ssoenv` | Sign-in window loads forever with GPU drawing | Install the AdSSO sign-in window; run it without GPU | 2020, 2023 |
 | `idmgr` | — | Autodesk Identity Manager: sign-in through your Mac's browser | 2024+ |
 | `rcl`, `ret`, `materials`, `samples` | — | Revit content and extensions, the material library, sample projects | 2020 |
-| `rvt` | Autodesk installer (ODIS); a licensing-service check in Revit's MSI always fails under Wine | Install Revit's MSI directly, from a copy where that check can be skipped; for 2024 the update, a patch to that MSI, is applied while installing it | all |
+| `rvt` | Autodesk installer (ODIS); a licensing-service check in Revit's MSI can fail under Wine | Install Revit's MSI directly. We run that check first; only if it fails, from a copy where it can be skipped. For 2024 the update, a patch to that MSI, is applied while installing it | all |
 | `pkgs` | Autodesk installer (ODIS); Steel Connections puts its language files into a wrong folder | Install the other packages directly; move those files into Revit's folder | 2023+ |
 | `asc` | "Autodesk Shared Components bundle is missing" on start | Install the Shared Components bundle ourselves | 2026+ |
 | `revitini` | 2024, 2025: "Cannot load the required component Autodesk RealDWG Shared", Revit closes. 2027: "Default family templates is empty or invalid" | In `Revit.ini`: where RealDWG is, the language section; defaults for new users (anti-aliasing off, theme to match the Mac) | 2024+ |

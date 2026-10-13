@@ -89,10 +89,17 @@ for s in "${STEPS[@]}"; do
     adsso)     msi adsso     'x64\AdSSO\AdSSO.msi' ;;
     rcl)       msi rcl       'x64\RCL\RCL.msi' "TRANSFORMS=:$LANG_UI.mst" "${SETUP_PROPS[@]}" \
                  'INSTALLDIR=C:\Program Files\Autodesk\Revit Content 2020' ;;
-    rvt) # RVT-wine.msi comes from scripts/patch-rvt-msi.sh: the licIsSvcUpgraded service check
-         # (InstHelper upgrade isUpgraded, always exit 100 under Wine) is disabled with CLM_SKIP_SVCCHECK=1
-      [ -f "$DIST_UNIX/x64/RVT/RVT-wine.msi" ] || "$ROOT/scripts/patch-rvt-msi.sh" "$NAME"
-      msi rvt 'x64\RVT\RVT-wine.msi' "TRANSFORMS=:$LANG_UI.mst;:all.mst" "${SETUP_PROPS[@]}" CLM_SKIP_SVCCHECK=1 \
+    rvt) # licIsSvcUpgraded runs `InstHelper upgrade isUpgraded`; we run it first. Exit 0 → Autodesk's RVT.msi as it is.
+         # Otherwise (it once gave exit 100 here) → RVT-wine.msi (scripts/patch-rvt-msi.sh), where CLM_SKIP_SVCCHECK=1
+         # skips that check.
+      rvtmsi=RVT.msi; svccheck=()
+      if ! w 'C:\Program Files (x86)\Common Files\Autodesk Shared\AdskLicensing\Current\helper\AdskLicensingInstHelper.exe' \
+           upgrade isUpgraded >>"$LOGDIR/svccheck.log" 2>&1; then
+        [ -f "$DIST_UNIX/x64/RVT/RVT-wine.msi" ] || "$ROOT/scripts/patch-rvt-msi.sh" "$NAME"
+        rvtmsi=RVT-wine.msi; svccheck=(CLM_SKIP_SVCCHECK=1)
+        printf '   %-10s %s\n' rvt "licensing check did not pass (svccheck.log): installing from RVT-wine.msi" | tee -a "$LOGDIR/summary.txt" # no exit=: not a failure
+      fi
+      msi rvt "x64\\RVT\\$rvtmsi" "TRANSFORMS=:$LANG_UI.mst;:all.mst" "${SETUP_PROPS[@]}" ${svccheck[@]+"${svccheck[@]}"} \
         'INSTALLDIR=C:\Program Files\Autodesk\Revit 2020' ;;
     ret)       msi ret       'x64\RET\RET.msi' ;;
     materials) # minimal set: material library + base image library
