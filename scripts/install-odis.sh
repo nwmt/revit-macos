@@ -57,11 +57,9 @@ for s in "${STEPS[@]}"; do
         winetricks -q --unattended corefonts msxml6 >>"$LOGDIR/winetricks.log" 2>&1
       say fonts "$?" "winetricks corefonts msxml6" ;;
     dotnet|net8) # .NET Desktop + ASP.NET Core from the installer (2026: 8.0, folders 80; 2027: 10.0, folders 100; switches from pkg.dotnet*.xml / pkg.aspnet*.xml)
-      if [ "$(revit_dotnet "$YEAR")" = netfx48 ]; then # 2021–2024: .NET Framework 4.8 from the installer on top of real 4.0 (as 4.7 for 2020)
-        "$ROOT/scripts/d3-dotnet47.sh" "$NAME" "$DIST/3rdParty/dotNetFramework/48/dotNetFx48_Full_x86_x64.exe" >>"$LOGDIR/netfx48.log" 2>&1
-        w wineboot -r >>"$LOGDIR/wine.log" 2>&1 # the MSI asks for a reboot (pending file renames)
-        rel="$(w reg query 'HKLM\Software\Microsoft\NET Framework Setup\NDP\v4\Full' /v Release 2>/dev/null | tr -d '\r' | awk '/Release/{print $3}')"
-        say netfx48 "$([ $((rel)) -ge 528040 ] && echo 0 || echo 1)" "Release=$((rel)) (528040+ = 4.8)"; continue
+      if [ "$(revit_dotnet "$YEAR")" = netfx48 ]; then # 2021–2024: the shared runner's netfx step (scripts/steps/runtimes.sh)
+        RUN_DIR="$LOGDIR" "$ROOT/scripts/run-steps.sh" "$YEAR" "$NAME" netfx >>"$LOGDIR/netfx48.log" 2>&1
+        say netfx48 "$?" "scripts/run-steps.sh $YEAR $NAME netfx"; continue
       fi
       # every runtime the installer ships: an update laid over the base (inspect-installer.sh) adds a newer one (2026.5: 10.0 next to 8.0)
       # into arrays first: a for over $(ls) splits a path with spaces, and a while-read loop would give wine its stdin

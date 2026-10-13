@@ -10,14 +10,13 @@ set -uo pipefail
 NAME="${1:?specify a bottle}"; shift
 STEPS=("$@"); [ ${#STEPS[@]} -eq 0 ] && STEPS=(licensing svcshim adsso rcl rvt ret materials register ncryptshim ssoenv wbemshim richedit dynamo d3d9dxvk warpshim pdfprinter tlbpin samples)
 LANG_UI="${REVIT_LANG:-en-US}"
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CX="/Applications/CrossOver.app/Contents/SharedSupport/CrossOver"
-B="$HOME/Library/Application Support/CrossOver/Bottles/$NAME"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"; . "$ROOT/scripts/lib/common.sh"; . "$ROOT/scripts/lib/wine.sh"
+revit_bottle_name_ok "$NAME" || usage_die "Bad bottle name: $NAME"
+lock_take "d6-install-revit.sh $NAME"; bottle_guard must_exist 2020 "$NAME"; wine_init "$NAME"
 DIST_UNIX="$(ls -d "$ROOT"/installers/extracted/revit2020/*/ | head -1)"
 DIST="Z:$(echo "${DIST_UNIX%/}" | tr '/' '\\')"
-RUN="$(date +%Y%m%d-%H%M%S)"
-LOGDIR="$ROOT/logs/d6-$NAME-$RUN"; mkdir -p "$LOGDIR"
-. "$ROOT/scripts/lib/bottle.sh"   # w, sh_path
+if [ -z "${RUN_DIR:-}" ] || [ ! -d "$RUN_DIR" ]; then RUN_DIR="$(run_dir_new "$NAME" steps)" || exit 1; fi
+LOGDIR="$RUN_DIR"
 # What the Setup.exe wizard normally passes to the MSIs. Without ADSK_SETUP_EXE the
 # LaunchCondition "Installed or ADSK_SETUP_EXE" fails (msiexec exit=67, silently).
 # Setup.exe builds INSTALLDIR from INSTALL_PATH (Setup.ini) + ADSK_INSTALL_PATH; in the MSI it is relative.
@@ -54,6 +53,7 @@ echo ">> bottle $NAME, language $LANG_UI, logs: $LOGDIR"
 echo ">> 0 = ok, 194 (=3010) = ok+reboot, 67 (=1603) = fatal, 103 (=1639) = bad arguments"
 
 for s in "${STEPS[@]}"; do
+  stop_check
   case "$s" in
     licensing) # BitRock InstallBuilder
       t0=$(date +%s)
@@ -84,11 +84,11 @@ for s in "${STEPS[@]}"; do
       w reg add 'HKLM\System\CurrentControlSet\Services\AdskLicensingService' /v ImagePath /t REG_EXPAND_SZ \
         /d "\"C:\\Program Files (x86)\\Common Files\\Autodesk Shared\\AdskLicensing\\AdskSvcShim.exe\" \"C:\\Program Files (x86)\\Common Files\\Autodesk Shared\\AdskLicensing\\$ver\\AdskLicensingService\\AdskLicensingService.exe\"" \
         /f >>"$LOGDIR/svcshim.log" 2>&1
-      WINEPREFIX="$B" "$CX/bin/wineserver" -k 2>/dev/null
+      wineserver_kill 2>/dev/null
       # no --wait-children: the service never exits, we'd hang
-      "$CX/bin/wine" --bottle "$NAME" sc start AdskLicensingService >>"$LOGDIR/svcshim.log" 2>&1 &
+      w_nowait sc start AdskLicensingService >>"$LOGDIR/svcshim.log" 2>&1 </dev/null 9>&- &
       for i in $(seq 1 20); do
-        st="$("$CX/bin/wine" --bottle "$NAME" sc query AdskLicensingService 2>/dev/null | tr -d '\r' | awk '/STATE/{print $4}')"
+        st="$(w_nowait sc query AdskLicensingService 2>/dev/null | tr -d '\r' | awk '/STATE/{print $4}')"
         [ "$st" = RUNNING ] && break; perl -e 'select(undef,undef,undef,2)'
       done
       echo "   svcshim    AdskLicensingService: ${st:-?}" | tee -a "$LOGDIR/summary.txt" ;;
@@ -133,7 +133,7 @@ for s in "${STEPS[@]}"; do
       else
         env_args+=('-QTWEBENGINE_REMOTE_DEBUGGING' '-QT_LOGGING_RULES')
       fi
-      "$ROOT/scripts/bottle-env.sh" "$NAME" "${env_args[@]}" | sed 's/^/   ssoenv     /' | tee -a "$LOGDIR/summary.txt" ;;
+      bottle_env "${env_args[@]}" | sed 's/^/   ssoenv     /' | tee -a "$LOGDIR/summary.txt" ;;
     wbemshim) # WMI shim: several async queries on one IWbemServices (tools/wbem-shim)
       # Affects all 64-bit processes in the bottle (changes the CLSID_WbemLocator registration).
       "$ROOT/scripts/build-wbem-shim.sh" >/dev/null &&
@@ -219,7 +219,7 @@ PY
       RD="$B/drive_c/Program Files/Autodesk/Revit 2020"
       [ ! -f "$RD/OGSDeviceDX11.dll.orig" ] || mv -f "$RD/OGSDeviceDX11.dll.orig" "$RD/OGSDeviceDX11.dll"
       "$ROOT/scripts/build-d3dwp.sh" >/dev/null && "$ROOT/scripts/build-rvtfix.sh" >/dev/null &&
-        cp "$ROOT/build/d3dwp/d3dwp.dll" "$ROOT/build/rvtfix/rvtfix.dll" "$RD/" && "$ROOT/scripts/bottle-env.sh" "$NAME" RVTFIX_CEF_ARGS=
+        cp "$ROOT/build/d3dwp/d3dwp.dll" "$ROOT/build/rvtfix/rvtfix.dll" "$RD/" && bottle_env RVTFIX_CEF_ARGS=
       printf '   %-10s exit=%-5s %s\n' warpshim "$?" "d3dwp.dll + rvtfix.dll (points OGSDeviceDX11.dll at d3dwp.dll; RVTFIX_CEF_ARGS empty)" | tee -a "$LOGDIR/summary.txt" ;;
     pdfprinter) # "Revit PDF" printer: Wine PostScript driver + tools/pdf-printer/revitpdf.ppd (A4…A0, ARCH),
                 # port REVITPDF: → |scripts/ps2pdf-port.sh (Ghostscript → ~/Documents/Revit-PDF). The Mac has no CUPS queues,

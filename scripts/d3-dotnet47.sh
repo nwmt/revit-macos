@@ -8,13 +8,16 @@
 set -uo pipefail
 
 NAME="${1:?specify a bottle}"
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CX="/Applications/CrossOver.app/Contents/SharedSupport/CrossOver"
-B="$HOME/Library/Application Support/CrossOver/Bottles/$NAME"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"; . "$ROOT/scripts/lib/common.sh"; . "$ROOT/scripts/lib/wine.sh"
+revit_bottle_name_ok "$NAME" || usage_die "Bad bottle name: $NAME"
+lock_take "d3-dotnet47.sh $NAME"; bottle_guard must_exist 2020 "$NAME"; wine_init "$NAME"
 NET40="$ROOT/installers/redist/dotNetFx40_Full_x86_x64.exe"
 NET47="${2:-$(ls "$ROOT"/installers/extracted/revit2020/*/3rdParty/NET/47/wcu/dotNetFramework/dotNetFx47_Full_x86_x64.exe 2>/dev/null | head -1)}"
-LOG="$ROOT/logs/d3-$NAME-$(date +%Y%m%d-%H%M%S).log"; mkdir -p "$ROOT/logs"
-w() { "$CX/bin/wine" --bottle "$NAME" --wait-children "$@"; }
+if [ -z "${RUN_DIR:-}" ] || [ ! -d "$RUN_DIR" ]; then RUN_DIR="$(run_dir_new "$NAME" steps)" || exit 1; fi
+LOG="$RUN_DIR/d3.log"
+stop_restore() { # TERM/HUP/INT came during an installer: put the Windows version back, then stop
+  [ "$STOP_REQUESTED" = 0 ] || { w winecfg -v win10 >>"$LOG" 2>&1; echo "Stopped." >&2; exit 1; }
+}
 mscoree_state() {
   for d in system32 syswow64; do
     f="$B/drive_c/windows/$d/mscoree.dll"
@@ -48,6 +51,7 @@ rm -f "$B/drive_c/windows/system32/mscoree.dll" "$B/drive_c/windows/syswow64/msc
 echo ">> 2. .NET 4.0 as winxp64 (base: installs the real mscoree.dll)"
 w winecfg -v winxp64 >>"$LOG" 2>&1
 install_net "$NET40" dotNetFx40.exe /q '/c:install.exe /q'
+stop_restore
 mscoree_state
 w reg add 'HKCU\Software\Wine\DllOverrides' /v mscoree /d native /f >>"$LOG" 2>&1
 for k in 'HKLM\Software\Microsoft\.NETFramework' 'HKLM\Software\Wow6432Node\.NETFramework'; do
@@ -58,7 +62,8 @@ echo ">> 3. $(basename "$NET47") as win7"
 # On Win10 1703+ the 4.7/4.8 installers are blocked by OS version ("already installed").
 w winecfg -v win7 >>"$LOG" 2>&1
 install_net "$NET47" dotNetFx47.exe /q /norestart /log 'C:\net47-setup'
-cp "$B"/drive_c/net47-setup* "$ROOT/logs/" 2>/dev/null || true
+stop_restore
+cp "$B"/drive_c/net47-setup* "$RUN_DIR/" 2>/dev/null || true
 
 echo ">> 4. back to win10"
 w winecfg -v win10 >>"$LOG" 2>&1

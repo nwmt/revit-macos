@@ -5,14 +5,15 @@
 set -uo pipefail
 
 NAME="${1:?specify a bottle}"
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CX="/Applications/CrossOver.app/Contents/SharedSupport/CrossOver"
-B="$HOME/Library/Application Support/CrossOver/Bottles/$NAME"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"; . "$ROOT/scripts/lib/common.sh"; . "$ROOT/scripts/lib/wine.sh"
+revit_bottle_name_ok "$NAME" || usage_die "Bad bottle name: $NAME"
+lock_take "d2-runtimes.sh $NAME"; bottle_guard must_exist 2020 "$NAME"; wine_init "$NAME"
 DIST="$(ls -d "$ROOT"/installers/extracted/revit2020/*/ | head -1)"
-LOG="$ROOT/logs/d2-$NAME-$(date +%Y%m%d-%H%M%S).log"; mkdir -p "$ROOT/logs"
-w() { "$CX/bin/wine" --bottle "$NAME" --wait-children "$@"; }
+if [ -z "${RUN_DIR:-}" ] || [ ! -d "$RUN_DIR" ]; then RUN_DIR="$(run_dir_new "$NAME" steps)" || exit 1; fi
+LOG="$RUN_DIR/d2.log"
 override() { for d in "$@"; do w reg add 'HKCU\Software\Wine\DllOverrides' /v "$d" /d native,builtin /f >>"$LOG" 2>&1; done; }
 run_exe() { # $1 = path inside the installer, rest = switches
+  stop_check
   local src="$DIST/$1" tmp="C:\\d2tmp.exe"; shift
   cp "$src" "$B/drive_c/d2tmp.exe"
   w "$tmp" "$@" >>"$LOG" 2>&1; local rc=$?
@@ -44,9 +45,10 @@ run_exe 3rdParty/x64/VCRedist/2017/VC_redist.x64.exe /install /quiet /norestart
 
 fi
 
+stop_check
 echo ">> 2. corefonts + msxml6 via winetricks"
 WINE="$ROOT/scripts/lib/cxwine" WINESERVER="$CX/bin/wineserver" CX_BOTTLE="$NAME" WINEPREFIX="$B" \
-  winetricks -q --unattended corefonts msxml6 >>"$LOG" 2>&1
+  winetricks -q --unattended corefonts msxml6 >>"$LOG" 2>&1 9>&-
 echo "   winetricks exit=$?"
 
 echo ">> 3. check"
