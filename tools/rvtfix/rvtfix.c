@@ -1,6 +1,6 @@
 /*
  * SPDX-License-Identifier: MIT
- * rvtfix -- fixes for Wine behavior inside the Revit process that can't be done by replacing files
+ * rvtfix -- fixes for Wine behavior inside the Revit process, made in memory: no Autodesk file is changed
  * (Autodesk assemblies are signed: Revit checks add-in .sig files and won't load modified ones -- "Verify failed!").
  * Loaded by our ncrypt.dll (tools/ncrypt-shim) if it sits next to Revit.exe.
  *
@@ -30,6 +30,18 @@
  *    maximize/restore toggles (until the window is resized); software drawing keeps it right at the same speed.
  *    Not tried on 2023 yet, so 2023 keeps the flag it was tested with.
  *    Custom flags: RVTFIX_CEF_ARGS; empty disables.
+ *
+ * 4. Material browser: OGSDeviceDX11.dll asks D3D11 for a WARP device, which D3DMetal lacks -> "Can't get OGS device",
+ *    the dialog does not open. Our d3dwp.dll (tools/d3d11-warp-shim) asks for HARDWARE instead. Fix: in the loaded
+ *    OGSDeviceDX11.dll replace the name it loads, L"D3D11.dll", with L"d3dwp.dll" (same length).
+ *    Only if d3dwp.dll sits next to Revit.exe.
+ *
+ * 5. DesktopMFC.dll imports USER32!SetDialogControlDpiChangeBehavior (Win10 1703+), missing in CrossOver 26.3 Wine ->
+ *    the loader binds a stub; opening a view raises EXCEPTION_WINE_STUB, the project closes, Revit crashes.
+ *    Fix: bind the import to USER32!IsWindow (same registers, no side effects, TRUE for a live window): rename it in
+ *    the import table if the loader has not bound it yet, otherwise put IsWindow into its import address table slot.
+ *
+ * 4 and 5 run when the DLL loads (LdrRegisterDllNotification), or at once if it is already loaded.
  */
 #include <windows.h>
 #include <ole2.h>
@@ -163,15 +175,17 @@ typedef struct { ULONG Flags; const UNICODE_STRING *FullDllName, *BaseDllName; v
 typedef VOID (CALLBACK *dll_notif_fn)(ULONG reason, const dll_notif_data *data, void *ctx);
 typedef NTSTATUS (NTAPI *ldr_register_fn)(ULONG, dll_notif_fn, void *, void **);
 
+static void patch_autodesk(HMODULE mod, const WCHAR *name); /* 4, 5 */
+
 static VOID CALLBACK on_dll(ULONG reason, const dll_notif_data *d, void *ctx)
 {
     WCHAR name[64];
     if (reason != 1 /* LDR_DLL_NOTIFICATION_REASON_LOADED */ || !d->BaseDllName) return;
     lstrcpynW(name, d->BaseDllName->Buffer, min(64, d->BaseDllName->Length / 2 + 1));
-    if (!lstrcmpiW(name, L"WebView2Loader.dll")) {
+    if (wv2_args[0] && !lstrcmpiW(name, L"WebView2Loader.dll")) {
         WCHAR full[MAX_PATH]; lstrcpynW(full, d->FullDllName->Buffer, min(MAX_PATH, d->FullDllName->Length / 2 + 1));
         patch_loader((HMODULE)d->DllBase, full);
-    }
+    } else patch_autodesk((HMODULE)d->DllBase, name);
 }
 
 static void fix_webview2(void)
@@ -181,10 +195,7 @@ static void fix_webview2(void)
     if (n && n < 1024) lstrcpyW(wv2_args, env);
     else if (!n && GetLastError() != ERROR_ENVVAR_NOT_FOUND) wv2_args[0] = 0;
     if (!wv2_args[0]) { trace("[rvtfix] WebView2: disabled (RVTFIX_WV2_ARGS is empty)\n"); return; }
-    ldr_register_fn reg = (ldr_register_fn)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "LdrRegisterDllNotification");
-    void *cookie;
-    if (!reg || reg(0, on_dll, NULL, &cookie)) trace("[rvtfix] WebView2: no LdrRegisterDllNotification\n");
-    HMODULE m = GetModuleHandleW(L"WebView2Loader.dll"); /* already loaded: patch it too */
+    HMODULE m = GetModuleHandleW(L"WebView2Loader.dll"); /* already loaded: patch it too; later ones in on_dll */
     if (m) patch_loader(m, L"(already loaded)");
 }
 
@@ -226,6 +237,97 @@ static void fix_cef(void)
     trace(msg);
 }
 
+/* --- 4, 5. Autodesk DLLs --- */
+static BOOL have_d3dwp;
+
+static BOOL write_mem(void *dst, const void *src, SIZE_T size)
+{
+    MEMORY_BASIC_INFORMATION mbi;
+    DWORD old, rw = PAGE_READWRITE;
+    if (VirtualQuery(dst, &mbi, sizeof(mbi)) && (mbi.Protect & 0xf0)) rw = PAGE_EXECUTE_READWRITE; /* keep code runnable */
+    if (!VirtualProtect(dst, size, rw, &old)) return FALSE;
+    CopyMemory(dst, src, size);
+    VirtualProtect(dst, size, old, &old);
+    return TRUE;
+}
+
+static void patch_ogs(BYTE *base)
+{
+    static const WCHAR from[] = L"D3D11.dll", to[] = L"d3dwp.dll"; /* with the terminating 0 */
+    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+    IMAGE_SECTION_HEADER *s = IMAGE_FIRST_SECTION(nt);
+    BYTE *hit = NULL;
+    int i, n = 0;
+    char msg[200];
+    for (i = 0; i < nt->FileHeader.NumberOfSections; i++, s++) {
+        BYTE *p = base + s->VirtualAddress, *end = p + (s->Misc.VirtualSize ? s->Misc.VirtualSize : s->SizeOfRawData);
+        for (; p + sizeof(from) <= end; p++)
+            if (*p == 'D' && !memcmp(p, from, sizeof(from))) { hit = p; n++; }
+    }
+    if (n == 1 && write_mem(hit, to, sizeof(to)))
+        wsprintfA(msg, "[rvtfix] OGSDeviceDX11.dll: L\"D3D11.dll\" -> L\"d3dwp.dll\" at +0x%lx\n", (DWORD)(hit - base));
+    else
+        wsprintfA(msg, "[rvtfix] OGSDeviceDX11.dll: %d L\"D3D11.dll\" found, expected 1: left as is\n", n);
+    trace(msg);
+}
+
+static void patch_mfc(BYTE *base)
+{
+    static const char from[] = "SetDialogControlDpiChangeBehavior";
+    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+    IMAGE_DATA_DIRECTORY dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    IMAGE_IMPORT_DESCRIPTOR *imp;
+    const char *how = "not imported";
+    char msg[200];
+    for (imp = (IMAGE_IMPORT_DESCRIPTOR *)(base + dir.VirtualAddress); dir.VirtualAddress && imp->Name; imp++) {
+        if (lstrcmpiA((char *)(base + imp->Name), "user32.dll") || !imp->OriginalFirstThunk) continue;
+        IMAGE_THUNK_DATA *names = (IMAGE_THUNK_DATA *)(base + imp->OriginalFirstThunk);
+        IMAGE_THUNK_DATA *iat = (IMAGE_THUNK_DATA *)(base + imp->FirstThunk);
+        for (; names->u1.AddressOfData; names++, iat++) {
+            if (IMAGE_SNAP_BY_ORDINAL(names->u1.Ordinal)) continue;
+            IMAGE_IMPORT_BY_NAME *ibn = (IMAGE_IMPORT_BY_NAME *)(base + names->u1.AddressOfData);
+            if (lstrcmpA((char *)ibn->Name, from)) continue;
+            if (iat->u1.Function == names->u1.Function) { /* not bound yet: the loader binds the new name */
+                char to[sizeof(from)] = "IsWindow";
+                how = write_mem(ibn->Name, to, sizeof(to)) ? "renamed to IsWindow before binding" : "rename failed";
+            } else {
+                ULONG_PTR fn = (ULONG_PTR)IsWindow;
+                how = write_mem(&iat->u1.Function, &fn, sizeof(fn)) ? "bound stub replaced with IsWindow" : "IAT write failed";
+            }
+        }
+    }
+    wsprintfA(msg, "[rvtfix] DesktopMFC.dll: USER32!%s: %s\n", from, how);
+    trace(msg);
+}
+
+static void patch_autodesk(HMODULE mod, const WCHAR *name)
+{
+    if (!lstrcmpiW(name, L"OGSDeviceDX11.dll")) {
+        if (have_d3dwp) patch_ogs((BYTE *)mod);
+        else trace("[rvtfix] OGSDeviceDX11.dll: no d3dwp.dll next to Revit.exe, left as is\n");
+    } else if (!lstrcmpiW(name, L"DesktopMFC.dll")) patch_mfc((BYTE *)mod);
+}
+
+static void fix_autodesk(void)
+{
+    WCHAR path[MAX_PATH], *slash;
+    HMODULE m;
+    if (GetModuleFileNameW(NULL, path, MAX_PATH) && (slash = wcsrchr(path, L'\\'))) {
+        lstrcpyW(slash + 1, L"d3dwp.dll");
+        have_d3dwp = GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES;
+    }
+    if ((m = GetModuleHandleW(L"OGSDeviceDX11.dll"))) patch_autodesk(m, L"OGSDeviceDX11.dll");
+    if ((m = GetModuleHandleW(L"DesktopMFC.dll"))) patch_autodesk(m, L"DesktopMFC.dll");
+}
+
+/* DLLs loaded later: WebView2Loader.dll (2), OGSDeviceDX11.dll and DesktopMFC.dll (4, 5). */
+static void watch_dlls(void)
+{
+    ldr_register_fn reg = (ldr_register_fn)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "LdrRegisterDllNotification");
+    void *cookie;
+    if (!reg || reg(0, on_dll, NULL, &cookie)) trace("[rvtfix] no LdrRegisterDllNotification: DLLs loaded later are not fixed\n");
+}
+
 static void fix_dragdrop(void)
 {
     HMODULE ole = LoadLibraryW(L"ole32.dll");
@@ -248,6 +350,8 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
         fix_dragdrop();
         fix_webview2();
         fix_cef();
+        fix_autodesk();
+        watch_dlls(); /* under the loader lock: no DLL loads between the checks above and this */
     }
     return TRUE;
 }
