@@ -30,7 +30,8 @@ reset() { # a fresh sandbox for each test
   stop_fakes; chmod -R u+w "$T" 2>/dev/null; rm -rf "$T"
   mkdir -p "$R/scripts/lib" "$R/logs" "$R/installers/revit2024" "$H/Documents" "$H/Applications" "$BOTTLES" "$CXF/bin" \
     || { echo "sandbox setup failed"; exit 1; }
-  cp "$REPO/revit" "$R/"; cp "$REPO/scripts/lib/versions.sh" "$R/scripts/lib/"
+  cp "$REPO/revit" "$R/"; cp "$REPO/scripts/lib/common.sh" "$REPO/scripts/lib/versions.sh" "$R/scripts/lib/"
+  mkdir -p "$R/scripts/profiles"; cp "$REPO"/scripts/profiles/*.sh "$R/scripts/profiles/"
   stub "$R/install.sh"; stub "$R/scripts/d8-addins.sh"; stub "$R/scripts/d7-launch.sh"
   cat > "$CXF/bin/wineserver" <<EOF
 #!/bin/bash
