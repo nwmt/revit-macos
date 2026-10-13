@@ -37,6 +37,7 @@ Each fact lives in one place. Other pages link to it instead of repeating it.
 | Issues of one version, with a one-line workaround | `versions/<year>.md` |
 | Problems by symptom, shared by versions, longer workarounds, how to report a problem | `docs/troubleshooting.md` |
 | Install steps and fixes per version | `docs/how-it-works.md`, one matrix |
+| Microsoft components in the bottle and where each comes from | `docs/how-it-works.md` |
 | Speed numbers | `docs/benchmarks.md`; one sentence in the README |
 | Status scale | README |
 

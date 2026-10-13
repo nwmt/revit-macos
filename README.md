@@ -110,5 +110,6 @@ Run them in Terminal, in the project folder. In a new Terminal window, first typ
 ## License
 
 [MIT](LICENSE). This is an independent project, not affiliated with Autodesk. Autodesk does not support Revit on
-macOS. The project ships no Autodesk or Microsoft files: you use your own Revit installer and license. Autodesk and
-Revit are trademarks of Autodesk, Inc.
+macOS. The project ships no Autodesk or Microsoft files: you use your own Revit installer and license. Which
+Microsoft components an install puts into the bottle, and where each comes from:
+[Microsoft components](docs/how-it-works.md#microsoft-components). Autodesk and Revit are trademarks of Autodesk, Inc.

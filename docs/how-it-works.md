@@ -60,6 +60,22 @@ In install order. Normal install steps have "—" in What breaks.
 
 Some fixes were carried over from another version as they are, without checking that this version still needs them.
 
+## Microsoft components
+
+The project ships no Microsoft files. `./revit install` puts these into the bottle:
+
+| Component | Comes from | Step |
+|---|---|---|
+| Visual C++ runtimes; .NET Framework 4.7 (2020) and 4.8 (2023, 2024); .NET 8 and 10 (2025+) | Revit's installer, which ships them | `vc`, `dotnet` |
+| .NET Framework 4.0 (2020, 2023, 2024) | Microsoft's offline installer, which you download ([installers](../installers/README.md#extra-files)) | `dotnet` |
+| WebView2 runtime (2024+) | Microsoft's installer, which you download; otherwise the older one in Revit's installer | `webview2` |
+| Core fonts, MSXML 6 | winetricks downloads them from their usual sources | `fonts` |
+| `riched20.dll`, `msftedit.dll`, `usp10.dll` | The Windows 7 SP1 update package (KB976932) from Microsoft's download server: the same file and checksum winetricks uses | `richedit` |
+| `msls31.dll` | A 64-bit Windows 7 or 10 PC with a Windows license ([what you need](../README.md#what-you-need)) | `richedit` |
+
+The last two rows are parts of Windows, not runtimes made for redistribution. Microsoft's license terms for Windows
+apply to them.
+
 ## Add-ins
 
 `./revit addins` installs RevitLookup and pyRevit, then:
