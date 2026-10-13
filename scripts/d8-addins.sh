@@ -80,7 +80,7 @@ enscape4() { # Enscape 4.18 LTS for Revit 2027; the renderer runs in its own pro
     cp "$tmp/ucrtbase_clr0400_dll_amd64" "$S32/ucrtbase_clr0400.dll"; rc=$?
   rm -rf "$tmp"; [ $rc = 0 ] || { echo "enscape: wminet_utils.dll from .NET 4.8 failed" >&2; return 1; }
   # Vulkan fixes (tools/vkshim): Enscape turns down the Mac GPU (logicOp); its view takes keys and the mouse only when active.
-  [ -f "$ROOT/build/vkshim/vulkan-1.dll" ] || "$ROOT/scripts/build-vkshim.sh" >>"$LOGDIR/vkshim.log" 2>&1
+  "$ROOT/scripts/build-vkshim.sh" >>"$LOGDIR/vkshim.log" 2>&1
   [ -f "$S32/vulkan-1.dll.wine-fake" ] || cp "$S32/vulkan-1.dll" "$S32/vulkan-1.dll.wine-fake"
   cp "$ROOT/build/vkshim/vulkan-1.dll" "$S32/vulkan-1.dll.new" && mv -f "$S32/vulkan-1.dll.new" "$S32/vulkan-1.dll"
   w reg add "$A" /v vulkan-1 /d native,builtin /f >>"$LOGDIR/wine.log" 2>&1
@@ -91,13 +91,13 @@ enscape4() { # Enscape 4.18 LTS for Revit 2027; the renderer runs in its own pro
   # Asset Library is a WebView2 browser: it needs the same browser arguments as Revit's (tools/rvtfix) from the start of
   # the process. Our version.dll (tools/wv2fix, updated here) loads rvtfix.dll that sits next to the exe.
   "$ROOT/scripts/install-odis.sh" 2027 "$NAME" wv2fix >>"$LOGDIR/wv2fix.log" 2>&1 || { echo "enscape: wv2fix step failed" >&2; return 1; }
-  [ -f "$ROOT/build/rvtfix/rvtfix.dll" ] || "$ROOT/scripts/build-rvtfix.sh" >>"$LOGDIR/rvtfix.log" 2>&1
+  "$ROOT/scripts/build-rvtfix.sh" >>"$LOGDIR/rvtfix.log" 2>&1
   cp "$ROOT/build/rvtfix/rvtfix.dll" "$B/drive_c/Program Files/Enscape/RendererHost/rvtfix.dll"
   w reg add "$A" /v version /d native,builtin /f >>"$LOGDIR/wine.log" 2>&1
   "$ROOT/scripts/bottle-env.sh" "$NAME" MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=1 MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS=1 >/dev/null
   # Chaos Unified Login (sign-in) and Cosmos (Asset Library) start from the Windows StartUp folder, which Wine does not
   # run. Make them auto-start services through tools/svcshim; Wine starts those with the bottle.
-  [ -f "$ROOT/build/svcshim/svcshim.exe" ] || "$ROOT/scripts/build-svcshim.sh" >>"$LOGDIR/svcshim.log" 2>&1
+  "$ROOT/scripts/build-svcshim.sh" >>"$LOGDIR/svcshim.log" 2>&1
   cp "$ROOT/build/svcshim/svcshim.exe" "$B/drive_c/Program Files/Chaos/svcshim.exe"
   local svc
   for svc in 'ChaosUnifiedLogin|Chaos Unified Login|"C:\Program Files\Chaos\UnifiedLogin\ulasupervisor.exe"' \
@@ -194,7 +194,7 @@ for s in "${STEPS[@]}"; do
     # Vulkan fixes (tools/vkshim): Enscape's GPU check, its query pools and the focus of its view under Wine/MoltenVK.
     # Into system32: at Revit start DXVK (d3d9dxvk) loads vulkan-1.dll from there before Enscape does. Wine takes a
     # native DLL from system32 only where native,builtin is set, here for Revit.exe. Wine's file is kept as .wine-fake.
-    [ -f "$ROOT/build/vkshim/vulkan-1.dll" ] || "$ROOT/scripts/build-vkshim.sh" >>"$LOGDIR/vkshim.log" 2>&1
+    "$ROOT/scripts/build-vkshim.sh" >>"$LOGDIR/vkshim.log" 2>&1
     S32="$B/drive_c/windows/system32"
     [ -f "$S32/vulkan-1.dll.wine-fake" ] || cp "$S32/vulkan-1.dll" "$S32/vulkan-1.dll.wine-fake"
     cp "$ROOT/build/vkshim/vulkan-1.dll" "$S32/vulkan-1.dll.new" && mv -f "$S32/vulkan-1.dll.new" "$S32/vulkan-1.dll"

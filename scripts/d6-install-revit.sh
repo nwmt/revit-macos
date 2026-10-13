@@ -122,7 +122,7 @@ for s in "${STEPS[@]}"; do
       w 'C:\Program Files (x86)\Common Files\Autodesk Shared\AdskLicensing\Current\helper\AdskLicensingInstHelper.exe' \
         list 2>/dev/null | tr -d '\r' | sed 's/^/   /' | head -20 ;;
     ncryptshim) # ncrypt shim for Revit.exe: PersistenceDB ECDSA key via bcrypt (tools/ncrypt-shim)
-      [ -f "$ROOT/build/ncrypt-shim/ncrypt.dll" ] || "$ROOT/scripts/build-ncrypt-shim.sh" >/dev/null
+      "$ROOT/scripts/build-ncrypt-shim.sh" >/dev/null
       cp "$ROOT/build/ncrypt-shim/ncrypt.dll" "$B/drive_c/Program Files/Autodesk/Revit 2020/ncrypt.dll"
       w reg add 'HKCU\Software\Wine\AppDefaults\Revit.exe\DllOverrides' /v ncrypt /d native,builtin /f >>"$LOGDIR/ncryptshim.log" 2>&1
       printf '   %-10s exit=%-5s %s\n' ncryptshim "$?" "Revit 2020\\ncrypt.dll + AppDefaults\\Revit.exe ncrypt=native,builtin" | tee -a "$LOGDIR/summary.txt" ;;
@@ -136,7 +136,7 @@ for s in "${STEPS[@]}"; do
       "$ROOT/scripts/bottle-env.sh" "$NAME" "${env_args[@]}" | sed 's/^/   ssoenv     /' | tee -a "$LOGDIR/summary.txt" ;;
     wbemshim) # WMI shim: several async queries on one IWbemServices (tools/wbem-shim)
       # Affects all 64-bit processes in the bottle (changes the CLSID_WbemLocator registration).
-      [ -f "$ROOT/build/wbem-shim/wbemshim.dll" ] || "$ROOT/scripts/build-wbem-shim.sh" >/dev/null
+      "$ROOT/scripts/build-wbem-shim.sh" >/dev/null
       cp "$ROOT/build/wbem-shim/wbemshim.dll" "$B/drive_c/windows/system32/wbem/wbemshim.dll"
       w reg add 'HKLM\Software\Classes\CLSID\{4590F811-1D3A-11D0-891F-00AA004B2E24}\InprocServer32' /ve \
         /d 'C:\windows\system32\wbem\wbemshim.dll' /f >>"$LOGDIR/wbemshim.log" 2>&1
@@ -217,8 +217,8 @@ PY
               # on disk: put the original (.orig) back. rvtfix's CefSharp flag (2023) is off here: 2020 uses CefSharp for
               # the Dynamo library and other panels that work without it, and the flag was never tried on them.
       RD="$B/drive_c/Program Files/Autodesk/Revit 2020"
-      [ -f "$ROOT/build/d3dwp/d3dwp.dll" ] || "$ROOT/scripts/build-d3dwp.sh" >/dev/null
-      "$ROOT/scripts/build-rvtfix.sh" >/dev/null # always: a DLL left in build/ may be older than the sources
+      "$ROOT/scripts/build-d3dwp.sh" >/dev/null
+      "$ROOT/scripts/build-rvtfix.sh" >/dev/null
       [ ! -f "$RD/OGSDeviceDX11.dll.orig" ] || mv -f "$RD/OGSDeviceDX11.dll.orig" "$RD/OGSDeviceDX11.dll"
       cp "$ROOT/build/d3dwp/d3dwp.dll" "$ROOT/build/rvtfix/rvtfix.dll" "$RD/" && "$ROOT/scripts/bottle-env.sh" "$NAME" RVTFIX_CEF_ARGS=
       printf '   %-10s exit=%-5s %s\n' warpshim "$?" "d3dwp.dll + rvtfix.dll (points OGSDeviceDX11.dll at d3dwp.dll; RVTFIX_CEF_ARGS empty)" | tee -a "$LOGDIR/summary.txt" ;;

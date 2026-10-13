@@ -90,7 +90,7 @@ for s in "${STEPS[@]}"; do
       w sc query AdskLicensingService 2>/dev/null | tr -d '\r' | grep -E 'STATE' | sed 's/^/   AdskLicensingService /' | tee -a "$LOGDIR/summary.txt" ;;
     svcshim) # the licensing service (Go) doesn't answer SCM under Wine (1053) — native shim tools/svcshim
       AL='C:\Program Files (x86)\Common Files\Autodesk Shared\AdskLicensing'
-      [ -f "$ROOT/build/svcshim/svcshim.exe" ] || "$ROOT/scripts/build-svcshim.sh" >>"$LOGDIR/svcshim.log" 2>&1
+      "$ROOT/scripts/build-svcshim.sh" >>"$LOGDIR/svcshim.log" 2>&1
       cp "$ROOT/build/svcshim/svcshim.exe" "$B/drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing/svcshim.exe"
       mkdir -p "$B/drive_c/ProgramData/Autodesk/AdskLicensingService/Log"
       # sc config binPath= doesn't change the path under Wine → ImagePath in the registry; SCM rereads it after a wineserver restart
@@ -110,7 +110,7 @@ for s in "${STEPS[@]}"; do
         | sed 's/^/   ssoenv     /' | tee -a "$LOGDIR/summary.txt" ;;
     wbemshim) # WMI shim: several async queries on one IWbemServices (tools/wbem-shim), as in 2020.
               # Affects all 64-bit processes in the bottle (changes the CLSID_WbemLocator registration).
-      [ -f "$ROOT/build/wbem-shim/wbemshim.dll" ] || "$ROOT/scripts/build-wbem-shim.sh" >>"$LOGDIR/wbemshim.log" 2>&1
+      "$ROOT/scripts/build-wbem-shim.sh" >>"$LOGDIR/wbemshim.log" 2>&1
       cp "$ROOT/build/wbem-shim/wbemshim.dll" "$B/drive_c/windows/system32/wbem/wbemshim.dll"
       w reg add 'HKLM\Software\Classes\CLSID\{4590F811-1D3A-11D0-891F-00AA004B2E24}\InprocServer32' /ve \
         /d 'C:\windows\system32\wbem\wbemshim.dll' /f >>"$LOGDIR/wbemshim.log" 2>&1
@@ -193,7 +193,7 @@ for s in "${STEPS[@]}"; do
       w reg query "HKLM\\SOFTWARE\\Autodesk\\SharedComponents\\$YEAR" 2>/dev/null | tr -d '\r' | grep -v '^$' | sed 's/^/   /' ;;
     ncryptshim) # Wine's ncrypt can't import a private ECDSA P-256 key (ECCPRIVATEBLOB) → assert in PersistenceDB\DataIntegrity.cpp:52
                 # and "unrecoverable error" at startup — as in 2020. Our own ncrypt.dll (tools/ncrypt-shim) for Revit.exe only.
-      [ -f "$ROOT/build/ncrypt-shim/ncrypt.dll" ] || "$ROOT/scripts/build-ncrypt-shim.sh" >>"$LOGDIR/ncryptshim.log" 2>&1
+      "$ROOT/scripts/build-ncrypt-shim.sh" >>"$LOGDIR/ncryptshim.log" 2>&1
       cp "$ROOT/build/ncrypt-shim/ncrypt.dll" "$B/drive_c/Program Files/Autodesk/Revit $YEAR/ncrypt.dll"
       w reg add 'HKCU\Software\Wine\AppDefaults\Revit.exe\DllOverrides' /v ncrypt /d native,builtin /f >>"$LOGDIR/ncryptshim.log" 2>&1
       say ncryptshim "$?" "Revit $YEAR\\ncrypt.dll + AppDefaults\\Revit.exe ncrypt=native,builtin" ;;
@@ -251,8 +251,8 @@ for s in "${STEPS[@]}"; do
     warpshim) # the material browser requires D3D11 WARP, which D3DMetal lacks → "Can't get OGS device … Material Browser dialog
               # can't be created", the window doesn't open (as in 2020). d3dwp.dll (tools/d3d11-warp-shim): WARP → HARDWARE;
               # the rvtfix step makes the loaded OGSDeviceDX11.dll load it instead of D3D11.dll.
-      [ -f "$ROOT/build/d3dwp/d3dwp.dll" ] || "$ROOT/scripts/build-d3dwp.sh" >>"$LOGDIR/warpshim.log" 2>&1
-      cp "$ROOT/build/d3dwp/d3dwp.dll" "$B/drive_c/Program Files/Autodesk/Revit $YEAR/d3dwp.dll"
+      "$ROOT/scripts/build-d3dwp.sh" >>"$LOGDIR/warpshim.log" 2>&1 &&
+        cp "$ROOT/build/d3dwp/d3dwp.dll" "$B/drive_c/Program Files/Autodesk/Revit $YEAR/d3dwp.dll"
       say warpshim "$?" "d3dwp.dll → Revit $YEAR (rvtfix points OGSDeviceDX11.dll at it)" ;;
     wv2env) # HYPOTHESIS: Revit's embedded WebView2 (start screen, Manage Links) shows a blank window, msedgewebview2 processes
             # quietly exit without crashing. Like Qt WebEngine in 2020 (ssoenv) — no GPU compositing. For all processes in the bottle.
