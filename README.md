@@ -21,7 +21,7 @@ No virtual machine, no Windows installation.
 
 Worksharing is not tested on any version yet.
 
-Tested on an Apple M5 MacBook (16 GB), macOS 26, CrossOver 26.3. Modeling takes about 1.5–2× as long as on a
+Tested on an Apple M5 MacBook (16 GB), macOS 26, CrossOver 26.3. Modeling takes about 1.3–2× as long as on a
 fast Windows PC ([benchmarks](docs/benchmarks.md)).
 
 ## What you need

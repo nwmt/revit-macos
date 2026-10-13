@@ -18,7 +18,7 @@ other. These are our numbers on one machine, not a promise for yours.
 
 ## Results
 
-Full_Simplified, average of 3 runs.
+Full_Simplified, average of 3 runs (2027: 4).
 
 | Revit | Modeling | Graphics | Anti-aliasing | Windows reference |
 |---|---:|---:|---|---|
@@ -27,7 +27,7 @@ Full_Simplified, average of 3 runs.
 | 2024 | 122.9 s | 29.9 s | **off** | Intel i9-13900KS + RTX 4090 desktop: 60.2 s modeling |
 | 2025 | 128.1 s | 31.9 s | **off** | Intel i9-13900KS virtual machine (Hyper-V): 84.7 s modeling |
 | 2026 | 128.0 s | 32.4 s | on (benchmark template) | none |
-| 2027 | 99.0 s | 27.9 s | **off** | Intel Core Ultra 9 275HX + RTX 5090 laptop: 65.2 s modeling |
+| 2027 | 87.3 s | 28.9 s | **off** | Intel Core Ultra 9 275HX + RTX 5090 laptop: 65.2 s modeling |
 
 ## Windows references
 
@@ -48,6 +48,7 @@ Windows laptop, done over remote desktop, which lowers its graphics score.
   The Mac takes about 1.5× as long for modeling.
 - **2026:** measured on 2026.0, with anti-aliasing on, before we switched to measuring without it; other apps were
   using a lot of CPU during the run. To be re-measured. There is no Windows reference for 2026.
-- **2027:** measured on 2027.3 (build 27.3.0.28). Runs were steady: modeling 100.2 / 98.5 / 98.2 s, graphics
-  28.0 / 27.9 / 27.9 s. Windows reference: Revit 2027.0 on a laptop with an Intel Core Ultra 9 275HX and 128 GB.
-  The Mac takes about 1.5× as long for modeling.
+- **2027:** measured on 2027.3 (build 27.3.0.28), 4 runs on the normal bottle and a copy of it. Runs were steady:
+  modeling 87.2 / 86.8 / 87.5 / 87.8 s, graphics 28.7 / 29.4 / 28.7 / 28.9 s. Earlier it was 99.0 s: since shims
+  0.4.0, `tools/tlbpin` caches the cursor position. Windows reference: Revit 2027.0 on a laptop with an Intel Core
+  Ultra 9 275HX and 128 GB. The Mac takes about 1.3× as long for modeling.
