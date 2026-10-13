@@ -17,7 +17,8 @@ def attrs(tag):
 
 def packages(dist):
     app = glob.glob(os.path.join(dist, "manifest", "app.*.xml"))
-    assert len(app) == 1, app
+    if len(app) != 1:
+        sys.exit(f"expected one manifest/app.*.xml in {dist}, found {len(app)}")
     for tag in re.findall(r"<Package\s[^>]*>", open(app[0], encoding="utf-8").read()):
         a = attrs(tag)
         pkg = open(os.path.join(dist, a["path"]), encoding="utf-8").read()
@@ -26,7 +27,9 @@ def packages(dist):
         yield a["name"], a.get("installAs", ""), fa.get("type", ""), fa.get("file", ""), fa.get("installParams", "")
 
 
-if __name__ == "__main__":
+def main():
+    if len(sys.argv) < 3 or sys.argv[1] not in ("list", "get"):
+        sys.exit(__doc__)
     cmd, dist, *names = sys.argv[1:]
     rows = list(packages(dist))
     if cmd == "get":
@@ -37,3 +40,7 @@ if __name__ == "__main__":
         rows = [by[n] for n in names]
     for r in rows:
         print("\t".join(r))
+
+
+if __name__ == "__main__":
+    main()

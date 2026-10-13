@@ -360,8 +360,8 @@ PY
       fi
       for f in "$B/drive_c/ProgramData/Autodesk/RVT $YEAR/UserDataCache/Revit.ini" \
                "$B/drive_c/users/crossover/AppData/Roaming/Autodesk/Revit/Autodesk Revit $YEAR/Revit.ini"; do
-        [ -f "$f" ] || continue; [ -f "$f.orig" ] || cp "$f" "$f.orig" # from .orig — re-running gives the same result
-        python3 -I "$ROOT/tools/revitini.py" "$f.orig" "$f" "${keys[@]}" >>"$LOGDIR/revitini.log" 2>&1
+        [ -f "$f" ] || continue   # revitini.py keeps the untouched file as .orig
+        python3 -I "$ROOT/tools/revitini.py" "$f" "${keys[@]}" >>"$LOGDIR/revitini.log" 2>&1
         say revitini "$?" "Revit.ini ${keys[*]}${theme:+ ($theme)}: ${f#$B/drive_c/}"
       done ;;
     register) # register the product with AdskLicensing (instead of licRegister in the MSI), like the 2020 register step
