@@ -114,6 +114,9 @@ reset; run "" install 2024;          expect "install runs install.sh" 0 ""
 check "install passes the year and the default bottle" called "install.sh 2024 rvt2024-a | REVIT_YEAR= INSTALL_DRYRUN= "
 reset; run "" check 2025 rvt2025-b;  expect "check runs install.sh" 0 ""
 check "check is a dry run of the named bottle" called "install.sh 2025 rvt2025-b | REVIT_YEAR= INSTALL_DRYRUN=1"
+reset; fake_install 2024; run "" install 2024 rvt2024-b; expect "install refuses during an install of this year" 1 "An install of Revit 2024 is running."
+check "install running: no second install" not_called "install.sh"
+reset; bottle rvt2024-a 2024 2024; fake_script rvt2024-a; run "" install 2024; expect "install refuses while a script works on the bottle" 1 "A script is still working on rvt2024-a."
 
 # ---- install.sh ----
 reset; run_install "" 2024 default;  expect "install.sh refuses the bottle name default" 1 'cannot be "default"'
@@ -129,6 +132,9 @@ reset; run "" addins 2027;           expect "no add-ins for 2027" 1 "The add-in 
 reset; run "" addins 2024;           expect "addins needs the bottle" 1 "There is no bottle rvt2024-a. To install Revit 2024: ./revit install 2024"
 reset; bottle rvt2024-a 2024 2024; run "" addins 2024; expect "addins runs the add-in script" 0 ""
 check "addins passes the year and the bottle" called "d8-addins.sh rvt2024-a | REVIT_YEAR=2024"
+reset; bottle rvt2024-a 2024 2024; fake_revit rvt2024-a 2024; run "" addins 2024
+expect "addins refuses while Revit runs" 1 "Revit 2024 is running in rvt2024-a."
+check "running: no add-ins installed" not_called "d8-addins.sh"
 reset; bottle rvt2025-a 2025 2025; run "" stop 2024 rvt2025-a
 expect "stop refuses a bottle of another year" 1 "Bottle rvt2025-a is for Revit 2025, not 2024."
 check "wrong year: nothing stopped" not_called "wineserver"

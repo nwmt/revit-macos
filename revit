@@ -133,11 +133,11 @@ extracted_plan() { # sets DROP_X (1 = remove deletes the unpacked files) and KEE
 }
 
 case "$CMD" in
-  install) exec "$ROOT/install.sh" "$YEAR" "$NAME" ;;
+  install) not_busy; exec "$ROOT/install.sh" "$YEAR" "$NAME" ;;   # two installs of a year share the unpacked installer
   check)   export INSTALL_DRYRUN=1; exec "$ROOT/install.sh" "$YEAR" "$NAME" ;;
   addins)
     in_list "$YEAR" "${REVIT_ADDIN_YEARS[@]}" || die "The add-in script is not set up for Revit $YEAR yet."
-    need_bottle
+    need_bottle; not_busy   # the add-in installers and the trust step change the bottle
     export REVIT_YEAR="$YEAR"; exec "$ROOT/scripts/d8-addins.sh" "$NAME" ;;
   stop)
     need_crossover; need_bottle
