@@ -55,7 +55,11 @@ while read -r u sub; do
 done <<<"$all"
 
 if [ ${#plan[@]} -gt 0 ]; then
-  free=$(df -k "$SRC" | awk 'NR==2 {print $4 * 1024}')
+  # as in install.sh: what Finder calls "available", with purgeable space that df does not count
+  free=$(osascript -l JavaScript -e 'ObjC.import("Foundation"); var r = Ref();
+    $.NSURL.fileURLWithPath("/").getResourceValueForKeyError(r, $.NSURLVolumeAvailableCapacityForImportantUsageKey, null);
+    ObjC.unwrap(r[0])' 2>/dev/null) || free=""
+  [[ "$free" =~ ^[0-9]+$ ]] || free=$(df -k "$SRC" | awk 'NR==2 {print $4 * 1024}')
   [ "$free" -gt $((need + 2000000000)) ] || { echo "!! not enough disk space: need $((need / 1000000000 + 2)) GB, free $((free / 1000000000)) GB" >&2; exit 1; }
   for p in "${plan[@]}"; do
     read -r u size sub <<<"$p"; f="$SRC/$sub/$(basename "$u")"
