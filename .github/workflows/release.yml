@@ -27,8 +27,8 @@ jobs:
           Prebuilt shim DLLs for Wine/CrossOver, built by GitHub Actions from this tag's sources
           (\`scripts/build-release.sh\`). What each one fixes: [docs/how-it-works.md](https://github.com/${{ github.repository }}/blob/$GITHUB_REF_NAME/docs/how-it-works.md).
 
-          \`./install.sh\` still builds them from source; the package is for checking and reuse.
-          No Autodesk or Microsoft files are included.
+          \`./install.sh\` downloads this package (\`scripts/get-shims.sh\`, SHA-256 pinned in \`scripts/lib/shims.sh\`).
+          License: MIT, \`build/LICENSE\` in the package. No Autodesk or Microsoft files are included.
 
           SHA-256 of \`revit-macos-shims-$VER.zip\`: \`$SUM\`
           NOTES

@@ -10,6 +10,8 @@ for s in "$ROOT"/scripts/build-{add-printer,d3dwp,ncrypt-shim,rvtfix,svcshim,tlb
   echo ">> $(basename "$s")"; "$s" >/dev/null
 done
 OUT="$ROOT/dist/revit-macos-shims-$VER.zip"; mkdir -p "$ROOT/dist"; rm -f "$OUT"
-(cd "$ROOT" && find build/{d3dwp,ncrypt-shim,pdf-printer,rvtfix,svcshim,tlbpin,vkshim,wbem-shim,wv2fix} -type f \( -name '*.dll' -o -name '*.exe' \) | sort | zip -q -X "$OUT" -@)
+# the license goes with the files; build/, not the root: get-shims.sh unpacks into the repo root
+cp "$ROOT/LICENSE" "$ROOT/build/LICENSE"
+(cd "$ROOT" && { echo build/LICENSE; find build/{d3dwp,ncrypt-shim,pdf-printer,rvtfix,svcshim,tlbpin,vkshim,wbem-shim,wv2fix} -type f \( -name '*.dll' -o -name '*.exe' \) | sort; } | zip -q -X "$OUT" -@)
 (cd "$ROOT/dist" && shasum -a 256 "$(basename "$OUT")" > "$(basename "$OUT").sha256")
 unzip -l "$OUT"; cat "$OUT.sha256"
