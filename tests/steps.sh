@@ -289,4 +289,24 @@ check "revitini: dark canvas" grep -q "CanvasTheme=0" <(iconv -f UTF-16 -t UTF-8
 reset; mkbottle rvt2026-t 2026 2026; run_steps 2026 rvt2026-t dynamo gdoff
 expect "dynamo and gdoff skip what is not there" 0 ""; check "gdoff: in the summary" grep -qE '^   gdoff +exit=skip ' "$RUN/summary.txt"
 
+# ---- steps: add-ins ----
+reset; mkbottle rvt2024-t 2024 2024; run_steps 2024 rvt2024-t wpfsw trust check
+expect "add-in steps without add-ins" 0 ""; check "trust: in the summary" grep -qE '^   trust +exit=skip +no add-in assemblies' "$RUN/summary.txt"
+run_steps 2024 rvt2024-t wpfsw trust check; expect "add-in steps again: still fine" 0 "check"
+check "wpfsw sets software WPF" called "[HKCU\\Software\\Microsoft\\Avalon.Graphics] [/v] [DisableHWAcceleration]"
+# fake wine rules match its arguments as one string: "reg query HKCU\Software\…"
+rule "reg query HKCU\\Software\\Microsoft\\Avalon.Graphics" 1
+run_steps 2024 rvt2024-t wpfhw; expect "wpfhw without the value is fine" 0 "wpfhw"
+reset; mkbottle rvt2024-t 2024 2024; rule "reg query HKCU\\Software\\Microsoft\\Avalon.Graphics" 67
+run_steps 2024 rvt2024-t wpfhw; expect "wpfhw: a failed registry query fails the step" 1 "wpfhw"
+reset; mkbottle rvt2024-t 2024 2024; rule "reg delete HKCU\\Software\\Microsoft\\Avalon.Graphics" 1
+run_steps 2024 rvt2024-t wpfhw; expect "wpfhw: a failed delete fails the step" 1 "wpfhw"
+reset; mkbottle rvt2024-t 2024 2024; run_steps 2024 rvt2024-t revitlookup
+expect "revitlookup without its installer says where it goes" 1 "revitlookup"
+check "revitlookup: the log names the missing file" grep -q "RevitLookup-2024.3.4-SingleUser.msi" "$RUN/revitlookup.log"
+reset; mkbottle rvt2027-t 2027 2027; run_steps 2027 rvt2027-t revitlookup
+expect "revitlookup: not set up for 2027 is a skip" 0 ""; check "revitlookup: in the summary" grep -qE '^   revitlookup +exit=skip ' "$RUN/summary.txt"
+reset; mkbottle rvt2024-t 2024 2024; run_steps 2024 rvt2024-t enscape
+expect "enscape: not set up for 2024" 1 "enscape"
+
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]
