@@ -18,7 +18,8 @@ Revit is a Windows x64 program. On an Apple Silicon Mac it runs like this:
 ## What ./revit install does
 
 1. Checks the Mac, CrossOver, the Homebrew tools and the files in `installers/`, and lists everything that is missing.
-2. Downloads our prebuilt shims from the project's GitHub release.
+2. Downloads our prebuilt shims from the project's GitHub release, and the Microsoft runtimes the version needs
+   ([Microsoft components](#microsoft-components)).
 3. Downloads Revit and its update from your Create Installer file (2024 and newer).
 4. Unpacks the installer on the Mac.
 5. Creates the bottle.
@@ -67,8 +68,8 @@ The project ships no Microsoft files. `./revit install` puts these into the bott
 | Component | Comes from | Step |
 |---|---|---|
 | Visual C++ runtimes; .NET Framework 4.7 (2020) and 4.8 (2023, 2024); .NET 8 and 10 (2025+) | Revit's installer, which ships them | `vc`, `dotnet` |
-| .NET Framework 4.0 (2020, 2023, 2024) | Microsoft's offline installer, which you download ([installers](../installers/README.md#extra-files)) | `dotnet` |
-| WebView2 runtime (2024+) | Microsoft's installer, which you download; otherwise the older one in Revit's installer | `webview2` |
+| .NET Framework 4.0 (2020, 2023, 2024) | Microsoft's offline installer from Microsoft's download server: the same file and checksum winetricks uses | `dotnet` |
+| WebView2 runtime (2024+) | Microsoft's installer for the newest build, from Microsoft's download link; if that download fails, the older one in Revit's installer | `webview2` |
 | Core fonts, MSXML 6 | winetricks downloads them from their usual sources | `fonts` |
 | `riched20.dll`, `msftedit.dll`, `usp10.dll` | The Windows 7 SP1 update package (KB976932) from Microsoft's download server: the same file and checksum winetricks uses | `richedit` |
 | `msls31.dll` | A 64-bit Windows 7 or 10 PC with a Windows license ([what you need](../README.md#what-you-need)) | `richedit` |

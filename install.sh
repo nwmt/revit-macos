@@ -58,15 +58,6 @@ if [ ! -d "$DST" ] && [ -z "$GET" ] && [ -z "$part1" ] && [ -z "$(find "$SRC" -m
 fi
 RX="$ROOT/installers/redist/win7sp1/x64"
 [ -f "$RX/msls31.dll" ] || need "installers/redist/win7sp1/x64/msls31.dll missing" "copy C:\\Windows\\System32\\msls31.dll from a licensed Windows 7/10 x64 PC, see installers/README.md"
-case "$(revit_dotnet "$YEAR")" in netfx47|netfx48) # .NET Framework 4.7/4.8 goes on top of a real 4.0
-  [ -f "$ROOT/installers/redist/dotNetFx40_Full_x86_x64.exe" ] \
-    || need "installers/redist/dotNetFx40_Full_x86_x64.exe missing" ".NET Framework 4.0 offline installer from Microsoft, see installers/README.md" ;;
-esac
-if [ "$YEAR" -ge 2024 ]; then
-  [ -f "$ROOT/installers/redist/webview2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe" ] \
-    || warn "no fresh WebView2 runtime in installers/redist/webview2/" \
-            "optional but recommended: without it the start screen and Manage Links stay blank (installers/README.md)"
-fi
 
 if [ -d "$B" ] && [ "${CX_RECREATE:-0}" != 1 ]; then
   need "bottle $BOTTLE already exists" "pick another name (./revit install $YEAR rvt$YEAR-b) or rebuild it: ./revit rebuild $YEAR$SFX"
@@ -88,17 +79,20 @@ echo "  ✓ ready"
 # ---- plan ----
 if [ "$YEAR" = 2020 ]; then
   PLAN=("scripts/get-shims.sh"
+        "scripts/get-redist.sh $YEAR"
         "scripts/inspect-installer.sh 2020 --extract"
         "scripts/build-bottle.sh $BOTTLE"
         "scripts/make-launcher.sh $BOTTLE 2020")
 elif [ "$YEAR" = 2023 ]; then # sign-in in Revit's own window (AdSSO): no link handler
   PLAN=("scripts/get-shims.sh"
+        "scripts/get-redist.sh $YEAR"
         "scripts/inspect-installer.sh 2023 --extract"
         "scripts/cx-bottle.sh $BOTTLE"
         "scripts/install-odis.sh 2023 $BOTTLE"
         "scripts/make-launcher.sh $BOTTLE 2023")
 else
   PLAN=("scripts/get-shims.sh"
+        "scripts/get-redist.sh $YEAR"
         "scripts/inspect-installer.sh $YEAR --extract"
         "scripts/cx-bottle.sh $BOTTLE"
         "scripts/install-odis.sh $YEAR $BOTTLE"

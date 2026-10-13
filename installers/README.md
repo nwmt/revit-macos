@@ -27,13 +27,10 @@ Keep the file names as Autodesk gives them. Only the versions you install need t
 
 - **msls31.dll** (all versions, required) → `installers/redist/win7sp1/x64/`. Revit needs it to show text.
   Where to get it: [What you need](../README.md#what-you-need).
-- **.NET Framework 4.0** (Revit 2020, 2023, 2024) → `installers/redist/`.
-  The offline installer `dotNetFx40_Full_x86_x64.exe` from Microsoft.
-- **WebView2 runtime** (Revit 2024 and newer, recommended) → `installers/redist/webview2/`.
-  `MicrosoftEdgeWebView2RuntimeInstallerX64.exe` from Microsoft: <https://go.microsoft.com/fwlink/?linkid=2124701>
-  (Evergreen Standalone, x64). Without it the start screen and Manage Links stay white.
-- **RichEdit files**: `./revit install` downloads them from Microsoft by itself (Windows 7 SP1 package, about
-  947 MB, once).
+- **.NET Framework 4.0** (Revit 2020, 2023, 2024), **WebView2 runtime** (Revit 2024 and newer) and the **RichEdit
+  files**: `./revit install` downloads them from Microsoft by itself, once (.NET 4.0 50 MB, WebView2 about 200 MB,
+  the Windows 7 SP1 package with RichEdit about 947 MB). WebView2 is always the newest build: delete
+  `installers/redist/webview2/` to get a newer one with the next `./revit install`.
 
 ## Add-ins (optional)
 
@@ -119,8 +116,8 @@ installers/
 │   └── update/Revit_2027_3_0.exe                          downloaded
 ├── redist/
 │   ├── win7sp1/x64/msls31.dll                             all versions
-│   ├── dotNetFx40_Full_x86_x64.exe                        2020, 2023, 2024
-│   ├── webview2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe   2024 and newer, recommended
+│   ├── dotNetFx40_Full_x86_x64.exe                        downloaded; 2020, 2023, 2024
+│   ├── webview2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe   downloaded; 2024 and newer
 │   └── nuget/system.valuetuple.4.5.0.nupkg                Enscape, 2020
 ├── addins/                                                optional
 │   ├── revitlookup/RevitLookup-<year>….msi

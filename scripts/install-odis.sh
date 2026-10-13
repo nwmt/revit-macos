@@ -198,7 +198,7 @@ for s in "${STEPS[@]}"; do
                # (IDSDK 3070: WebView2 is not found). Installer from the distribution, switches from pkg.webview2.xml.
       # The 2026 installer ships runtime 103 (2022), but Revit's SDK is 1.0.2478.35 (needs runtime ~124+): Revit gets
       # E_NOINTERFACE and closes the browser → blank start screen and Manage Links. On Windows WebView2 self-updates;
-      # here we use a fresh Microsoft Evergreen Standalone from installers/redist/webview2 (see installers/README.md), if present.
+      # here we use a fresh Microsoft Evergreen Standalone from installers/redist/webview2 (scripts/get-redist.sh), if present.
       WV="$ROOT/installers/redist/webview2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
       [ -f "$WV" ] || WV="$DIST/3rdParty/x64/WebView2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
       run_exe webview2 "$WV" /silent /install

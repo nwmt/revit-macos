@@ -80,9 +80,9 @@ H="$(hostname)"; sudo sh -c "printf '127.0.0.1\t$H\n::1\t$H\n' >> /etc/hosts"
 
 Revit 2023 and newer
 
-**Solution:** For 2024 and newer, put the WebView2 runtime into `installers/redist/webview2/` first
-([Extra files](../installers/README.md#extra-files)). Then `./revit rebuild <year>`: the fixes for the built-in
-browser are part of `./revit install`.
+**Solution:** `./revit rebuild <year>`: the fixes for the built-in browser are part of `./revit install`. For 2024 and
+newer it also downloads a fresh WebView2 runtime; if that download failed, the install said "no fresh WebView2
+runtime". Then check the internet connection and rebuild again.
 
 ### Web panels sometimes redraw when another web window opens
 
