@@ -155,6 +155,9 @@ case "$CMD" in
     if [ "$want_x" = 1 ] && [ "$DROP_X" = 0 ]; then echo "Kept: installers/extracted/revit$YEAR ($KEEP_X)."; fi
     [ "$want_x" = 1 ] || DROP_X=0
     if [ -d "$B" ]; then
+      # the bottle's services (Autodesk licensing) run for hours without Revit, and CrossOver does not delete a bottle
+      # with programs in it: end them first (it fails when nothing runs, which is fine)
+      WINEPREFIX="$B" "$CX/bin/wineserver" -k 2>/dev/null </dev/null 9>&-
       "$CX/bin/cxbottle" --bottle "$NAME" --delete --force </dev/null 9>&-
       [ -d "$B" ] && die "The bottle is still there: $(tilde "$B"). Nothing else was removed. Quit CrossOver and run ./revit remove $YEAR$SFX again."
     fi

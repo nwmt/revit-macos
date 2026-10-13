@@ -190,6 +190,7 @@ run "no" remove 2024;                expect "remove can be cancelled" 1 "Cancell
 check "cancelled remove kept the bottle" test -d "$BOTTLES/rvt2024-a"
 run "2024" remove 2024;              expect "remove says Documents stays" 0 "Documents in this bottle is your Mac folder ~/Documents. It stays."
 check "remove deleted the bottle" test ! -d "$BOTTLES/rvt2024-a"
+check "remove stops the bottle's services before deleting it" eval '[ "$(grep -e "^wineserver -k |.*WINEPREFIX=$BOTTLES/rvt2024-a" -e "^cxbottle .*--delete" "$CALLS" | cut -c1-8 | tr "\n" " ")" = "wineserv cxbottle " ]'
 check "remove deleted the Revit app" test ! -d "$H/Applications/Revit 2024 (rvt2024-a).app"
 check "remove deleted the Sign-In app" test ! -d "$H/Applications/Autodesk Sign-In (rvt2024-a).app"
 check "remove deleted the unpacked files" test ! -d "$R/installers/extracted/revit2024"
