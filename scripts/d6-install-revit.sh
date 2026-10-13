@@ -94,18 +94,17 @@ for s in "${STEPS[@]}"; do
     adsso)     msi adsso     'x64\AdSSO\AdSSO.msi' ;;
     rcl)       msi rcl       'x64\RCL\RCL.msi' "TRANSFORMS=:$LANG_UI.mst" "${SETUP_PROPS[@]}" \
                  'INSTALLDIR=C:\Program Files\Autodesk\Revit Content 2020' ;;
-    rvt) # licIsSvcUpgraded runs `InstHelper upgrade isUpgraded` from the version folder; we run the same first.
-         # Exit 0 → Autodesk's RVT.msi as it is. Otherwise (exit 100 when the service runs through Current, see svcshim)
-         # → RVT-wine.msi (scripts/patch-rvt-msi.sh), where CLM_SKIP_SVCCHECK=1 skips that check.
-      rvtmsi=RVT.msi; svccheck=()
+    rvt) # licIsSvcUpgraded runs `InstHelper upgrade isUpgraded` from the version folder and fails the install (1603)
+         # unless the licensing service answers (exit 100 when it runs through Current, see svcshim). We run the same
+         # first, so a service that does not answer stops the install here, with the helper's output in svccheck.log.
       ver="$(readlink "$B/drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing/Current")"; [ -n "$ver" ] || ver=Current
       if ! w "C:\\Program Files (x86)\\Common Files\\Autodesk Shared\\AdskLicensing\\$ver\\helper\\AdskLicensingInstHelper.exe" \
            upgrade isUpgraded >>"$LOGDIR/svccheck.log" 2>&1; then
-        [ -f "$DIST_UNIX/x64/RVT/RVT-wine.msi" ] || "$ROOT/scripts/patch-rvt-msi.sh" "$NAME"
-        rvtmsi=RVT-wine.msi; svccheck=(CLM_SKIP_SVCCHECK=1)
-        printf '   %-10s %s\n' rvt "licensing check did not pass (svccheck.log): installing from RVT-wine.msi" | tee -a "$LOGDIR/summary.txt" # no exit=: not a failure
+        printf '   %-10s exit=%-5s %s\n' rvt fail "the Autodesk licensing service does not answer, so RVT.msi would fail: $LOGDIR/svccheck.log" \
+          | tee -a "$LOGDIR/summary.txt"
+        exit 1
       fi
-      msi rvt "x64\\RVT\\$rvtmsi" "TRANSFORMS=:$LANG_UI.mst;:all.mst" "${SETUP_PROPS[@]}" ${svccheck[@]+"${svccheck[@]}"} \
+      msi rvt 'x64\RVT\RVT.msi' "TRANSFORMS=:$LANG_UI.mst;:all.mst" "${SETUP_PROPS[@]}" \
         'INSTALLDIR=C:\Program Files\Autodesk\Revit 2020' ;;
     ret)       msi ret       'x64\RET\RET.msi' ;;
     materials) # minimal set: material library + base image library

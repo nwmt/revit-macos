@@ -33,6 +33,15 @@ All versions
 A Revit bug that also happens on Windows goes to Autodesk. A CrossOver problem that also happens in other apps goes
 to CodeWeavers.
 
+## Install
+
+### Install stops: "the Autodesk licensing service does not answer"
+
+All versions
+
+**Solution:** `./revit rebuild <year>`. If it stops there again, [report a problem](#report-a-problem) and attach the
+`svccheck.log` it names.
+
 ## Sign-in
 
 ### Revit hangs on the splash screen after the first sign-in

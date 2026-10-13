@@ -116,32 +116,30 @@ for s in "${STEPS[@]}"; do
       run_exe idmgr "$DIST/x64/AdskIdentityManager/AdskIdentityManager-Installer.exe" --mode unattended
       ls "$B/drive_c/Program Files/Autodesk/" 2>/dev/null | sed 's/^/   Program Files\\Autodesk\\/' | tee -a "$LOGDIR/summary.txt" ;;
     rvt) # RVT.msi: LaunchCondition "Installed or ADSK_SETUP_EXE or ADSK_ODIS_SETUP"; properties from pkg.RVT.xml.
-         # licIsSvcUpgraded runs `InstHelper upgrade isUpgraded` from the version folder; we run the same first. Exit 0
-         # (2027 after the svcshim step: "upgraded successfully" inside the MSI) → Autodesk's RVT.msi as it is. Otherwise
-         # → RVT-wine.msi (scripts/patch-rvt-msi.sh), where CLM_SKIP_SVCCHECK=1 skips that check. The helper in Current
-         # can pass where the one in the version folder fails (2020: the service answers /hubversion with "Current").
+         # licIsSvcUpgraded runs `InstHelper upgrade isUpgraded` from the version folder and fails the install (1603) unless
+         # the licensing service answers (after the svcshim step it does: "upgraded successfully"). We run the same first,
+         # so a service that does not answer stops the install here, with the helper's output in svccheck.log. The helper
+         # in Current can pass where the one in the version folder fails (2020: the service answered "Current").
          # licRegister calls `InstHelper register --upgrade`, which in AdskLicensing 15 looks for FNP_Act_Installer.dll,
          # which no longer exists (exit 100 → 1603) → CLM_SKIP_REGISTER=1, register in the register step.
          # REVITLANGUAGE is a three-letter code (RVT.msi Property: ENU); hypothesis: Revit.ini [Language] Select comes from it. With en-US
          # Revit 2027 couldn't find template paths (revitini step). A fresh install with ENU is not yet verified.
          # 2024: the update (inspect-installer.sh lays it over the base) is a patch to RVT.msi, x64/RVTSP*.msp (pkg.RVTSP.xml,
          # InstallFile type MSP), not a new RVT.msi as in 2026+ → applied in the same install with PATCH=.
-      rvtmsi=RVT.msi; svccheck=()
       ver="$(readlink "$B/drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing/Current")"; [ -n "$ver" ] || ver=Current
       if ! w "C:\\Program Files (x86)\\Common Files\\Autodesk Shared\\AdskLicensing\\$ver\\helper\\AdskLicensingInstHelper.exe" \
            upgrade isUpgraded >>"$LOGDIR/svccheck.log" 2>&1; then
-        [ -f "$DIST/x64/RVT/RVT-wine.msi" ] || "$ROOT/scripts/patch-rvt-msi.sh" "$NAME" "$YEAR" >>"$LOGDIR/patch.log" 2>&1
-        rvtmsi=RVT-wine.msi; svccheck=(CLM_SKIP_SVCCHECK=1)
-        printf '   %-10s %s\n' rvt "licensing check did not pass (svccheck.log): installing from RVT-wine.msi" | tee -a "$LOGDIR/summary.txt" # no exit=: not a failure
+        say rvt fail "the Autodesk licensing service does not answer, so RVT.msi would fail: $LOGDIR/svccheck.log"
+        exit 1
       fi
       patch=(); x="$(grep -l 'InstallFile type="MSP"' "$DIST"/x64/pkg.*.xml 2>/dev/null | head -1)"
       if [ -n "$x" ]; then
         f="$(grep -o 'InstallFile type="MSP"[^>]* file="[^"]*"' "$x" | sed 's/.* file="//; s/"$//')"
         [ -f "$DIST/$f" ] && patch=("PATCH=$(win "$DIST/$f")")
       fi
-      msi_win rvt "$(win "$DIST")\\x64\\RVT\\$rvtmsi" "TRANSFORMS=:$LANG_UI.mst;:all.mst" \
+      msi_win rvt "$(win "$DIST")\\x64\\RVT\\RVT.msi" "TRANSFORMS=:$LANG_UI.mst;:all.mst" \
         ADSK_SETUP_EXE=1 ADSK_EULA_STATUS=#1 "ADLM_PRODKEY=$(revit_prodkey "$YEAR")" ADLM_EULA_COUNTRY=US \
-        REVITLANGUAGE=ENU ${svccheck[@]+"${svccheck[@]}"} CLM_SKIP_REGISTER=1 "INSTALLDIR=C:\\Program Files\\Autodesk\\Revit $YEAR" \
+        REVITLANGUAGE=ENU CLM_SKIP_REGISTER=1 "INSTALLDIR=C:\\Program Files\\Autodesk\\Revit $YEAR" \
         ${patch[@]+"${patch[@]}"}
       ls "$B/drive_c/Program Files/Autodesk/Revit $YEAR/Revit.exe" >/dev/null 2>&1 && say rvt 0 "Revit.exe is in place" ;;
     pkgs) # product packages from manifest/app.RVT.xml (except RVT — rvt step): ADIX via tools/adix.py, MSI via msiexec.
