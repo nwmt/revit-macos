@@ -203,4 +203,44 @@ check "TERM: the running Wine program finished" test -f "$T/slow-done"
 check "TERM: the next step did not run" test "$(tr '\n' ' ' < "$T/order")" = "t_slow "
 in_repo 'lock_free && echo free'; expect "TERM: the lock is free afterwards" 0 "free"
 
+# ---- steps: runtimes, licensing ----
+lic_rule() { # $1 = exit code of the fake licensing installer; it lays out AdskLicensing as the real one does
+  rule "licensing.exe" "$1" "mkdir -p '$BOTTLES/rvt$2-t/drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing/16.1.0.1/helper' '$BOTTLES/rvt$2-t/drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing/Currentx'; touch '$BOTTLES/rvt$2-t/drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing/16.1.0.1/helper/AdskLicensingInstHelper.exe'"
+}
+AL2024="$BOTTLES/rvt2024-t/drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing"
+reset; mkbottle rvt2024-t 2024 2024; mkdist 2024; lic_rule 84 2024; run_steps 2024 rvt2024-t licensing
+expect "licensing: the expected 84 is success" 0 ""; check "licensing: in the summary" grep -qE '^   licensing +exit=0 +AdskLicensing' "$RUN/summary.txt"
+check "licensing: Current points at the version" test "$(readlink "$AL2024/Current")" = 16.1.0.1
+check "licensing: the mklink garbage folder is gone" test ! -e "$AL2024/Currentx"
+check "licensing: version.ini written" grep -q "version=16.1.0.1" "$AL2024/version.ini"
+run_steps 2024 rvt2024-t licensing; expect "licensing twice: the second run skips the installer" 0 ""; check "licensing twice: skipped the installer" grep -q "already installed: 16.1.0.1" "$RUN/summary.txt"
+reset; mkbottle rvt2024-t 2024 2024; mkdist 2024; lic_rule 85 2024; run_steps 2024 rvt2024-t licensing
+expect "licensing: another code fails" 1 "Step licensing failed"
+reset; mkbottle rvt2024-t 2024 2024; teststeps; mkdist 2024; rule "licensing.exe" 5; run_steps 2024 rvt2024-t licensing t_ok
+expect "a failed critical step stops the run" 1 "Step licensing failed, and the steps after it need it: stopped."
+check "critical: the next step did not run" test ! -e "$T/order"
+reset; mkbottle rvt2024-t 2024 2024; teststeps; run_steps 2024 rvt2024-t licensing
+expect "a step that needs the installer checks for it first" 1 "No unpacked Revit 2024 installer"
+reset; mkbottle rvt2024-t 2024 2024; mkdist 2024; rule "licensing.exe" 84; run_steps 2024 rvt2024-t licensing
+expect "licensing: 84 without the installed files fails" 1 "Step licensing failed"
+reset; mkbottle rvt2025-t 2025 2025; mkdist 2025; D="$R/installers/extracted/revit2025"
+mkdir -p "$D/3rdParty/x64/VCRedist/2022" "$D/3rdParty/x86/VCRedist/2022" "$D/3rdParty/x86/VCRedist/2019"
+touch "$D/3rdParty/x64/VCRedist/2022/VC_redist.x64.exe" "$D/3rdParty/x86/VCRedist/2022/VC_redist.x86.exe"
+echo '<Package><InstallFile file="3rdParty/x86/VCRedist/2019/vc.exe" installParams="/q"/></Package>' > "$D/3rdParty/x86/VCRedist/2019/pkg.vc.xml"
+rule "vc22x86" 194; run_steps 2025 rvt2025-t vc
+expect "vc: 3010 (194) is success" 0 ""; check "vc: in the summary" grep -qE '^   vc +exit=0 ' "$RUN/summary.txt"
+check "vc: the VC++ 2022 installers ran" called "[C:\\vc22x64.exe] [/install] [/quiet] [/norestart]"
+check "vc: with VC++ 2022 present the XML list is not used" not_called "vc19"
+reset; mkbottle rvt2026-t 2026 2026; mkdist 2026; D="$R/installers/extracted/revit2026"
+mkdir -p "$D/3rdParty/x64/dotNet/80" "$D/3rdParty/x64/dotNet/100"
+touch "$D/3rdParty/x64/dotNet/80/windowsdesktop-runtime-8.0.1-win-x64.exe" "$D/3rdParty/x64/dotNet/100/windowsdesktop-runtime-10.0.0-win-x64.exe"
+run_steps 2026 rvt2026-t dotnet; expect "dotnet runs" 0 "dotnet"
+check "dotnet: both runtimes, 8 before 10" test "$(grep -o 'netdesk[0-9]*' "$CALLS" | tr '\n' ' ')" = "netdesk80 netdesk100 "
+reset; mkbottle rvt2024-t 2024 2024; mkdist 2024; run_steps 2024 rvt2024-t dotnet
+expect "dotnet: skipped for .NET Framework years" 0 ""; check "dotnet: in the summary" grep -qE '^   dotnet +exit=skip ' "$RUN/summary.txt"
+reset; mkbottle rvt2024-t 2024 2024; mkdist 2024; mkdir -p "$AL2024/16.1.0.1/helper"; ln -s 16.1.0.1 "$AL2024/Current"
+run_steps 2024 rvt2024-t register
+expect "register runs the licensing helper" 0 ""; check "register: in the summary" grep -qE '^   register +exit=0 +829P1 2024.0.0.F USER' "$RUN/summary.txt"
+check "register: product key and version" called "[register] [--pk] [829P1] [--pv] [2024.0.0.F]"
+
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]
