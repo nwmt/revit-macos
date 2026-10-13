@@ -101,8 +101,9 @@ for a in "${PLAN[@]}"; do
   run_child --log "$RUN_DIR/action-$a.log" "$ROOT/${A[0]}" "${A[@]:1}"; rc=$?
   printf '   %-10s exit=%-5s %s\n' "$a" "$rc" "${A[*]} ($((SECONDS - t)) s; action-$a.log)" >> "$RUN_DIR/summary.txt"
   stop_check
-  # a failed fix after Revit.exe is in place: go on, the list comes at the end; anything else stops the install
-  if [ $rc != 0 ] && ! { [ "$a" = steps ] && [ -f "$(revit_dir_unix "$B" "$YEAR")/Revit.exe" ]; }; then
+  # a failed fix after Revit.exe is in place: go on, the list comes at the end; anything else stops the install,
+  # also a runner that stopped or failed without naming a failed step in failed.txt
+  if [ $rc != 0 ] && ! { [ "$a" = steps ] && [ -f "$(revit_dir_unix "$B" "$YEAR")/Revit.exe" ] && [ -s "$RUN_DIR/failed.txt" ]; }; then
     echo; echo "Step failed: ${A[*]}" >&2
     last="$(tail -1 "$RUN_DIR/failed.txt" 2>/dev/null)"; log="$RUN_DIR/action-$a.log"
     [ -n "$last" ] && [ -f "$RUN_DIR/$last.log" ] && log="$RUN_DIR/$last.log"   # a failed step: its own log

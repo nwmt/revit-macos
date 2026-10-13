@@ -68,8 +68,9 @@ step_pkgs() { # product packages from manifest/app.RVT.xml except RVT (step rvt)
 step_asc() { # Autodesk Shared Components (pkg ASC, type EXE): an ODIS bundle itself — 7z subpackages into
   # %COMMONPROGRAMFILES%\Autodesk Shared\Components\<year>\<version> + its registry tool (postInstall). Without it
   # Revit 2026 fails at startup: "Autodesk Shared Components bundle is missing" (ASC status 6)
-  local ae ax ver base bw n=0 z tool
-  python3 -I "$ROOT/tools/odis.py" list "$DIST" | cut -f1 | grep -qx ASC || { skip "no ASC package"; return 0; }
+  local ae ax ver base bw n=0 z tool pkgs
+  pkgs="$(python3 -I "$ROOT/tools/odis.py" list "$DIST")" || return 1   # a manifest it cannot read is a failure, not a skip
+  cut -f1 <<<"$pkgs" | grep -qx ASC || { skip "no ASC package"; return 0; }
   ae="$DIST/$(python3 -I "$ROOT/tools/odis.py" get "$DIST" ASC | cut -f4)"; ax="$(dirname "$ae")/x"   # 2026: x64/ASC, 2027: x64/ASC2
   [ -f "$ax/setup.xml" ] || 7zz x -y -o"$ax" "$ae" || return 1
   ver="$(grep -oE '<BuildNumber[^>]*>[0-9.]+' "$ax/setup.xml" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"

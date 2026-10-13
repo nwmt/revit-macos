@@ -65,6 +65,17 @@ $OUT"; fi
   [ "$OUT" = free ] && ok "the lock is free after install.sh" || fail "the lock is free after install.sh" "$OUT"
   grep -qF "Last log:" <<<"$(cd / && "${INST_ENV[@]}" /bin/bash "$R/install.sh" 2024 rvt2024-t 2>&1)" \
     && ok "a failed action names its log" || fail "a failed action names its log" ""
+  # a runner that stopped (or failed) without recording a failed step: install.sh stops, even with Revit.exe in place
+  prep; cat > "$R/scripts/run-steps.sh" <<EOF
+#!/bin/bash
+mkdir -p "$BOTTLES/\$2/drive_c/Program Files/Autodesk/Revit \$1"; touch "$BOTTLES/\$2/drive_c/Program Files/Autodesk/Revit \$1/Revit.exe"
+echo "Stopped." >&2; exit 1
+EOF
+  chmod +x "$R/scripts/run-steps.sh"; inst 2024 rvt2024-t
+  if [ "$RC" = 1 ] && grep -qF "Step failed: scripts/run-steps.sh" <<<"$OUT" && ! grep -q make-apps "$T/calls"; then
+    ok "a runner that stopped without a failed step stops install.sh"
+  else fail "a runner that stopped without a failed step stops install.sh" "rc=$RC
+$OUT"; fi
   # TERM (or Ctrl-C) during an action: install.sh passes TERM on, waits for the action to stop, then stops itself
   prep; cat > "$R/scripts/run-steps.sh" <<EOF
 #!/bin/bash

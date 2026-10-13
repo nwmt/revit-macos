@@ -45,7 +45,7 @@ step_idmgr() { # AdskIdentityManager: Autodesk sign-in in the Mac's browser (202
   accept_codes $? 0 || return 1
   ls -d "$B/drive_c/Program Files/Autodesk/AdskIdentityManager/"*/ >/dev/null 2>&1 \
     || { echo "AdskIdentityManager is not in Program Files"; return 1; }
-  detail "AdskIdentityManager $(ls "$B/drive_c/Program Files/Autodesk/AdskIdentityManager" | sort -V | tail -1)"
+  detail "AdskIdentityManager $(ls "$B/drive_c/Program Files/Autodesk/AdskIdentityManager" | grep -E '^[0-9]+\.[0-9.]+$' | sort -V | tail -1)"
 }
 
 step_adsso() { # AdSSO: Autodesk sign-in in Revit's own window (QtWebEngine), 2020 and 2023; from pkg.adsso.xml

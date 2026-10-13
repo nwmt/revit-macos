@@ -288,6 +288,8 @@ check "revitini: language and theme" grep -q "Select=ENU" <(iconv -f UTF-16 -t U
 check "revitini: dark canvas" grep -q "CanvasTheme=0" <(iconv -f UTF-16 -t UTF-8 "$P/Revit.ini")
 reset; mkbottle rvt2026-t 2026 2026; run_steps 2026 rvt2026-t dynamo gdoff
 expect "dynamo and gdoff skip what is not there" 0 ""; check "gdoff: in the summary" grep -qE '^   gdoff +exit=skip ' "$RUN/summary.txt"
+reset; mkbottle rvt2026-t 2026 2026; mkdist 2026; rm -f "$R/installers/extracted/revit2026/manifest/app.RVT.xml"
+run_steps 2026 rvt2026-t asc; expect "asc: an unreadable manifest fails the step, not a skip" 1 "asc"
 
 # ---- steps: add-ins ----
 reset; mkbottle rvt2024-t 2024 2024; run_steps 2024 rvt2024-t wpfsw trust check
