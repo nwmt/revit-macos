@@ -33,12 +33,8 @@ jobs:
         run: python3 -I -m py_compile tools/*.py tools/ncrypt-shim/gen_forwards.py
       - name: ./revit and install.sh argument checks (sandbox, /bin/bash 3.2)
         run: tests/revit-cli.sh
-      - name: Build all shims
-        run: |
-          ./scripts/get-toolchain.sh
-          for s in scripts/build-{add-printer,d3dwp,ncrypt-shim,rvtfix,svcshim,tlbpin,wbem-shim,wv2fix}.sh; do
-            echo "::group::$s"; "$s"; echo "::endgroup::"
-          done
+      - name: Build all shims, as a release does
+        run: ./scripts/build-release.sh ci
       - name: install.sh refuses cleanly without CrossOver and installers
         run: |
           if INSTALL_DRYRUN=1 ./install.sh 2020 > out.txt 2>&1; then cat out.txt; exit 1; fi
