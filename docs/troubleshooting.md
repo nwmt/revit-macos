@@ -26,7 +26,8 @@ All versions
 2. If `./revit install` failed: copy what Terminal shows from `Step failed` to the end. If it names a `Last log`,
    attach that file.
 3. If Revit fails when it starts or while you work: run `./revit debug <year>`, make the problem happen, and quit
-   Revit. Attach `stdout.log` and the last 200 lines of `wine.cxlog` from the newest `d7-…` folder.
+   Revit. Attach `stdout.log` and the last 200 lines of `wine.cxlog` from the newest `…-debug` folder in
+   `logs/<bottle>/`.
 4. Remove your name, email and your Mac's name from the files.
 5. [Open a test report](https://github.com/nwmt/revit-macos/issues/new?template=test-report.yml).
 
@@ -135,7 +136,7 @@ Revit 2023, 2024, 2025, 2026
 <summary>Advanced: turn software drawing off again</summary>
 
 ```bash
-REVIT_YEAR=<year> ./scripts/d8-addins.sh <bottle> wpfhw
+./scripts/run-steps.sh <year> <bottle> wpfhw
 ```
 
 </details>
@@ -171,14 +172,14 @@ Enscape needs graphics features that CrossOver on a Mac does not have. The `ensc
 together with fixes that give it what it needs.
 
 **Solution:** put the installer in place ([where](../installers/README.md#add-ins-optional)) and run
-`REVIT_YEAR=2020 ./scripts/d8-addins.sh rvt2020-a enscape trust`. If Enscape is already installed, this installs it
+`./scripts/run-steps.sh 2020 rvt2020-a enscape trust`. If Enscape is already installed, this installs it
 again with the fixes.
 
 <details>
 <summary>Advanced: turn Enscape off so it does not load</summary>
 
 ```bash
-REVIT_YEAR=2020 ./scripts/d8-addins.sh rvt2020-a enscape-off
+./scripts/run-steps.sh 2020 rvt2020-a enscape-off
 ```
 
 </details>

@@ -7,13 +7,15 @@ simple (`./revit install <year>`) and the docs short.
 ## Layout
 ```
 revit               everyday commands: ./revit <command> <year> [bottle]; install.sh does the install
-install.sh          the install itself: ./install.sh <year> [bottle]
-scripts/            every install step as a script; scripts/lib/versions.sh holds per-version metadata
+install.sh          the install itself: ./install.sh <year> [bottle]; runs a fixed plan of scripts
+scripts/            run-steps.sh runs the install and add-in steps (scripts/steps/) with a year's profile
+                    (scripts/profiles/<year>.sh); scripts/lib/ holds the shared code; the other scripts download,
+                    unpack, make the bottle and the apps, build the shims
 tools/              our shim DLLs (C, llvm-mingw) and Python helpers; users get them prebuilt (scripts/get-shims.sh)
 versions/<year>.md  status, what works, known issues for one Revit version
 docs/               troubleshooting, how it works
 installers/         user-supplied installers and runtimes (gitignored except README and checksums)
-tests/              tests/revit-cli.sh: sandbox tests for ./revit
+tests/              sandbox tests: revit-cli.sh, plans.sh, steps.sh; test_tools.py for the Python helpers
 ```
 
 ## Rules

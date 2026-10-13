@@ -16,12 +16,15 @@ and what did not. Open an issue with the **Test report** template. `./revit logs
 5. No personal data (names, emails, hostnames, `/Users/<name>` paths), no
    installers, DLLs from Windows, license files or logs. The hooks check this;
    `.githooks/check-tree` runs the full check by hand.
-6. Every manual step must also be a script in `scripts/`, so a bottle can be
-   rebuilt from scratch.
+6. Every manual step must also be a step in `scripts/steps/` (or a script in
+   `scripts/`), so a bottle can be rebuilt from scratch.
 7. Mark a feature as working only after a real run. Untested is "not tested",
    a guess is a guess.
 8. Status words: see the scale in the [README](README.md#which-versions-work).
-9. `tests/revit-cli.sh` must pass: it runs `./revit` and the argument checks of `install.sh` in a sandbox.
+9. `tests/revit-cli.sh`, `tests/plans.sh`, `tests/steps.sh` and
+   `python3 -I -m unittest discover -s tests -p 'test_*.py'` must pass. After a
+   deliberate change to a year's plan or steps, `UPDATE=1 tests/plans.sh` rewrites
+   `tests/plans/`; review that diff.
 
 ## Writing docs
 

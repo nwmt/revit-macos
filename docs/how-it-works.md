@@ -35,7 +35,8 @@ In install order. Normal install steps have "—" in What breaks.
 |---|---|---|---|
 | `vc` | — | Microsoft Visual C++ runtimes | all |
 | `fonts` | — | Core fonts and MSXML 6 (winetricks) | all |
-| `dotnet` | The .NET Framework 4.8 installer refuses to run on "Windows 10" | Install the .NET Revit needs; for 4.8, real 4.0 first, then 4.8 as Windows 7 | all |
+| `netfx` | The .NET Framework 4.8 installer refuses to run on "Windows 10" | Real .NET Framework 4.0 first, then 4.8 from Revit's installer as Windows 7 | 2023, 2024 (2020: 4.7 the same way) |
+| `dotnet` | Revit 2025 and newer run on .NET 8 or 10 | Every .NET runtime Revit's installer ships | 2025, 2026, 2027 |
 | `licensing`, `svcshim` | Licensing service does not start as a Windows service | Install Autodesk licensing; a small wrapper service runs it | all |
 | `adsso`, `ssoenv` | Sign-in window loads forever with GPU drawing | Install the AdSSO sign-in window; run it without GPU | 2020, 2023 |
 | `idmgr` | — | Autodesk Identity Manager: sign-in through your Mac's browser | 2024+ |
@@ -67,8 +68,8 @@ The project ships no Microsoft files. `./revit install` puts these into the bott
 
 | Component | Comes from | Step |
 |---|---|---|
-| Visual C++ runtimes; .NET Framework 4.7 (2020) and 4.8 (2023, 2024); .NET 8 and 10 (2025+) | Revit's installer, which ships them | `vc`, `dotnet` |
-| .NET Framework 4.0 (2020, 2023, 2024) | Microsoft's offline installer from Microsoft's download server: the same file and checksum winetricks uses | `dotnet` |
+| Visual C++ runtimes; .NET Framework 4.7 (2020) and 4.8 (2023, 2024); .NET 8 and 10 (2025+) | Revit's installer, which ships them | `vc`, `netfx`, `dotnet` |
+| .NET Framework 4.0 (2020, 2023, 2024) | Microsoft's offline installer from Microsoft's download server: the same file and checksum winetricks uses | `netfx` |
 | WebView2 runtime (2024+) | Microsoft's installer for the newest build, from Microsoft's download link; if that download fails, the older one in Revit's installer | `webview2` |
 | Core fonts, MSXML 6 | winetricks downloads them from their usual sources | `fonts` |
 | `riched20.dll`, `msftedit.dll`, `usp10.dll` | The Windows 7 SP1 update package (KB976932) from Microsoft's download server: the same file and checksum winetricks uses | `richedit` |
@@ -114,7 +115,8 @@ For normal use, `./revit rebuild <year>` runs everything again from scratch. To 
 bottle:
 
 ```bash
-scripts/install-odis.sh <year> <bottle> <step…>           # Revit 2023 and newer
-scripts/d6-install-revit.sh <bottle> <step…>              # Revit 2020
-REVIT_YEAR=<year> scripts/d8-addins.sh <bottle> <step…>   # add-ins
+scripts/run-steps.sh <year> <bottle> <step…>   # Revit 2023 and newer: install and add-in steps
+scripts/d6-install-revit.sh <bottle> <step…>   # Revit 2020, until it moves to run-steps.sh
 ```
+
+Each run writes its logs to `logs/<bottle>/<time>-steps/`: one log per step and `summary.txt`.
