@@ -40,11 +40,10 @@ revit_main_installer() { # $1 = year: the installer's main file in installers/re
     -exec stat -f '%z %N' {} + 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-
 }
 
-# Until stage 1 is done: the old scripts (install-odis.sh, d8-addins.sh, inspect-installer.sh, get-redist.sh,
-# install.sh, revit) still ask for these. Removed in the commit that deletes their last caller.
+# Until stage 1 is done: the old scripts (install-odis.sh, revit) still ask for these. Removed in the commit that
+# deletes their last caller.
 revit_dotnet()    { load_profile "$1" && echo "$DOTNET"; }
 revit_prodkey()   { load_profile "$1" && echo "$PRODKEY"; }
 revit_pkgs_core() { load_profile "$1" && echo "$PKGS"; }
 revit_dynamo()    { load_profile "$1" && [ -n "$DYNAMO" ] && echo "$DYNAMO"; }
-revit_expect()    { echo "not tested"; }
 REVIT_ADDIN_YEARS=(2020 2023 2024 2025 2026)

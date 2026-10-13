@@ -1,0 +1,10 @@
+Plan:
+  1. scripts/get-shims.sh
+  2. scripts/get-redist.sh 2023
+  3. scripts/unpack-revit.sh 2023
+  4. scripts/new-bottle.sh 2023 rvt2023-a
+  5. scripts/run-steps.sh 2023 rvt2023-a
+  6. scripts/make-apps.sh 2023 rvt2023-a
+Steps: vc fonts netfx licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim d3d9dxvk richedit tlbpin warpshim gdoff rvtfix pdfprinter dynamo
+
+Fix the items marked ✗ and run ./revit install 2023 again.

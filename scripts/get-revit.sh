@@ -6,8 +6,8 @@
 # the same files the old "Browser download" gave (BrowserImageUrl): *_001_002.exe + *_002_002.7z (2025+)
 # or *_dlm_001_005.sfx.exe … (2024). That is the base release (e.g. 2026.0); the update in the tool's name
 # (2026.5) is a separate package listed in <bundle>/setup_ext.xml → <dir>/setup.xml (Payload, with SHA-256).
-# Base files go to installers/revit<year>/, the update to installers/revit<year>/update/; inspect-installer.sh lays
-# the update over the extracted base. Resumes an interrupted download; checks the size, and the SHA-256 when known
+# Base files go to installers/revit<year>/, the update to installers/revit<year>/update/; unpack-revit.sh lays
+# the update over the unpacked base. Resumes an interrupted download; checks the size, and the SHA-256 when known
 # (update: from its manifest; base: installers/CHECKSUMS.txt).
 set -uo pipefail
 YEAR="${1:?specify a year, e.g. 2027}"
