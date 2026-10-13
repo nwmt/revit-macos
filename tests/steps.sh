@@ -147,4 +147,60 @@ check "msi quotes values with spaces" grep -qF 'INSTALLDIR="C:\Program Files\Aut
 reset; mkbottle rvt2024-t 2024 2024; in_bottle 'ensure_shim wbem-shim && echo built; ensure_shim nonsense; echo rc=$?'
 expect "ensure_shim takes the prebuilt shim" 0 "built"; check "ensure_shim refuses an unknown shim" grep -q "rc=1" <<<"$OUT"
 
+# ---- run-steps.sh ----
+STEP_ENV=()   # VAR=value pairs for the next run_steps only (ODIS_PKGS, REVIT_THEME, RUN_DIR)
+run_steps() { # $@ = arguments of run-steps.sh; sets OUT, RC and RUN (the newest run folder of bottle $2)
+  OUT="$(cd / && "${SANDBOX_ENV[@]}" ${STEP_ENV[@]+"${STEP_ENV[@]}"} /bin/bash "$R/scripts/run-steps.sh" "$@" 2>&1)"; RC=$?
+  RUN="$(ls -td "$R/logs/${2:-none}"/*/ 2>/dev/null | head -1)"; RUN="${RUN%/}"; STEP_ENV=()
+}
+teststeps() { # test-only steps, in the sandbox copy only
+  mkdir -p "$R/scripts/steps"
+  cat > "$R/scripts/steps/zz-test.sh" <<EOF
+step_t_ok()   { echo t_ok >> "$T/order"; detail "fine"; }
+step_t_two()  { echo t_two >> "$T/order"; }
+step_t_fail() { echo t_fail >> "$T/order"; echo "it broke"; return 1; }
+step_t_skip() { skip "not for this version"; return 0; }
+step_t_wine() { w t-wine-call; }
+step_t_slow() { echo t_slow >> "$T/order"; w t-slow; }
+EOF
+}
+mkdist() { # $1 = year: a tiny unpacked ODIS installer
+  local d="$R/installers/extracted/revit$1"
+  mkdir -p "$d/manifest" "$d/x86/Licensing" "$d/x64/RVT" "$d/x64/AdskIdentityManager"
+  echo '<Setup/>' > "$d/setup.xml"; echo '<Packages></Packages>' > "$d/manifest/app.RVT.xml"
+  touch "$d/x86/Licensing/AdskLicensing-installer.exe" "$d/x64/RVT/RevitConfig.pit" \
+    "$d/x64/AdskIdentityManager/AdskIdentityManager-Installer.exe"
+}
+reset; mkbottle rvt2024-t 2024 2024; teststeps; run_steps 2024 rvt2024-t t_ok nonsense
+expect "an unknown step stops before anything runs" 2 "Unknown step: nonsense"
+check "unknown step: nothing ran" test ! -e "$T/order"; check "unknown step: no run folder" test -z "$RUN"
+reset; mkbottle rvt2024-t 2024 2024; teststeps; run_steps 2024 rvt2024-t t_two t_ok t_skip
+expect "steps run" 0 ">> Revit 2024 → bottle rvt2024-t"
+check "steps run in the given order" test "$(tr '\n' ' ' < "$T/order")" = "t_two t_ok "
+check "summary has the detail" grep -qE '^   t_ok +exit=0 +fine \([0-9]+ s\)$' "$RUN/summary.txt"
+check "a skipped step says skip" grep -qE '^   t_skip +exit=skip +not for this version' "$RUN/summary.txt"
+check "a step's output goes to its log" test -f "$RUN/t_ok.log"
+reset; mkbottle rvt2024-t 2024 2024; teststeps; run_steps 2024 rvt2024-t t_fail t_ok
+expect "a failed step: the others still run, exit 1" 1 "t_fail"
+check "failed: the next step ran" grep -qx t_ok "$T/order"
+check "failed.txt lists it" grep -qx t_fail "$RUN/failed.txt"
+check "the failure points at the log" grep -q 't_fail.log' "$RUN/summary.txt"
+reset; mkbottle rvt2024-t 2024 2024; teststeps; run_steps 2024 rvt2024-t t_wine
+check "Wine in a step does not get the lock's fd" not_called "FD9"
+reset; mkbottle rvt2024-t 2024 2024; teststeps; hold_lock "install.sh 2025 rvt2025-t"; run_steps 2024 rvt2024-t t_ok
+expect "a held lock stops run-steps" 1 "Another task is running: install.sh 2025 rvt2025-t."
+reset; mkbottle rvt2025-t 2025 2025; teststeps; run_steps 2024 rvt2025-t t_ok
+expect "run-steps checks the bottle's year" 1 "is for Revit 2025, not 2024"
+reset; mkbottle rvt2024-t 2024 2024; teststeps; mkdir -p "$R/logs/rvt2024-t/given"
+STEP_ENV=(RUN_DIR="$R/logs/rvt2024-t/given"); run_steps 2024 rvt2024-t t_ok
+check "RUN_DIR from install.sh is used" test -f "$R/logs/rvt2024-t/given/summary.txt"
+# TERM while a step runs Wine: the Wine program finishes, the run stops after that step, the lock is free
+reset; mkbottle rvt2024-t 2024 2024; teststeps; rule "t-slow" 0 "sleep 2; touch '$T/slow-done'"
+(cd / && exec "${SANDBOX_ENV[@]}" /bin/bash "$R/scripts/run-steps.sh" 2024 rvt2024-t t_slow t_ok) > "$T/out" 2>&1 &
+rs=$!; sleep 1; kill -TERM "$rs"; wait "$rs"; RC=$?; OUT="$(cat "$T/out")"
+expect "TERM stops the run with code 1" 1 "Stopped."
+check "TERM: the running Wine program finished" test -f "$T/slow-done"
+check "TERM: the next step did not run" test "$(tr '\n' ' ' < "$T/order")" = "t_slow "
+in_repo 'lock_free && echo free'; expect "TERM: the lock is free afterwards" 0 "free"
+
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]
