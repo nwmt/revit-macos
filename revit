@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 # Everyday commands for Revit on this Mac: ./revit <command> <year> [bottle]. Run ./revit for the list.
-# A thin front for install.sh and scripts/: it checks the arguments, refuses to touch the wrong or a running
-# bottle, and asks before deleting anything. REVIT_CX (tests only) points at a fake CrossOver.
+# A thin front for install.sh and scripts/: it checks the arguments, refuses to touch the wrong or a busy bottle, and
+# asks before deleting anything. REVIT_CX (tests only) points at a fake CrossOver.
 set -uo pipefail
-ROOT="$(cd "$(dirname "$0")" && pwd)"; . "$ROOT/scripts/lib/versions.sh"
-CX="${REVIT_CX:-/Applications/CrossOver.app/Contents/SharedSupport/CrossOver}"
-BOTTLES="$HOME/Library/Application Support/CrossOver/Bottles"
+ROOT="$(cd "$(dirname "$0")" && pwd)"; . "$ROOT/scripts/lib/common.sh"
 
 usage() {
   cat <<'EOF'
@@ -24,8 +22,6 @@ Example: ./revit install 2025
 Each Revit year lives in its own bottle, rvt<year>-a. To use another bottle, add its name at the end.
 EOF
 }
-die() { echo "$*" >&2; exit 1; }
-tilde() { case "$1" in "$HOME"/*) echo "~${1#"$HOME"}" ;; *) echo "$1" ;; esac; }
 cx_launchers() { # apps CrossOver makes for the bottle's Start Menu entries; deleting the bottle leaves them behind
   local a
   find "$HOME/Applications/CrossOver" -type d -name '*.app' -prune 2>/dev/null | while IFS= read -r a; do
@@ -34,70 +30,26 @@ cx_launchers() { # apps CrossOver makes for the bottle's Start Menu entries; del
 }
 size() { du -sh "$1" 2>/dev/null | cut -f1; }
 
-CMD="${1:-}"; YEAR="${2:-}"; NAME="${3:-}"
+CMD="${1:-}"; YEAR_ARG="${2:-}"; NAME="${3:-}"
 case "$CMD" in
   install|check|addins|stop|logs|debug|rebuild|remove) ;;
   ""|help|-h|--help) usage; exit 0 ;;
   *) echo "Unknown command: $CMD" >&2; echo >&2; usage >&2; exit 1 ;;
 esac
-[ -n "$YEAR" ] || die "Which Revit year? Example: ./revit $CMD 2025"
-if ! in_list "$YEAR" "${REVIT_SUPPORTED[@]}"; then
-  [[ "$YEAR" =~ ^[0-9]{4}$ ]] || die "\"$YEAR\" is not a Revit year. Example: ./revit $CMD 2025"
-  die "Revit $YEAR is not supported yet. Supported: ${REVIT_SUPPORTED[*]}."
+[ -n "$YEAR_ARG" ] || die "Which Revit year? Example: ./revit $CMD 2025"
+if ! load_profile "$YEAR_ARG"; then
+  [[ "$YEAR_ARG" =~ ^[0-9]{4}$ ]] || die "\"$YEAR_ARG\" is not a Revit year. Example: ./revit $CMD 2025"
+  die "Revit $YEAR_ARG is not supported yet. Supported: ${REVIT_SUPPORTED[*]}."
 fi
 DEFAULT="$(revit_bottle_default "$YEAR")"; NAME="${NAME:-$DEFAULT}"
 revit_bottle_name_ok "$NAME" || die "Bottle name may contain only letters, digits, - and _, and cannot be \"default\": \"$NAME\""
-B="$BOTTLES/$NAME"
-no_link() { # CrossOver follows a link to the real bottle, so the checks would look at one bottle and delete another
-  [ ! -L "$B" ] || die "Bottle $NAME is a link to another bottle. Use the real bottle name."
-}
-[ "$CMD" = logs ] || no_link   # logs only reads logs/
-SFX=""; [ "$NAME" = "$DEFAULT" ] || SFX=" $NAME"   # hints name the bottle only when it is not the default
+B="$(bottle_path "$NAME")"; SFX="$(bottle_sfx "$NAME" "$YEAR")"
 
-bottle_years() { # the Revit years of bottle $1: its description (install.sh names the bottle "Revit <year>"
-  # before installing anything, so a half-done install has it too) and its Revit folders
-  sed -n 's/^"Description" = "Revit \([0-9][0-9][0-9][0-9]\)"$/\1/p' "$1/cxbottle.conf" 2>/dev/null
-  local d; for d in "$1/drive_c/Program Files/Autodesk/Revit "[0-9][0-9][0-9][0-9]; do [ -d "$d" ] && echo "${d##* }"; done
-  return 0
-}
-check_year() { # a wrong year/bottle pair would rebuild or delete another Revit
-  local ys; ys="$(bottle_years "$B" | sort -u | tr '\n' ' ')"; ys="${ys% }"
-  [ -n "$ys" ] || die "Bottle $NAME does not look like a Revit bottle. If you do not need it, delete it in CrossOver."
-  [ "$ys" = "$YEAR" ] || die "Bottle $NAME is for Revit $ys, not $YEAR. Check the year and the bottle name."
-}
-need_bottle() {
-  [ -d "$B" ] || die "There is no bottle $NAME. To install Revit $YEAR: ./revit install $YEAR$SFX"
-  check_year
-}
 need_crossover() {
   [ -x "$CX/bin/cxbottle" ] && [ -x "$CX/bin/wineserver" ] \
     || die "CrossOver not found in /Applications. Install it from https://www.codeweavers.com/crossover"
 }
-revit_running() { # a Revit.exe with files open in this bottle. The bottle's background services (licensing) run for
-  # hours without Revit, so "wineserver is up" is not the test. Output goes through variables, not `| grep -q`:
-  # under pipefail an early grep exit gives the writer SIGPIPE and the pipeline reports "not found"
-  local p rb out; rb="$(cd "$B" 2>/dev/null && pwd -P)" || return 1   # lsof prints real paths
-  for p in $(pgrep -f "Autodesk.Revit $YEAR.Revit\.exe" 2>/dev/null); do
-    out="$(lsof -p "$p" -Fn 2>/dev/null)"
-    grep -qF "n$rb/" <<<"$out" && return 0
-  done
-  return 1
-}
-not_busy() { # Revit open in this bottle, an install of this year, or one of our scripts working on this bottle
-  if revit_running; then
-    die "Revit $YEAR is running in $NAME. Save your work and quit Revit, then try again. If it hangs: ./revit stop $YEAR$SFX"
-  fi
-  pgrep -f "install\.sh $YEAR( |$)" >/dev/null 2>&1 \
-    && die "An install of Revit $YEAR is running. Wait until it finishes, then try again."
-  # our step scripts take "<bottle> …" or "<year> <bottle> …" (install-odis.sh)
-  pgrep -f "scripts/[a-z0-9-]+\.sh ([0-9]{4} )?$NAME( |$)" >/dev/null 2>&1 \
-    && die "A script is still working on $NAME. Wait until it finishes, then try again."
-  return 0
-}
-verify() { # who the bottle is and that nothing uses it; run before confirm and again right before acting
-  no_link
-  if [ -d "$B" ]; then check_year; not_busy; fi
-}
+not_busy() { lock_free || die "Another task is running: $(lock_owner). Wait until it finishes, then try again."; }
 confirm() { # typing the year is harder to do by accident than y/n
   local a=""; printf 'Type %s to continue, anything else to cancel: ' "$YEAR"
   read -r a || a=""
@@ -122,64 +74,56 @@ other_bottle_of_year() { # another bottle of this year still needs installers/ex
   done
   return 1
 }
-extracted_plan() { # sets DROP_X (1 = remove deletes the unpacked files) and KEEP_X (why they stay)
+extracted_plan() { # sets X, DROP_X (1 = remove deletes the unpacked files) and KEEP_X (why they stay)
   X="$(revit_extracted "$YEAR")"; DROP_X=0; KEEP_X=""
   [ -d "$X" ] || return 0
-  if o="$(other_bottle_of_year)"; then KEEP_X="bottle $o still uses it"
-  # unpacking starts before the bottle exists, and the download/unpack steps also run on their own
-  elif pgrep -f "(install|scripts/inspect-installer|scripts/get-revit)\.sh $YEAR( |$)" >/dev/null 2>&1; then
-    KEEP_X="an install of Revit $YEAR is running"
-  else DROP_X=1; fi
+  if o="$(other_bottle_of_year)"; then KEEP_X="bottle $o still uses it"; else DROP_X=1; fi
 }
 
 case "$CMD" in
-  install) # two installs of a year share the downloaded and unpacked installer
-    not_busy
-    pgrep -f "scripts/(get-revit|inspect-installer)\.sh $YEAR( |$)" >/dev/null 2>&1 \
-      && die "The Revit $YEAR installer is being downloaded or unpacked. Wait until it finishes, then try again."
-    exec "$ROOT/install.sh" "$YEAR" "$NAME" ;;
+  install) not_busy; exec "$ROOT/install.sh" "$YEAR" "$NAME" ;;
   check)   export INSTALL_DRYRUN=1; exec "$ROOT/install.sh" "$YEAR" "$NAME" ;;
   addins)
-    in_list "$YEAR" "${REVIT_ADDIN_YEARS[@]}" || die "The add-in script is not set up for Revit $YEAR yet."
-    need_bottle; not_busy   # the add-in installers and the trust step change the bottle
-    export REVIT_YEAR="$YEAR"; exec "$ROOT/scripts/d8-addins.sh" "$NAME" ;;
+    [ ${#ADDIN_STEPS[@]} -gt 0 ] || die "The add-in script is not set up for Revit $YEAR yet."
+    bottle_guard must_exist "$YEAR" "$NAME"; not_busy
+    lock_take "./revit addins $YEAR $NAME"; bottle_guard must_exist "$YEAR" "$NAME"
+    export RUN_KIND=addins; exec "$ROOT/scripts/run-steps.sh" "$YEAR" "$NAME" "${ADDIN_STEPS[@]}" ;;
   stop)
-    need_crossover; need_bottle
-    if ! WINEPREFIX="$B" "$CX/bin/wineserver" -k0 2>/dev/null; then echo "Nothing is running in $NAME."; exit 0; fi
-    WINEPREFIX="$B" "$CX/bin/wineserver" -k 2>/dev/null || die "Could not stop $NAME. Quit CrossOver and try again."
+    need_crossover; bottle_guard running_ok "$YEAR" "$NAME"
+    lock_take "./revit stop $YEAR $NAME"   # an install's Wine programs run in this bottle too: -k would end them
+    bottle_guard running_ok "$YEAR" "$NAME"   # again, under the lock: the bottle may have changed meanwhile
+    if ! WINEPREFIX="$B" "$CX/bin/wineserver" -k0 2>/dev/null 9>&-; then echo "Nothing is running in $NAME."; exit 0; fi
+    WINEPREFIX="$B" "$CX/bin/wineserver" -k 2>/dev/null 9>&- || die "Could not stop $NAME. Quit CrossOver and try again."
     echo "Stopped Revit and everything else in $NAME. Start Revit again from ~/Applications." ;;
   logs)
-    found=""
-    ts='[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]'
-    while IFS= read -r f; do   # <step>-<bottle>-<timestamp>[.log] or d7-<bottle>-<backend>-<timestamp>; step names have no "-",
-      # so the bottle name is matched whole: not the logs of <bottle>-2 or <bottle>-other
-      b="${f##*/}"; rest="${b#*-}"; [ "${rest#"$NAME"-}" != "$rest" ] || continue; rest="${rest#"$NAME"-}"
-      case "${b%%-*}:$rest" in d7:default-*|d7:d3dmetal-*|d7:dxmt-*|d7:wined3d-*|d7:dxvk-*) rest="${rest#*-}" ;; esac
-      case "$rest" in $ts|$ts.log) found="$found$f"$'\n' ;; esac
-    done < <(ls -td "$ROOT"/logs/*-"$NAME"-* 2>/dev/null)
-    found="$(printf '%s' "$found" | head -8)"
-    [ -n "$found" ] || die "No logs for $NAME yet. ./revit install and ./revit debug write them to logs/."
+    found="$(ls -td "$ROOT/logs/$NAME"/*/ 2>/dev/null | head -8)"
+    if [ -z "$found" ]; then
+      ls -d "$ROOT"/logs/*-"$NAME"-[0-9]* >/dev/null 2>&1 \
+        && die "No logs for $NAME in logs/$NAME/ yet. Older logs are in logs/ directly: open \"$ROOT/logs\""
+      die "No logs for $NAME yet. ./revit install and ./revit debug write them to logs/$NAME/."
+    fi
     echo "Newest logs for Revit $YEAR ($NAME), newest first:"
-    while IFS= read -r f; do echo "  logs/${f#"$ROOT/logs/"}"; done <<<"$found"
-    echo "Open the folder: open \"$ROOT/logs\""
+    while IFS= read -r f; do f="${f%/}"; echo "  logs/${f#"$ROOT/logs/"}"; done <<<"$found"
+    echo "Open the folder: open \"$ROOT/logs/$NAME\""
     echo "To report a problem, see \"Report a problem\" in docs/troubleshooting.md." ;;
   debug)
-    need_crossover; need_bottle; not_busy
-    export REVIT_YEAR="$YEAR"; "$ROOT/scripts/d7-launch.sh" "$NAME" || exit 1
+    need_crossover; bottle_guard must_exist "$YEAR" "$NAME"; not_busy
+    "$ROOT/scripts/launch.sh" "$YEAR" "$NAME" || exit 1
     echo "Make the problem happen, quit Revit, then run ./revit logs $YEAR$SFX." ;;
   rebuild)
-    need_crossover; need_bottle; verify
+    need_crossover; bottle_guard must_exist "$YEAR" "$NAME"; not_busy
     echo "This deletes the bottle $NAME and installs Revit $YEAR into it again (10–30 minutes)."
     echo "  Revit is installed from the files already in installers/extracted/revit$YEAR. To get a newer Revit update,"
     echo "  see \"Updating\" in the README."
-    if in_list "$YEAR" "${REVIT_ADDIN_YEARS[@]}"; then
+    if [ ${#ADDIN_STEPS[@]} -gt 0 ]; then
       echo "  Revit settings and add-ins in this bottle are reset: run ./revit addins $YEAR$SFX again if you use them."
     else
       echo "  Revit settings in this bottle are reset."
     fi
     docs_note
     confirm
-    need_bottle; verify   # again: the bottle may have changed, or Revit or an install started, while the user was reading
+    lock_take "./revit rebuild $YEAR $NAME"
+    bottle_guard must_exist "$YEAR" "$NAME"   # again: the bottle may have changed, or Revit started, while the user read
     export CX_RECREATE=1; exec "$ROOT/install.sh" "$YEAR" "$NAME" ;;
   remove)
     APPS=(); NA=0
@@ -188,7 +132,7 @@ case "$CMD" in
     done
     CXAPPS=(); while IFS= read -r a; do CXAPPS+=("$a"); done < <(cx_launchers)
     if [ -d "$B" ]; then need_crossover; fi
-    verify
+    bottle_guard allow_missing "$YEAR" "$NAME"; not_busy
     extracted_plan
     HAD_B=0; [ -d "$B" ] && HAD_B=1
     if [ "$HAD_B" = 0 ] && [ "$NA" -eq 0 ] && [ ${#CXAPPS[@]} -eq 0 ] && [ "$DROP_X" = 0 ]; then echo "Nothing to remove for Revit $YEAR ($NAME)."; exit 0; fi
@@ -201,8 +145,9 @@ case "$CMD" in
     echo "Kept: installers/revit$YEAR (your downloads)."
     [ -n "$KEEP_X" ] && echo "Kept: installers/extracted/revit$YEAR ($KEEP_X)."
     confirm
-    # again, right before deleting: the bottle may have changed, or Revit or an install started, while the user was reading
-    verify
+    lock_take "./revit remove $YEAR $NAME"
+    # again, right before deleting: the bottle may have changed, or Revit started, while the user was reading
+    bottle_guard allow_missing "$YEAR" "$NAME"
     # the second look may only shrink what was confirmed, never add to it
     [ "$HAD_B" = 1 ] || [ ! -e "$B" ] \
       || die "Bottle $NAME appeared while you were reading. Nothing was removed. Run ./revit remove $YEAR$SFX again."
@@ -210,7 +155,7 @@ case "$CMD" in
     if [ "$want_x" = 1 ] && [ "$DROP_X" = 0 ]; then echo "Kept: installers/extracted/revit$YEAR ($KEEP_X)."; fi
     [ "$want_x" = 1 ] || DROP_X=0
     if [ -d "$B" ]; then
-      "$CX/bin/cxbottle" --bottle "$NAME" --delete --force
+      "$CX/bin/cxbottle" --bottle "$NAME" --delete --force </dev/null 9>&-
       [ -d "$B" ] && die "The bottle is still there: $(tilde "$B"). Nothing else was removed. Quit CrossOver and run ./revit remove $YEAR$SFX again."
     fi
     for a in ${APPS[@]+"${APPS[@]}"} ${CXAPPS[@]+"${CXAPPS[@]}"}; do
