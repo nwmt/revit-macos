@@ -80,3 +80,7 @@ class P { static void Main() {
 CS
 w 'C:\windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe' /nologo /out:'C:\hello.exe' 'C:\hello.cs' 2>>"$LOG" | tr -d '\r'
 w 'C:\hello.exe' 2>>"$LOG" | tr -d '\r'
+
+# the installers' exit codes say little under Wine: check what got installed. 460798+ = 4.7 (460805 as installed here)
+rel="$(w reg query 'HKLM\Software\Microsoft\NET Framework Setup\NDP\v4\Full' /v Release 2>/dev/null | tr -d '\r' | awk '/Release/{print $3}')"
+[ $((rel)) -ge 460798 ] || { echo "!! .NET Framework 4.7 or newer is not installed (Release=$((rel))), see $LOG" >&2; exit 1; }

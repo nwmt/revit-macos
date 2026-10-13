@@ -153,7 +153,7 @@ for s in "${STEPS[@]}"; do
         case "$ptype" in
           ADIX)
             n="$(python3 -I "$ROOT/tools/adix.py" files "$DIST/$pfile" "$B/drive_c" 2>>"$LOGDIR/adix.log")"; rc=$?
-            python3 -I "$ROOT/tools/adix.py" reg "$DIST/$pfile" "$B/drive_c/$tag.reg" >>"$LOGDIR/adix.log" 2>&1
+            python3 -I "$ROOT/tools/adix.py" reg "$DIST/$pfile" "$B/drive_c/$tag.reg" >>"$LOGDIR/adix.log" 2>&1 || rc=$?
             if [ -f "$B/drive_c/$tag.reg" ]; then
               w regedit /s "C:\\$tag.reg" >>"$LOGDIR/wine.log" 2>&1 || rc=$?
               mv "$B/drive_c/$tag.reg" "$LOGDIR/"
@@ -226,15 +226,16 @@ for s in "${STEPS[@]}"; do
       # msftedit goes only to system32: Revit looks in its own folder first, but the system32 copy is already loaded by then;
       # a second copy fails to register window classes, DllMain → FALSE, "Revit could not load …\MsftEdit.dll".
       rm -f "$B/drive_c/Program Files/Autodesk/Revit $YEAR/msftedit.dll"
+      rc=0
       for dll in msftedit riched20 usp10 msls31; do
-        [ "$dll" = msftedit ] || cp "$RX/$dll.dll" "$B/drive_c/Program Files/Autodesk/Revit $YEAR/$dll.dll"
+        [ "$dll" = msftedit ] || cp "$RX/$dll.dll" "$B/drive_c/Program Files/Autodesk/Revit $YEAR/$dll.dll" || rc=1
         # loaded by full system32 path → put them there too; Wine's builtin stub goes to .wine-fake
         S32="$B/drive_c/windows/system32/$dll.dll"
         if LC_ALL=C grep -q -a 'Wine builtin DLL' "$S32" 2>/dev/null; then cp "$S32" "$S32.wine-fake"; fi
-        cp "$RX/$dll.dll" "$S32"
-        w reg add 'HKCU\Software\Wine\AppDefaults\Revit.exe\DllOverrides' /v "$dll" /d native,builtin /f >>"$LOGDIR/richedit.log" 2>&1
+        cp "$RX/$dll.dll" "$S32" || rc=1
+        w reg add 'HKCU\Software\Wine\AppDefaults\Revit.exe\DllOverrides' /v "$dll" /d native,builtin /f >>"$LOGDIR/richedit.log" 2>&1 || rc=1
       done
-      say richedit "$?" "msftedit (system32), riched20 usp10 msls31 → Revit $YEAR + system32 (AppDefaults Revit.exe native,builtin)" ;;
+      say richedit "$rc" "msftedit (system32), riched20 usp10 msls31 → Revit $YEAR + system32 (AppDefaults Revit.exe native,builtin)" ;;
     tlbpin) # LoadRegTypeLib(LIBID_tom) cache for Revit.exe (tools/tlbpin as msls31.dll → msls31_ms.dll): otherwise the TOM typelib
             # is re-parsed for every text — views are created 2–3x slower (measured on 2020). Run after richedit.
       "$ROOT/scripts/build-tlbpin.sh" >>"$LOGDIR/tlbpin.log" 2>&1
@@ -271,8 +272,8 @@ for s in "${STEPS[@]}"; do
             # Bottles from before patched these two files on disk: put the originals (.orig) back.
       RD="$B/drive_c/Program Files/Autodesk/Revit $YEAR"
       for f in OGSDeviceDX11.dll DesktopMFC.dll; do [ ! -f "$RD/$f.orig" ] || mv -f "$RD/$f.orig" "$RD/$f"; done
-      "$ROOT/scripts/build-ncrypt-shim.sh" >>"$LOGDIR/rvtfix.log" 2>&1; "$ROOT/scripts/build-rvtfix.sh" >>"$LOGDIR/rvtfix.log" 2>&1
-      cp "$ROOT/build/ncrypt-shim/ncrypt.dll" "$ROOT/build/rvtfix/rvtfix.dll" "$RD/"
+      "$ROOT/scripts/build-ncrypt-shim.sh" >>"$LOGDIR/rvtfix.log" 2>&1 && "$ROOT/scripts/build-rvtfix.sh" >>"$LOGDIR/rvtfix.log" 2>&1 &&
+        cp "$ROOT/build/ncrypt-shim/ncrypt.dll" "$ROOT/build/rvtfix/rvtfix.dll" "$RD/"
       say rvtfix "$?" "rvtfix.dll + ncrypt.dll (loads rvtfix) → Revit $YEAR" ;;
     wv2fix) # the WebView2 browser crashes inside Revit: "err:system:user_check_not_lock BUG: holding USER lock" when WS_VISIBLE
             # is restored on a window nested in a Revit window (Chromium redraw lock; CrossOver 26.3) → start screen "reloads", empty
@@ -368,6 +369,6 @@ PY
       w "$H" register --pk "$(revit_prodkey "$YEAR")" --pv "$YEAR.0.0.F" --el US --lm USER --cf "$PIT" >>"$LOGDIR/register.log" 2>&1
       say register "$?" "$(revit_prodkey "$YEAR") $YEAR.0.0.F USER"
       w "$H" list 2>/dev/null | tr -d '\r' | head -20 | sed 's/^/   /' ;;
-    *) echo "unknown step $s" >&2 ;;
+    *) echo "unknown step $s" >&2; exit 1 ;;
   esac
 done

@@ -41,6 +41,7 @@ msi() { # $1 = step name, $2 = MSI path inside the installer, rest = KEY=VALUE p
   rm -f "$B/drive_c/d6-$step.cmd"
   mv "$B/drive_c/d6-$step.log" "$LOGDIR/$step.msi.log" 2>/dev/null
   printf '   %-10s exit=%-5s %4ss  %s\n' "$step" "$rc" "$(( $(date +%s) - t0 ))" "$rel" | tee -a "$LOGDIR/summary.txt"
+  return $rc
 }
 
 [ -d "$B" ] || { echo "no bottle $NAME" >&2; exit 1; }
@@ -147,16 +148,17 @@ for s in "${STEPS[@]}"; do
       RX="$ROOT/installers/redist/win7sp1/x64"
       [ -f "$RX/riched20.dll" ] || "$ROOT/scripts/get-win7-richedit.sh" >/dev/null
       [ -f "$RX/msls31.dll" ] || { echo "no $RX/msls31.dll (x64, copy from a licensed Windows 7/10 x64 install)" >&2; exit 1; }
+      rc=0
       for dll in riched20 usp10 msls31; do
-        cp "$RX/$dll.dll" "$B/drive_c/Program Files/Autodesk/Revit 2020/$dll.dll"
+        cp "$RX/$dll.dll" "$B/drive_c/Program Files/Autodesk/Revit 2020/$dll.dll" || rc=1
         # Revit loads riched20 by its full system32 path → put it there too; Wine's builtin stub goes to .wine-fake.
         # Other programs in the bottle load system DLLs builtin-first and won't notice.
         S32="$B/drive_c/windows/system32/$dll.dll"
         if LC_ALL=C grep -q -a 'Wine builtin DLL' "$S32" 2>/dev/null; then cp "$S32" "$S32.wine-fake"; fi
-        cp "$RX/$dll.dll" "$S32"
-        w reg add 'HKCU\Software\Wine\AppDefaults\Revit.exe\DllOverrides' /v "$dll" /d native,builtin /f >>"$LOGDIR/richedit.log" 2>&1
+        cp "$RX/$dll.dll" "$S32" || rc=1
+        w reg add 'HKCU\Software\Wine\AppDefaults\Revit.exe\DllOverrides' /v "$dll" /d native,builtin /f >>"$LOGDIR/richedit.log" 2>&1 || rc=1
       done
-      printf '   %-10s exit=%-5s %s\n' richedit "$?" "riched20 usp10 msls31 → Revit 2020\\ (AppDefaults Revit.exe native,builtin)" | tee -a "$LOGDIR/summary.txt" ;;
+      printf '   %-10s exit=%-5s %s\n' richedit "$rc" "riched20 usp10 msls31 → Revit 2020\\ (AppDefaults Revit.exe native,builtin)" | tee -a "$LOGDIR/summary.txt" ;;
     wpfsw) # (not default; Dynamo switches to software WPF itself via UseHardwareAcceleration=false — dynamo step)
            # WPF without hardware acceleration for all of Revit: CrossOver's D3D9 goes wined3d → OpenGL and the GL thread hangs
            # (Dynamo window: main thread waits for the WPF render thread, which waits for wined3d, which waits for opengl32). Revit 3D (D3D11/D3DMetal) is unaffected.
@@ -256,7 +258,7 @@ PY
         rm -f "$B/drive_c/windows/system32/tlbpin.dll"
       } >>"$LOGDIR/tlbpin.log" 2>&1
       printf '   %-10s exit=%-5s %s\n' tlbpin 0 "msls31.dll (shim + TOM LoadRegTypeLib and cursor position caches) → msls31_ms.dll" | tee -a "$LOGDIR/summary.txt" ;;
-    *) echo "unknown step $s" >&2 ;;
+    *) echo "unknown step $s" >&2; exit 1 ;;
   esac
 done
 
