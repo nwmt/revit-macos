@@ -26,6 +26,12 @@ EOF
 }
 die() { echo "$*" >&2; exit 1; }
 tilde() { case "$1" in "$HOME"/*) echo "~${1#"$HOME"}" ;; *) echo "$1" ;; esac; }
+cx_launchers() { # apps CrossOver makes for the bottle's Start Menu entries; deleting the bottle leaves them behind
+  local a
+  find "$HOME/Applications/CrossOver" -type d -name '*.app' -prune 2>/dev/null | while IFS= read -r a; do
+    [ "$(plutil -extract CXHelperAppBottleName raw -o - "$a/Contents/Info.plist" 2>/dev/null)" = "$NAME" ] && echo "$a"
+  done
+}
 size() { du -sh "$1" 2>/dev/null | cut -f1; }
 
 CMD="${1:-}"; YEAR="${2:-}"; NAME="${3:-}"
@@ -172,15 +178,17 @@ case "$CMD" in
     for a in "Revit $YEAR" "Revit Viewer $YEAR" "Autodesk Sign-In"; do
       [ -d "$HOME/Applications/$a ($NAME).app" ] && { APPS+=("$HOME/Applications/$a ($NAME).app"); NA=$((NA + 1)); }
     done
+    CXAPPS=(); while IFS= read -r a; do CXAPPS+=("$a"); done < <(cx_launchers)
     if [ -d "$B" ]; then need_crossover; fi
     verify
     extracted_plan
     HAD_B=0; [ -d "$B" ] && HAD_B=1
-    if [ "$HAD_B" = 0 ] && [ "$NA" -eq 0 ] && [ "$DROP_X" = 0 ]; then echo "Nothing to remove for Revit $YEAR ($NAME)."; exit 0; fi
+    if [ "$HAD_B" = 0 ] && [ "$NA" -eq 0 ] && [ ${#CXAPPS[@]} -eq 0 ] && [ "$DROP_X" = 0 ]; then echo "Nothing to remove for Revit $YEAR ($NAME)."; exit 0; fi
     echo "This deletes:"
     [ "$HAD_B" = 1 ] && printf '  %-48s %s\n' "bottle $NAME" "$(size "$B")"
     [ "$DROP_X" = 1 ] && printf '  %-48s %s\n' "installers/extracted/revit$YEAR (unpacked files)" "$(size "$X")"
     for a in ${APPS[@]+"${APPS[@]}"}; do echo "  $(tilde "$a")"; done
+    [ ${#CXAPPS[@]} -eq 0 ] || echo "  ${#CXAPPS[@]} CrossOver menu apps of $NAME in ~/Applications/CrossOver"
     [ "$HAD_B" = 1 ] && docs_note
     echo "Kept: installers/revit$YEAR (your downloads)."
     [ -n "$KEEP_X" ] && echo "Kept: installers/extracted/revit$YEAR ($KEEP_X)."
@@ -197,9 +205,10 @@ case "$CMD" in
       "$CX/bin/cxbottle" --bottle "$NAME" --delete --force
       [ -d "$B" ] && die "The bottle is still there: $(tilde "$B"). Nothing else was removed. Quit CrossOver and run ./revit remove $YEAR$SFX again."
     fi
-    for a in ${APPS[@]+"${APPS[@]}"}; do
+    for a in ${APPS[@]+"${APPS[@]}"} ${CXAPPS[@]+"${CXAPPS[@]}"}; do
       rm -rf "$a" 2>/dev/null; [ ! -e "$a" ] || die "Could not delete $(tilde "$a"). Delete it in Finder, or run ./revit remove $YEAR$SFX again."
     done
+    [ ${#CXAPPS[@]} -eq 0 ] || find "$HOME/Applications/CrossOver" -mindepth 1 -type d -empty -delete 2>/dev/null
     if [ "$DROP_X" = 1 ]; then
       rm -rf "$X" 2>/dev/null; [ ! -e "$X" ] || die "Could not delete installers/extracted/revit$YEAR. Delete it in Finder."
     fi

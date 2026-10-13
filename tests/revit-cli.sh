@@ -59,6 +59,11 @@ bottle() { # $1 = name, $2 = year in the description ("" = none), $3 = year of t
   return 0
 }
 apps() { local a; for a in "Revit $1" "Revit Viewer $1" "Autodesk Sign-In"; do mkdir -p "$H/Applications/$a ($2).app"; done; }
+cxapp() { # $1 = path under ~/Applications/CrossOver, $2 = bottle: an app CrossOver makes for a Start Menu entry
+  mkdir -p "$H/Applications/CrossOver/$1.app/Contents"
+  printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CXHelperAppBottleName</key><string>%s</string></dict></plist>\n' \
+    "$2" > "$H/Applications/CrossOver/$1.app/Contents/Info.plist"
+}
 fake_revit() { # $1 = bottle, $2 = year: a process that looks like Revit.exe and holds a file open in that bottle
   touch "$BOTTLES/$1/drive_c/open.tmp"
   perl -e 'open(my $f, "<", $ARGV[0]) or die; sleep 60' "$BOTTLES/$1/drive_c/open.tmp" \
@@ -210,6 +215,14 @@ check "failed delete: apps kept" test -d "$H/Applications/Revit 2024 (rvt2024-a)
 reset; apps 2024 rvt2024-a; run "2024" remove 2024; expect "remove finishes a partial remove" 0 "Removed Revit 2024 (rvt2024-a)."
 check "partial remove: apps gone" test ! -d "$H/Applications/Revit Viewer 2024 (rvt2024-a).app"
 reset; run "" remove 2024;           expect "nothing to remove" 0 "Nothing to remove for Revit 2024 (rvt2024-a)."
+reset; bottle rvt2024-a 2024 2024; cxapp "Autodesk/Revit 2024/Revit 2024" rvt2024-a; cxapp "Chaos/Enscape" rvt2024-a
+cxapp "Autodesk/Revit 2024 other" rvt2024-b; run "2024" remove 2024
+expect "remove lists CrossOver's menu apps" 0 "2 CrossOver menu apps of rvt2024-a in ~/Applications/CrossOver"
+check "remove deleted CrossOver's menu apps" test ! -e "$H/Applications/CrossOver/Autodesk/Revit 2024/Revit 2024.app"
+check "remove deleted their empty folders" test ! -e "$H/Applications/CrossOver/Chaos"
+check "remove kept another bottle's menu app" test -d "$H/Applications/CrossOver/Autodesk/Revit 2024 other.app"
+reset; cxapp "Autodesk/Revit 2024" rvt2024-a; run "2024" remove 2024
+expect "remove finishes leftover CrossOver menu apps" 0 "Removed Revit 2024 (rvt2024-a)."
 reset; apps 2024 rvt2024-a; run_racing 'bottle rvt2024-a 2024 2024' 2024 remove 2024
 expect "a bottle that appears during the prompt stops remove" 1 "Nothing was removed."
 check "appeared bottle: not deleted" test -d "$BOTTLES/rvt2024-a"
