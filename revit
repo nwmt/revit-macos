@@ -133,7 +133,11 @@ extracted_plan() { # sets DROP_X (1 = remove deletes the unpacked files) and KEE
 }
 
 case "$CMD" in
-  install) not_busy; exec "$ROOT/install.sh" "$YEAR" "$NAME" ;;   # two installs of a year share the unpacked installer
+  install) # two installs of a year share the downloaded and unpacked installer
+    not_busy
+    pgrep -f "scripts/(get-revit|inspect-installer)\.sh $YEAR( |$)" >/dev/null 2>&1 \
+      && die "The Revit $YEAR installer is being downloaded or unpacked. Wait until it finishes, then try again."
+    exec "$ROOT/install.sh" "$YEAR" "$NAME" ;;
   check)   export INSTALL_DRYRUN=1; exec "$ROOT/install.sh" "$YEAR" "$NAME" ;;
   addins)
     in_list "$YEAR" "${REVIT_ADDIN_YEARS[@]}" || die "The add-in script is not set up for Revit $YEAR yet."
@@ -149,8 +153,9 @@ case "$CMD" in
     ts='[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]'
     while IFS= read -r f; do   # <step>-<bottle>-<timestamp>[.log] or d7-<bottle>-<backend>-<timestamp>; step names have no "-",
       # so the bottle name is matched whole: not the logs of <bottle>-2 or <bottle>-other
-      rest="${f##*/}"; rest="${rest#*-}"; [ "${rest#"$NAME"-}" != "$rest" ] || continue
-      case "${rest#"$NAME"-}" in $ts|$ts.log|default-$ts|d3dmetal-$ts|dxmt-$ts|wined3d-$ts|dxvk-$ts) found="$found$f"$'\n' ;; esac
+      b="${f##*/}"; rest="${b#*-}"; [ "${rest#"$NAME"-}" != "$rest" ] || continue; rest="${rest#"$NAME"-}"
+      case "${b%%-*}:$rest" in d7:default-*|d7:d3dmetal-*|d7:dxmt-*|d7:wined3d-*|d7:dxvk-*) rest="${rest#*-}" ;; esac
+      case "$rest" in $ts|$ts.log) found="$found$f"$'\n' ;; esac
     done < <(ls -td "$ROOT"/logs/*-"$NAME"-* 2>/dev/null)
     found="$(printf '%s' "$found" | head -8)"
     [ -n "$found" ] || die "No logs for $NAME yet. ./revit install and ./revit debug write them to logs/."

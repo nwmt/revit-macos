@@ -105,9 +105,13 @@ echo; echo "Plan:"; i=1; for s in "${PLAN[@]}"; do echo "  $i. $s"; i=$((i + 1))
 
 # ---- run ----
 export CX_DESC="Revit $YEAR"
-# logs/ holds every run of every bottle: the reports below look only at what this run wrote
+# logs/ holds every run of every bottle, and another year may be installing now: the reports below look only at
+# what this run wrote, <step>-<bottle>-<time>[.log] and the unpack report inspect-revit<year>-<time>.txt. Newest first.
 mkdir -p "$ROOT/logs"; START="$(mktemp)" || exit 1; trap 'rm -f "$START"' EXIT
-run_logs() { find "$ROOT/logs" -mindepth 1 -maxdepth 1 -newer "$START" -exec ls -td {} + 2>/dev/null; }   # newest first
+run_logs() {
+  find "$ROOT/logs" -mindepth 1 -maxdepth 1 -newer "$START" -exec ls -td {} + 2>/dev/null \
+    | grep -E "/([a-z0-9]+-$BOTTLE|inspect-revit$YEAR)-[0-9]{8}-[0-9]{6}(\.log|\.txt)?\$"
+}
 t0=$SECONDS; i=1
 for s in "${PLAN[@]}"; do
   echo; echo "==> [$i/${#PLAN[@]}] $s"
