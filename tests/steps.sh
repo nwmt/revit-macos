@@ -243,4 +243,50 @@ run_steps 2024 rvt2024-t register
 expect "register runs the licensing helper" 0 ""; check "register: in the summary" grep -qE '^   register +exit=0 +829P1 2024.0.0.F USER' "$RUN/summary.txt"
 check "register: product key and version" called "[register] [--pk] [829P1] [--pv] [2024.0.0.F]"
 
+# ---- steps: Revit and fixes ----
+reset; mkbottle rvt2024-t 2024 ""; mkdist 2024; D="$R/installers/extracted/revit2024"
+mkdir -p "$AL2024/16.1.0.1/helper" "$D/x64/RVTSP"; ln -s 16.1.0.1 "$AL2024/Current"; touch "$D/x64/RVTSP/RVTSP1.msp"
+echo '<Package><InstallFile type="MSP" file="x64/RVTSP/RVTSP1.msp"/></Package>' > "$D/x64/pkg.RVTSP.xml"
+rule "rvt.cmd" 0 "mkdir -p '$BOTTLES/rvt2024-t/drive_c/Program Files/Autodesk/Revit 2024'; touch '$BOTTLES/rvt2024-t/drive_c/Program Files/Autodesk/Revit 2024/Revit.exe'"
+run_steps 2024 rvt2024-t rvt; expect "rvt installs RVT.msi with the update's patch" 0 ""; check "rvt: in the summary" grep -qE '^   rvt +exit=0 ' "$RUN/summary.txt"
+check "rvt: the MSP goes in as PATCH (quoted: the sandbox path has a space)" grep -q 'PATCH="Z:.*RVTSP1.msp"' "$RUN/rvt.cmd"
+check "rvt: product key and skipped register" grep -q 'ADLM_PRODKEY=829P1 .*CLM_SKIP_REGISTER=1' "$RUN/rvt.cmd"
+check "rvt: first asks the licensing service" called "[upgrade] [isUpgraded]"
+reset; mkbottle rvt2024-t 2024 ""; mkdist 2024; mkdir -p "$AL2024/16.1.0.1/helper"; ln -s 16.1.0.1 "$AL2024/Current"
+run_steps 2024 rvt2024-t rvt; expect "rvt: no Revit.exe afterwards is a failure" 1 "Step rvt failed"
+: > "$CALLS"; rule "isUpgraded" 1; run_steps 2024 rvt2024-t rvt
+expect "rvt: a silent licensing service stops it" 1 "Step rvt failed"; check "rvt: RVT.msi did not run" not_called "rvt.cmd"
+reset; mkbottle rvt2025-t 2025 2025; mkdist 2025; D="$R/installers/extracted/revit2025"; mkdir -p "$D/x64/BAD"
+printf '<Packages><Package name="BAD" path="x64/BAD/pkg.BAD.xml"/></Packages>' > "$D/manifest/app.RVT.xml"
+echo '<Package><InstallFile type="ADIX" file="x64/BAD/BAD.adix"/></Package>' > "$D/x64/BAD/pkg.BAD.xml"
+python3 -I -c 'import sys, zipfile; z = zipfile.ZipFile(sys.argv[1], "w"); z.writestr("Registry.dat", b"garbage"); z.close()' "$D/x64/BAD/BAD.adix"
+STEP_ENV=(ODIS_PKGS=BAD); run_steps 2025 rvt2025-t pkgs
+expect "pkgs: a broken ADIX registry fails the step" 1 "pkgs"; check "pkgs: failed.txt" grep -qx pkgs "$RUN/failed.txt"
+reset; mkbottle rvt2024-t 2024 2024; rm -rf "$BOTTLES/rvt2024-t/drive_c/windows/system32/wbem"; run_steps 2024 rvt2024-t wbemshim
+expect "wbemshim: a failed copy fails the step even though nothing after it runs" 1 "wbemshim"
+check "wbemshim: no registry change after the failed copy" not_called "4590F811"
+reset; mkbottle rvt2024-t 2024 2024; mkdir -p "$R/installers/redist/win7sp1/x64"
+for d in riched20 usp10 msls31 msftedit; do echo "ms $d" > "$R/installers/redist/win7sp1/x64/$d.dll"; done
+run_steps 2024 rvt2024-t richedit tlbpin; expect "richedit and tlbpin" 0 "tlbpin"
+S32="$BOTTLES/rvt2024-t/drive_c/windows/system32"; RV="$BOTTLES/rvt2024-t/drive_c/Program Files/Autodesk/Revit 2024"
+check "richedit: msftedit only in system32" test -f "$S32/msftedit.dll" -a ! -e "$RV/msftedit.dll"
+check "richedit: riched20 in both" test -f "$S32/riched20.dll" -a -f "$RV/riched20.dll"
+check "tlbpin: the shim is msls31.dll, Microsoft's is msls31_ms.dll" grep -q "fake tlbpin" "$RV/msls31.dll"
+check "tlbpin: msls31_ms.dll is Microsoft's" grep -q "ms msls31" "$S32/msls31_ms.dll"
+reset; mkbottle rvt2024-t 2024 2024; run_steps 2024 rvt2024-t d3d9dxvk wv2fix
+expect "d3d9dxvk and wv2fix" 0 "wv2fix"
+check "d3d9dxvk: the copy has no builtin marker" grep -q "DXVK native  DLL" "$BOTTLES/rvt2024-t/drive_c/windows/system32/d3d9.dll"
+check "wv2fix: version_orig.dll without the marker" grep -q "Wine orig    DLL" "$BOTTLES/rvt2024-t/drive_c/windows/system32/version_orig.dll"
+check "wv2fix: native version.dll for the browser only" called "[HKCU\\Software\\Wine\\AppDefaults\\msedgewebview2.exe\\DllOverrides] [/v] [version]"
+reset; mkbottle rvt2024-t 2024 2024; run_steps 2024 rvt2024-t pdfprinter
+expect "pdfprinter" 0 "pdfprinter"
+check "pdfprinter: the port path is quoted for /bin/sh (the sandbox path has a space)" called "|'$R/scripts/ps2pdf-port.sh'"
+reset; mkbottle rvt2024-t 2024 2024; P="$BOTTLES/rvt2024-t/drive_c/ProgramData/Autodesk/RVT 2024/UserDataCache"; mkdir -p "$P"
+python3 -I -c 'import sys; open(sys.argv[1], "wb").write(b"\xff\xfe" + "[Language]\r\nSelect=en-US\r\n".encode("utf-16-le"))' "$P/Revit.ini"
+STEP_ENV=(REVIT_THEME=dark); run_steps 2024 rvt2024-t revitini; expect "revitini" 0 "revitini"
+check "revitini: language and theme" grep -q "Select=ENU" <(iconv -f UTF-16 -t UTF-8 "$P/Revit.ini")
+check "revitini: dark canvas" grep -q "CanvasTheme=0" <(iconv -f UTF-16 -t UTF-8 "$P/Revit.ini")
+reset; mkbottle rvt2026-t 2026 2026; run_steps 2026 rvt2026-t dynamo gdoff
+expect "dynamo and gdoff skip what is not there" 0 ""; check "gdoff: in the summary" grep -qE '^   gdoff +exit=skip ' "$RUN/summary.txt"
+
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]
