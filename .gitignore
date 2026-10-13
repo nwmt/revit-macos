@@ -46,3 +46,4 @@ build/
 
 # ---- release packages (scripts/build-release.sh) ----
 dist/
+__pycache__/
