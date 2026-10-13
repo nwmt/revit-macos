@@ -114,4 +114,37 @@ reset; in_repo 'bottle_guard allow_missing 2024 rvt2024-t && echo fine'; expect 
 reset; ln -s "$BOTTLES/nowhere" "$BOTTLES/rvt2024-t"; in_repo 'bottle_guard allow_missing 2024 rvt2024-t'
 expect "guard: a dangling link is refused" 1 "is a link to another bottle"
 
+# ---- wine.sh ----
+in_bottle() { # $1 = bash code with wine.sh loaded for bottle rvt2024-t and a run folder; sets OUT, RC
+  in_repo '. "$ROOT/scripts/lib/wine.sh"; . "$ROOT/scripts/lib/shims.sh"; wine_init rvt2024-t
+    RUN_DIR="$(run_dir_new rvt2024-t test)"; '"$1"
+}
+reset; mkbottle rvt2024-t 2024 2024; in_bottle 'lock_take test; w some-program arg; echo rc=$?'
+check "w runs wine with the bottle and waits" called "wine [--bottle] [rvt2024-t] [--wait-children] [some-program] [arg]"
+check "wine never gets the lock's fd" not_called "FD9"
+reset; mkbottle rvt2024-t 2024 2024; in_bottle 'accept_codes 194 0 194 102 && echo yes; accept_codes 67 0 194; echo no=$?'
+expect "accept_codes: 194 accepted, 67 refused with 1" 0 "yes"; check "accept_codes returns 1, not the code" grep -q "no=1" <<<"$OUT"
+reset; mkbottle rvt2024-t 2024 2024; echo new > "$T/new.dll"
+in_bottle 'put_native_dll d3d9 "'"$T"'/new.dll" "$B/drive_c/Program Files/Autodesk/Revit 2024" Revit.exe && echo done'
+expect "put_native_dll succeeds" 0 "done"
+check "put_native_dll keeps Wine's stub" grep -q "Wine builtin DLL" "$BOTTLES/rvt2024-t/drive_c/windows/system32/d3d9.dll.wine-fake"
+check "put_native_dll puts the file into system32" grep -q new "$BOTTLES/rvt2024-t/drive_c/windows/system32/d3d9.dll"
+check "put_native_dll puts the second copy" test -f "$BOTTLES/rvt2024-t/drive_c/Program Files/Autodesk/Revit 2024/d3d9.dll"
+check "put_native_dll sets native,builtin for the exe" called "[HKCU\\Software\\Wine\\AppDefaults\\Revit.exe\\DllOverrides] [/v] [d3d9] [/d] [native,builtin]"
+in_bottle 'put_native_dll d3d9 "'"$T"'/new.dll" "" && echo again'
+check "put_native_dll again keeps the first stub" grep -q "Wine builtin DLL" "$BOTTLES/rvt2024-t/drive_c/windows/system32/d3d9.dll.wine-fake"
+reset; mkbottle rvt2024-t 2024 2024; chmod 555 "$BOTTLES/rvt2024-t/drive_c/windows/system32"; echo new > "$T/new.dll"
+in_bottle 'put_native_dll d3d9 "'"$T"'/new.dll" "" Revit.exe; echo rc=$?'
+check "put_native_dll fails when system32 is not writable" grep -q "rc=1" <<<"$OUT"
+chmod 755 "$BOTTLES/rvt2024-t/drive_c/windows/system32"
+reset; mkbottle rvt2024-t 2024 2024; in_bottle 'bottle_env "A=b c" >/dev/null; sh_path "/a b/x.sh"'
+expect "sh_path quotes a path with a space" 0 "'/a b/x.sh'"
+check "bottle_env writes cxbottle.conf" grep -q '"A" = "b c"' "$BOTTLES/rvt2024-t/cxbottle.conf"
+reset; mkbottle rvt2024-t 2024 2024; rule "cmd /c" 103
+in_bottle 'msi rvt "Z:\\x\\RVT.msi" "INSTALLDIR=C:\\Program Files\\Autodesk\\Revit 2024" A=1; echo rc=$?; cat "$RUN_DIR/rvt.cmd"'
+expect "msi returns msiexec's code" 0 "rc=103"
+check "msi quotes values with spaces" grep -qF 'INSTALLDIR="C:\Program Files\Autodesk\Revit 2024" A=1' <<<"$OUT"
+reset; mkbottle rvt2024-t 2024 2024; in_bottle 'ensure_shim wbem-shim && echo built; ensure_shim nonsense; echo rc=$?'
+expect "ensure_shim takes the prebuilt shim" 0 "built"; check "ensure_shim refuses an unknown shim" grep -q "rc=1" <<<"$OUT"
+
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]

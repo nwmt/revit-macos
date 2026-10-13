@@ -13,3 +13,22 @@ cc_or_prebuilt() {
   if [ -f "$ROOT/build/.prebuilt" ] && [ -f "$1" ]; then echo "prebuilt v$(cat "$ROOT/build/.prebuilt"): ${1#"$ROOT"/}"; exit 0; fi
   "$ROOT/scripts/get-toolchain.sh"
 }
+
+# The shims the steps use, by name, and the file each build leaves in build/ (stage 3 moves them to tools/shims/).
+shim_file() {
+  case "$1" in
+    d3dwp) echo d3dwp/d3dwp.dll ;;             ncrypt-shim) echo ncrypt-shim/ncrypt.dll ;;
+    pdf-printer) echo pdf-printer/add_printer.exe ;; rvtfix) echo rvtfix/rvtfix.dll ;;
+    svcshim) echo svcshim/svcshim.exe ;;       tlbpin) echo tlbpin/msls31.dll ;;
+    vkshim) echo vkshim/vulkan-1.dll ;;        wbem-shim) echo wbem-shim/wbemshim.dll ;;
+    wv2fix) echo wv2fix/version.dll ;;         *) return 1 ;;
+  esac
+}
+ensure_shim() { # $1 = shim: build it from source, or take the prebuilt release DLL (cc_or_prebuilt in the build
+  # script decides). 0 when its file is in build/ afterwards
+  local f s="$1"
+  f="$(shim_file "$1")" || { echo "unknown shim: $1"; return 1; }
+  [ "$s" = pdf-printer ] && s=add-printer
+  "$ROOT/scripts/build-$s.sh" || return 1
+  [ -f "$ROOT/build/$f" ] || { echo "build/$f is missing after its build"; return 1; }
+}
