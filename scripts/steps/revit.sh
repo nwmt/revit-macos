@@ -22,8 +22,8 @@ step_rvt() { # RVT.msi: LaunchCondition "Installed or ADSK_SETUP_EXE or ADSK_ODI
     REVITLANGUAGE=ENU CLM_SKIP_REGISTER=1 "INSTALLDIR=C:\\Program Files\\Autodesk\\Revit $YEAR" \
     ${patch[@]+"${patch[@]}"}; rc=$?
   accept_codes "$rc" 0 194 || { echo "RVT.msi returned $rc: $RUN_DIR/rvt.msi.log"; return 1; }
-  [ -f "$RD/Revit.exe" ] || { echo "RVT.msi finished, but Revit.exe is not there"; return 1; }
-  detail "RVT.msi${patch[0]:+ + ${patch[0]##*\\}}: Revit.exe in place"
+  # no Revit.exe check here: since 2025 it comes from an ADIX package (step pkgs); install.sh checks it at the end
+  detail "RVT.msi${patch[0]:+ + ${patch[0]##*\\}}$([ -f "$RD/Revit.exe" ] && echo ': Revit.exe in place')"
 }
 
 step_pkgs() { # product packages from manifest/app.RVT.xml except RVT (step rvt): ADIX through tools/adix.py, MSI

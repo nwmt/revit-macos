@@ -253,7 +253,10 @@ check "rvt: the MSP goes in as PATCH (quoted: the sandbox path has a space)" gre
 check "rvt: product key and skipped register" grep -q 'ADLM_PRODKEY=829P1 .*CLM_SKIP_REGISTER=1' "$RUN/rvt.cmd"
 check "rvt: first asks the licensing service" called "[upgrade] [isUpgraded]"
 reset; mkbottle rvt2024-t 2024 ""; mkdist 2024; mkdir -p "$AL2024/16.1.0.1/helper"; ln -s 16.1.0.1 "$AL2024/Current"
-run_steps 2024 rvt2024-t rvt; expect "rvt: no Revit.exe afterwards is a failure" 1 "Step rvt failed"
+# since 2025 Revit.exe comes from an ADIX package (step pkgs), not from RVT.msi: no Revit.exe after it is fine
+run_steps 2024 rvt2024-t rvt; expect "rvt: RVT.msi that leaves no Revit.exe is not a failure" 0 ""
+: > "$CALLS"; rule "rvt.cmd" 67; run_steps 2024 rvt2024-t rvt; expect "rvt: RVT.msi failing (1603) fails the step" 1 "Step rvt failed"
+reset; mkbottle rvt2024-t 2024 ""; mkdist 2024; mkdir -p "$AL2024/16.1.0.1/helper"; ln -s 16.1.0.1 "$AL2024/Current"
 : > "$CALLS"; rule "isUpgraded" 1; run_steps 2024 rvt2024-t rvt
 expect "rvt: a silent licensing service stops it" 1 "Step rvt failed"; check "rvt: RVT.msi did not run" not_called "rvt.cmd"
 reset; mkbottle rvt2025-t 2025 2025; mkdist 2025; D="$R/installers/extracted/revit2025"; mkdir -p "$D/x64/BAD"
