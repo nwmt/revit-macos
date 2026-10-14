@@ -96,5 +96,62 @@ mkzip "$T/new.zip" $ALL; pin_zip "$T/new.zip"; run env FAKE_ZIP="$T/new.zip" "$R
 expect "stale marker: the pinned release is downloaded" 0 "prebuilt v$V: build/wv2fix/version.dll"
 check "stale marker: the file is the pinned release's" grep -qx "release version.dll" "$R/build/wv2fix/version.dll"
 
+# ---- get-shims.sh ----
+reset nocc; mkdir -p "$R/build/ncrypt-shim" "$R/build/rvtfix"; echo "$V" > "$R/build/.prebuilt"
+touch "$R/build/LICENSE" "$R/build/ncrypt-shim/ncrypt.dll" "$R/build/rvtfix/rvtfix.dll"
+run env SHIMS_FROM_SOURCE=1 "$R/scripts/get-shims.sh"
+expect "get-shims: building from source fetches the compiler" 1 "building from source"; check "from source: get-toolchain" called get-toolchain
+check "from source: the release marker is gone" test ! -e "$R/build/.prebuilt"
+check "from source: the release files are gone, new and old layout" test ! -e "$R/build/ncrypt-shim/ncrypt.dll" -a ! -e "$R/build/rvtfix/rvtfix.dll" -a ! -e "$R/build/LICENSE"
+reset nocc; mkzip "$T/new.zip" $ALL; pin_zip "$T/new.zip"; run env FAKE_ZIP="$T/new.zip" "$R/scripts/get-shims.sh"
+expect "get-shims: a release of this layout" 0 "prebuilt shims v$V in build/"
+check "this layout: marker set" grep -qx "$V" "$R/build/.prebuilt"
+run "$R/scripts/build-shims.sh"; expect "then build-shims takes all nine without a compiler" 0 "prebuilt v$V: build/wv2fix/version.dll"
+check "then: nothing fetched" absent get-toolchain
+reset nocc; mkzip "$T/old.zip" $OLD; pin_zip "$T/old.zip"; run env FAKE_ZIP="$T/old.zip" "$R/scripts/get-shims.sh"
+expect "get-shims: a release of the old layout is refused (no git history)" 1 "does not hold every shim"
+check "old layout: no marker, no files" test ! -e "$R/build/.prebuilt" -a ! -e "$R/build/ncrypt-shim/ncrypt.dll"
+# files built earlier under the three new names must not complete an old package: the package is checked on its own
+reset nocc; for f in ncryptshim/ncrypt.dll pdfprinter/add_printer.exe wbemshim/wbemshim.dll; do mkdir -p "$R/build/$(dirname "$f")"; echo built > "$R/build/$f"; done
+mkzip "$T/old.zip" $OLD; pin_zip "$T/old.zip"; run env FAKE_ZIP="$T/old.zip" "$R/scripts/get-shims.sh"
+expect "an old package next to files built earlier: refused" 1 "does not hold every shim"
+check "old package next to built files: no marker, no old wv2fix" test ! -e "$R/build/.prebuilt" -a ! -e "$R/build/wv2fix/version.dll"
+# the v0.5.0 package (old folders) in build/ with the pinned marker, and as the pinned download: none of its files is
+# used, also not wv2fix/version.dll, whose folder kept its name
+reset nocc; fill_release $OLD; mkzip "$T/old.zip" $OLD; pin_zip "$T/old.zip"
+run env FAKE_ZIP="$T/old.zip" "$R/scripts/build-shims.sh" wv2fix
+expect "old layout: refused, the compiler is fetched" 1 "does not hold every shim"; check "old layout: get-toolchain" called get-toolchain
+check "old layout: its files and marker are gone" test ! -e "$R/build/wv2fix/version.dll" -a ! -e "$R/build/ncrypt-shim/ncrypt.dll" -a ! -e "$R/build/.prebuilt"
+# an old cache that local builds made complete (three new names built with the compiler, then no compiler)
+reset; fill_release $OLD; mkzip "$T/old.zip" $OLD; pin_zip "$T/old.zip"
+run "$R/scripts/build-shims.sh" ncryptshim pdfprinter wbemshim; rm -f "$CCF"
+run env FAKE_ZIP="$T/old.zip" "$R/scripts/build-shims.sh" wv2fix
+expect "old cache completed by local builds: not taken" 1 "does not hold every shim"
+check "completed old cache: its wv2fix is gone" test ! -e "$R/build/wv2fix/version.dll"
+# the release/pin transition, as git sees it, with versions of its own: tag v1.0.0 on the old sources, the new
+# sources, tag v1.1.0 on them, the pin commit. Every setup command must succeed, or the checks would take the
+# no-history path
+gitc() { git -C "$R" -c user.name=t -c user.email=t@t -c core.hooksPath=/dev/null "$@"; }
+reset nocc; sed -i '' 's/^SHIMS_VERSION=.*/SHIMS_VERSION=1.0.0/' "$R/scripts/lib/shims.sh"
+if echo '/* old */' >> "$R/tools/shims/svcshim/svcshim.c" && gitc -c init.defaultBranch=main init -q && gitc add -A &&
+   gitc commit -qm old && gitc tag v1.0.0 && cp "$REPO/tools/shims/svcshim/svcshim.c" "$R/tools/shims/svcshim/svcshim.c" &&
+   gitc commit -qam new; then ok "sandbox git: tag v1.0.0 on the old sources, the new commit"; else fail "sandbox git: old and new commits"; fi
+run "$R/scripts/get-shims.sh"; expect "before the pin: sources differ from v1.0.0, from source" 1 "shim sources changed since v1.0.0"
+mkzip "$T/new.zip" $ALL
+if gitc tag v1.1.0 && pin_zip "$T/new.zip" && sed -i '' 's/^SHIMS_VERSION=.*/SHIMS_VERSION=1.1.0/' "$R/scripts/lib/shims.sh" &&
+   gitc commit -qam pin && [ "$(gitc rev-parse 'v1.1.0^{commit}')" = "$(gitc rev-parse HEAD~1)" ] &&
+   [ "$(gitc log -1 --format=%s)" = pin ]; then ok "sandbox git: tag v1.1.0 on the new sources, then the pin"
+else fail "sandbox git: tag v1.1.0 and the pin"; fi
+: > "$CALLS"; run env FAKE_ZIP="$T/new.zip" "$R/scripts/get-shims.sh"
+expect "after the pin: v1.1.0 is downloaded, no source build" 0 "prebuilt shims v1.1.0 in build/"; check "after the pin: no compiler" absent get-toolchain
+run "$R/scripts/get-shims.sh"; expect "after the pin, again: already there" 0 "prebuilt shims v1.1.0 already in build/"
+
+# ---- build-release.sh ----
+reset; run "$R/scripts/build-release.sh" 9.9.9
+expect "build-release packs the shims" 0 "revit-macos-shims-9.9.9.zip"
+check "release zip: LICENSE and exactly the nine shim files" test "$(unzip -Z1 "$R/dist/revit-macos-shims-9.9.9.zip" | tr '\n' ' ')" = \
+  "build/LICENSE build/d3dwp/d3dwp.dll build/ncryptshim/ncrypt.dll build/pdfprinter/add_printer.exe build/rvtfix/rvtfix.dll build/svcshim/svcshim.exe build/tlbpin/msls31.dll build/vkshim/vulkan-1.dll build/wbemshim/wbemshim.dll build/wv2fix/version.dll "
+check "release: checksum file" test -s "$R/dist/revit-macos-shims-9.9.9.zip.sha256"
+
 echo; echo "$((n - fails))/$n passed"
 [ "$fails" = 0 ]
