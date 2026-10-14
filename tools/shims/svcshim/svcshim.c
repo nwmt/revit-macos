@@ -1,17 +1,20 @@
-// SPDX-License-Identifier: MIT
-// Native service shim for AdskLicensingService under Wine: replaces tools/AdskSvcShim.cs without .NET Framework
-// (Revit 2025+ runs on .NET 8; we don't want .NET Framework just for the shim: CLR 4.8 crashes for us under Wine).
-//
-// Why: AdskLicensingService is written in Go (kardianos/service). It decides whether it is a service via
-// svc.IsAnInteractiveSession(); under Wine the token carries the Interactive SID, so it thinks it was started from
-// a console and never calls StartServiceCtrlDispatcher. SCM waits until the timeout (error 1053) and kills the process.
-//
-// What it does: registers with SCM as a regular service, reports RUNNING and keeps the real
-// AdskLicensingService.exe as a child process in console mode. If the child dies, the service stops.
-// Usage (service ImagePath): svcshim.exe ["path to the real exe" [its arguments...]]
-// Without arguments it wraps AdskLicensingService and logs to its Log folder; with a path it wraps that program (the
-// Chaos services for Enscape 4.x) and logs to svcshim.log next to it. Wine ignores the service name of a one-service
-// process, so the same exe serves any service.
+/*
+ * SPDX-License-Identifier: MIT
+ * svcshim.exe -- native service wrapper for services that do not answer Wine's SCM: Autodesk's licensing service
+ * (every Revit) and, for Enscape 4.18, Chaos sign-in and Asset Library.
+ *
+ * Problem: AdskLicensingService is written in Go (kardianos/service). It decides whether it is a service via
+ * svc.IsAnInteractiveSession(); under Wine the token carries the Interactive SID, so it thinks it was started from a
+ * console and never calls StartServiceCtrlDispatcher. SCM waits until the timeout (error 1053) and kills the process.
+ *
+ * Fix: registers with SCM as a regular service, reports RUNNING and keeps the real program as a child process in
+ * console mode. If the child dies, the service stops. Wine ignores the service name of a one-service process, so the
+ * same exe serves any service.
+ * Usage (service ImagePath): svcshim.exe ["path to the real exe" [its arguments...]]. Without arguments it wraps
+ * AdskLicensingService through AdskLicensing\Current; Revit 2020 passes the path in the version folder.
+ *
+ * Diagnostics: svcshim.log in the licensing service's Log folder, or next to the program it wraps.
+ */
 #include <windows.h>
 #include <stdio.h>
 
@@ -19,7 +22,7 @@ static const wchar_t *DEFAULT_TARGET =
     L"C:\\Program Files (x86)\\Common Files\\Autodesk Shared\\AdskLicensing\\Current\\AdskLicensingService\\AdskLicensingService.exe";
 static wchar_t log_path[MAX_PATH] = L"C:\\ProgramData\\Autodesk\\AdskLicensingService\\Log\\svcshim.log";
 static wchar_t target[MAX_PATH] = L"";
-static const wchar_t *target_args = L"";   // the rest of our command line after the target, as written
+static const wchar_t *target_args = L"";   /* the rest of our command line after the target, as written */
 static SERVICE_STATUS_HANDLE status_handle;
 static SERVICE_STATUS status = { SERVICE_WIN32_OWN_PROCESS, SERVICE_START_PENDING, 0, 0, 0, 0, 0 };
 static PROCESS_INFORMATION child;
@@ -69,7 +72,7 @@ static void WINAPI service_main(DWORD argc, wchar_t **argv) {
 
     HANDLE h[2] = { stop_event, child.hProcess };
     DWORD r = WaitForMultipleObjects(2, h, FALSE, INFINITE);
-    if (r == WAIT_OBJECT_0) { // stop from SCM
+    if (r == WAIT_OBJECT_0) { /* stop from SCM */
         TerminateProcess(child.hProcess, 0);
         WaitForSingleObject(child.hProcess, 5000);
         logf(L"stopped");
@@ -77,12 +80,12 @@ static void WINAPI service_main(DWORD argc, wchar_t **argv) {
     } else {
         DWORD code = 0; GetExitCodeProcess(child.hProcess, &code);
         logf(L"child exited code=%lu, stopping service", code);
-        // nonzero code -> SCM applies the sc failure policy (restart)
+        /* nonzero code -> SCM applies the sc failure policy (restart) */
         set_state(SERVICE_STOPPED, code ? ERROR_SERVICE_SPECIFIC_ERROR : 0);
     }
 }
 
-static const wchar_t *skip_arg(const wchar_t *p) { // past one command-line argument and the spaces after it
+static const wchar_t *skip_arg(const wchar_t *p) { /* past one command-line argument and the spaces after it */
     int quoted = 0;
     for (; *p && (quoted || (*p != L' ' && *p != L'\t')); p++) if (*p == L'"') quoted = !quoted;
     while (*p == L' ' || *p == L'\t') p++;
