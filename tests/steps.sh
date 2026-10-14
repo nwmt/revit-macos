@@ -171,6 +171,22 @@ mkdist() { # $1 = year: a tiny unpacked ODIS installer
   touch "$d/x86/Licensing/AdskLicensing-installer.exe" "$d/x64/RVT/RevitConfig.pit" \
     "$d/x64/AdskIdentityManager/AdskIdentityManager-Installer.exe"
 }
+mkdist2020() { # a tiny unpacked Setup.ini installer: multi-part 2020 downloads unpack into one subfolder. Sets D20
+  D20="$R/installers/extracted/revit2020/Revit_2020_G1_Win_64bit_r3_dlm"; local d="$D20" v a
+  mkdir -p "$d/Setup" "$d/x86/AdskLicensing" "$d/x64/AdSSO" "$d/x64/RCL" "$d/x64/RVT" "$d/x64/RET" \
+    "$d/3rdParty/NET/47/wcu/dotNetFramework" "$d/Content/ADSKMaterials/2020/CM" "$d/Content/ADSKMaterials/2020/ILB" \
+    "$d/Content/ADSKMaterials/2020/PLB" "$d/Content/ADSKMaterials/2020/PLL"
+  echo '[Setup]' > "$d/Setup.ini"
+  touch "$d/Setup/RevitConfig.pit" "$d/x86/AdskLicensing/AdskLicensing-installer.exe" "$d/x64/AdSSO/AdSSO.msi" \
+    "$d/x64/RCL/RCL.msi" "$d/x64/RVT/RVT.msi" "$d/x64/RET/RET.msi" \
+    "$d/3rdParty/NET/47/wcu/dotNetFramework/dotNetFx47_Full_x86_x64.exe" \
+    "$d/Content/ADSKMaterials/2020/CM/MaterialLibrary2020.msi" "$d/Content/ADSKMaterials/2020/ILB/BaseImageLibrary2020.msi" \
+    "$d/Content/ADSKMaterials/2020/PLB/PrismBaseImageLibrary2020.msi" "$d/Content/ADSKMaterials/2020/PLL/PrismLowImageLibrary2020.msi"
+  for a in x86 x64; do
+    for v in 2010SP1 2012 2013; do mkdir -p "$d/3rdParty/$a/VCRedist/$v"; touch "$d/3rdParty/$a/VCRedist/$v/vcredist_$a.exe"; done
+    for v in 2015 2017; do mkdir -p "$d/3rdParty/$a/VCRedist/$v"; touch "$d/3rdParty/$a/VCRedist/$v/VC_redist.$a.exe"; done
+  done
+}
 reset; mkbottle rvt2024-t 2024 2024; teststeps; run_steps 2024 rvt2024-t t_ok nonsense
 expect "an unknown step stops before anything runs" 2 "Unknown step: nonsense"
 check "unknown step: nothing ran" test ! -e "$T/order"; check "unknown step: no run folder" test -z "$RUN"
@@ -238,6 +254,38 @@ run_steps 2026 rvt2026-t dotnet; expect "dotnet runs" 0 "dotnet"
 check "dotnet: both runtimes, 8 before 10" test "$(grep -o 'netdesk[0-9]*' "$CALLS" | tr '\n' ' ')" = "netdesk80 netdesk100 "
 reset; mkbottle rvt2024-t 2024 2024; mkdist 2024; run_steps 2024 rvt2024-t dotnet
 expect "dotnet: skipped for .NET Framework years" 0 ""; check "dotnet: in the summary" grep -qE '^   dotnet +exit=skip ' "$RUN/summary.txt"
+release_rule() { rule "NDP\\v4\\Full" 0 "echo '    Release    REG_DWORD    $1'"; }   # $1 = what reg query reports
+reset; mkbottle rvt2020-t 2020 2020; mkdist2020; mkdir -p "$R/installers/redist"; touch "$R/installers/redist/dotNetFx40_Full_x86_x64.exe"
+release_rule 0x70805; run_steps 2020 rvt2020-t netfx
+expect "netfx (2020): .NET Framework 4.7" 0 ""; check "netfx (2020): in the summary" grep -qE '^   netfx +exit=0 +Release=460805' "$RUN/summary.txt"
+check "netfx (2020): the installer's 4.7" called "[C:\\dotNetFx47.exe] [/q] [/norestart]"
+check "netfx (2020): never 4.8 (Revit 2020 crashes on it)" not_called "dotNetFx48"
+check "netfx (2020): back on Windows 10" test "$(grep -o 'winecfg\] \[-v\] \[[a-z0-9]*' "$CALLS" | tail -1)" = "winecfg] [-v] [win10"
+reset; mkbottle rvt2020-t 2020 2020; mkdist2020; mkdir -p "$R/installers/redist"; touch "$R/installers/redist/dotNetFx40_Full_x86_x64.exe"
+release_rule 0x6040e; run_steps 2020 rvt2020-t netfx
+expect "netfx (2020): an older release than 4.7 fails" 1 "Step netfx failed"
+reset; mkbottle rvt2024-t 2024 2024; mkdist 2024; mkdir -p "$R/installers/redist" "$R/installers/extracted/revit2024/3rdParty/dotNetFramework/48"
+touch "$R/installers/redist/dotNetFx40_Full_x86_x64.exe" "$R/installers/extracted/revit2024/3rdParty/dotNetFramework/48/dotNetFx48_Full_x86_x64.exe"
+release_rule 0x80ea8; run_steps 2024 rvt2024-t netfx
+expect "netfx (2024): .NET Framework 4.8" 0 ""; check "netfx (2024): the installer's 4.8" called "[C:\\dotNetFx48.exe] [/q] [/norestart]"
+# Ctrl-C (SIGINT to the whole process group, as a terminal sends it) while the 4.7 installer runs as Windows 7: the
+# installer finishes, the bottle is back on Windows 10, the run stops. perl gives the runner its own group and the
+# default SIGINT (a background job of this script would get it ignored)
+reset; mkbottle rvt2020-t 2020 2020; mkdist2020; mkdir -p "$R/installers/redist"; touch "$R/installers/redist/dotNetFx40_Full_x86_x64.exe"
+rule "dotNetFx47.exe" 0 "sleep 2; touch '$T/net47-done'"; release_rule 0x70805
+(cd / && exec "${SANDBOX_ENV[@]}" /usr/bin/perl -e '$SIG{INT}="DEFAULT"; setpgrp(0,0); exec @ARGV' \
+  /bin/bash "$R/scripts/run-steps.sh" 2020 rvt2020-t netfx vc) > "$T/out" 2>&1 &
+rs=$!; sleep 1; kill -INT -- "-$rs"; wait "$rs"; RC=$?; OUT="$(cat "$T/out")"
+expect "Ctrl-C during netfx stops the run" 1 "Stopped."
+check "Ctrl-C during netfx: the installer finished" test -f "$T/net47-done"
+check "Ctrl-C during netfx: Windows 10 again" test "$(grep -o 'winecfg\] \[-v\] \[[a-z0-9]*' "$CALLS" | tail -1)" = "winecfg] [-v] [win10"
+check "Ctrl-C during netfx: vc did not run" not_called "vc10x86"
+# a failure while the bottle is Windows XP x64: the step fails and still puts Windows 10 back
+reset; mkbottle rvt2020-t 2020 2020; mkdist2020; mkdir -p "$R/installers/redist"; touch "$R/installers/redist/dotNetFx40_Full_x86_x64.exe"
+rule "OnlyUseLatestCLR" 5; run_steps 2020 rvt2020-t netfx
+expect "netfx: a failed registry change as Windows XP fails the step" 1 "Step netfx failed"
+check "netfx failed as Windows XP: Windows 10 again" test "$(grep -o 'winecfg\] \[-v\] \[[a-z0-9]*' "$CALLS" | tail -1)" = "winecfg] [-v] [win10"
+check "netfx failed as Windows XP: no 4.7 installer" not_called "dotNetFx47"
 reset; mkbottle rvt2024-t 2024 2024; mkdist 2024; mkdir -p "$AL2024/16.1.0.1/helper"; ln -s 16.1.0.1 "$AL2024/Current"
 run_steps 2024 rvt2024-t register
 expect "register runs the licensing helper" 0 ""; check "register: in the summary" grep -qE '^   register +exit=0 +829P1 2024.0.0.F USER' "$RUN/summary.txt"

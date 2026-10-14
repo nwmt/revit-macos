@@ -41,16 +41,32 @@ step_fonts() { # core fonts and MSXML 6 through winetricks
   detail "winetricks corefonts msxml6"
 }
 
-step_netfx() { # .NET Framework 4.8 from Revit's installer on top of a real 4.0 (the winetricks dotnet4x recipe)
-  local net40="$ROOT/installers/redist/dotNetFx40_Full_x86_x64.exe" k rel
-  local netx="$DIST/3rdParty/dotNetFramework/48/dotNetFx48_Full_x86_x64.exe"
+step_netfx() { # .NET Framework from Revit's installer on top of a real 4.0 (the winetricks dotnet4x recipe): 4.7 for
+  # DOTNET=netfx47 (Revit 2020 crashes on 4.7.2 and 4.8 under Wine), 4.8 for netfx48
+  local net40="$ROOT/installers/redist/dotNetFx40_Full_x86_x64.exe" netx ver min rc rel
   case "$DOTNET" in
-    netfx48) ;;
-    netfx*) echo "step netfx: $DOTNET is installed by scripts/d3-dotnet47.sh until stage 2"; return 1 ;;
+    netfx47) ver=4.7; min=460798; netx="$DIST/3rdParty/NET/47/wcu/dotNetFramework/dotNetFx47_Full_x86_x64.exe" ;;
+    netfx48) ver=4.8; min=528040; netx="$DIST/3rdParty/dotNetFramework/48/dotNetFx48_Full_x86_x64.exe" ;;
     *) skip "Revit $YEAR runs on .NET, not .NET Framework"; return 0 ;;
   esac
   [ -f "$net40" ] || { echo "no $net40: run ./scripts/get-redist.sh $YEAR"; return 1; }
   [ -f "$netx" ] || { echo "no $netx"; return 1; }
+  # the installers run as Windows XP x64 and 7; whatever happens there, the bottle goes back to Windows 10. Ctrl-C lets
+  # them finish: the step runs in its own subshell, so the runner still stops after it
+  trap '' INT TERM HUP
+  netfx_as_old_windows "$net40" "$netx" "$ver"; rc=$?
+  w winecfg -v win10 || return 1
+  [ $rc = 0 ] || return 1
+  w wineboot -r   # the MSI asks for a reboot (pending file renames)
+  # the installers' exit codes say little under Wine: check what got installed
+  rel="$(w reg query 'HKLM\Software\Microsoft\NET Framework Setup\NDP\v4\Full' /v Release 2>/dev/null | tr -d '\r' | awk '/Release/{print $3}')"
+  [ $((rel)) -ge $min ] || { echo ".NET Framework $ver is not installed (Release=$((rel)))"; return 1; }
+  detail "Release=$((rel)) ($min+ = $ver)"
+}
+
+netfx_as_old_windows() { # $1 = the 4.0 installer, $2 = the 4.x one, $3 = its version (4.7 | 4.8). Leaves the bottle
+  # as Windows 7 or XP x64: step_netfx puts Windows 10 back
+  local k
   # Wine's own mscoree leaves fake NDP keys and stub DLLs: the real installers would think .NET is there
   for k in 'HKLM\Software\Microsoft\NET Framework Setup\NDP\v4' 'HKLM\Software\Wow6432Node\Microsoft\NET Framework Setup\NDP\v4'; do
     w reg delete "$k" /f
@@ -58,21 +74,17 @@ step_netfx() { # .NET Framework 4.8 from Revit's installer on top of a real 4.0 
   rm -f "$B/drive_c/windows/system32/mscoree.dll" "$B/drive_c/windows/syswow64/mscoree.dll"
   # 4.0 as Windows XP x64 installs the real mscoree.dll, which 4.5 and later lack
   w winecfg -v winxp64 || return 1
-  WINEDLLOVERRIDES="fusion=b" run_exe dotNetFx40 "$net40" /q '/c:install.exe /q'; echo "4.0 installer exit=$?"
+  WINEDLLOVERRIDES="fusion=b" run_exe dotNetFx40 "$1" /q '/c:install.exe /q'; echo "4.0 installer exit=$?"
   w reg add 'HKCU\Software\Wine\DllOverrides' /v mscoree /d native /f || return 1
   for k in 'HKLM\Software\Microsoft\.NETFramework' 'HKLM\Software\Wow6432Node\.NETFramework'; do
     w reg add "$k" /v OnlyUseLatestCLR /t REG_DWORD /d 1 /f || return 1
   done
   # on Windows 10 1703+ the 4.7/4.8 installers say "already installed": install as Windows 7
   w winecfg -v win7 || return 1
-  WINEDLLOVERRIDES="fusion=b" run_exe dotNetFx48 "$netx" /q /norestart /log 'C:\netfx-setup'; echo "4.8 installer exit=$?"
-  cp "$B"/drive_c/netfx-setup* "$RUN_DIR/" 2>/dev/null; rm -f "$B"/drive_c/netfx-setup*
-  w winecfg -v win10 || return 1
-  w wineboot -r   # the MSI asks for a reboot (pending file renames)
-  # the installers' exit codes say little under Wine: check what got installed
-  rel="$(w reg query 'HKLM\Software\Microsoft\NET Framework Setup\NDP\v4\Full' /v Release 2>/dev/null | tr -d '\r' | awk '/Release/{print $3}')"
-  [ $((rel)) -ge 528040 ] || { echo ".NET Framework 4.8 is not installed (Release=$((rel)))"; return 1; }
-  detail "Release=$((rel)) (528040+ = 4.8)"
+  WINEDLLOVERRIDES="fusion=b" run_exe "dotNetFx${3/./}" "$2" /q /norestart /log 'C:\netfx-setup'; echo "$3 installer exit=$?"
+  # the installer's own logs: removed from the bottle only once they are in the run folder
+  cp "$B"/drive_c/netfx-setup* "$RUN_DIR/" 2>/dev/null && rm -f "$B"/drive_c/netfx-setup*
+  return 0
 }
 
 step_dotnet() { # .NET Desktop + ASP.NET Core runtimes from the installer, every one it ships, oldest first: an update
