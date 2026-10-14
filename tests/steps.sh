@@ -247,6 +247,14 @@ rule "vc22x86" 194; run_steps 2025 rvt2025-t vc
 expect "vc: 3010 (194) is success" 0 ""; check "vc: in the summary" grep -qE '^   vc +exit=0 ' "$RUN/summary.txt"
 check "vc: the VC++ 2022 installers ran" called "[C:\\vc22x64.exe] [/install] [/quiet] [/norestart]"
 check "vc: with VC++ 2022 present the XML list is not used" not_called "vc19"
+reset; mkbottle rvt2020-t 2020 2020; mkdist2020; run_steps 2020 rvt2020-t vc
+expect "vc (2020): runs" 0 ""; check "vc (2020): in the summary" grep -qE '^   vc +exit=0 +VC\+\+ 2010 SP1' "$RUN/summary.txt"
+check "vc (2020): 2010 SP1, 2012, 2013, 2017, x86 before x64, never 2015" \
+  test "$(grep -o 'vc1[0-9]x[0-9]*' "$CALLS" | tr '\n' ' ')" = "vc10x86 vc10x64 vc12x86 vc12x64 vc13x86 vc13x64 vc17x86 vc17x64 "
+check "vc (2020): the 2010 overrides" called "[HKCU\\Software\\Wine\\DllOverrides] [/v] [msvcr100] [/d] [native,builtin]"
+check "vc (2020): 2017 with its switches" called "[C:\\vc17x64.exe] [/install] [/quiet] [/norestart]"
+reset; mkbottle rvt2020-t 2020 2020; mkdist2020; rule "vc12x64" 67; run_steps 2020 rvt2020-t vc
+expect "vc (2020): a failed runtime fails the step" 1 "Step vc failed"; check "vc (2020): the others still ran" called "vc17x64"
 reset; mkbottle rvt2026-t 2026 2026; mkdist 2026; D="$R/installers/extracted/revit2026"
 mkdir -p "$D/3rdParty/x64/dotNet/80" "$D/3rdParty/x64/dotNet/100"
 touch "$D/3rdParty/x64/dotNet/80/windowsdesktop-runtime-8.0.1-win-x64.exe" "$D/3rdParty/x64/dotNet/100/windowsdesktop-runtime-10.0.0-win-x64.exe"

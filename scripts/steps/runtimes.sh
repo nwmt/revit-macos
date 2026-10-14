@@ -29,8 +29,23 @@ step_vc() { # Visual C++ runtimes from the installer, oldest first. The branch f
       vc_install "vc${v:2:2}$arch" "$DIST/$f" ${args[@]+"${args[@]}"} || rc=1
     done
     detail "VC++ runtimes from the installer's pkg.*.xml"
+  elif [ -f "$DIST/3rdParty/x64/VCRedist/2010SP1/vcredist_x64.exe" ]; then
+    # Setup.ini installers (2020): 2010 SP1, 2012, 2013, 2017, each after its DLL overrides; 2015 is the same v14
+    # runtime as 2017 and would return 1638 after it
+    override msvcp100 msvcr100 vcomp100 atl100 || return 1
+    vc_install vc10x86 "$DIST/3rdParty/x86/VCRedist/2010SP1/vcredist_x86.exe" /q /norestart || rc=1
+    vc_install vc10x64 "$DIST/3rdParty/x64/VCRedist/2010SP1/vcredist_x64.exe" /q /norestart || rc=1
+    override atl110 msvcp110 msvcr110 vcomp110 || return 1
+    vc_install vc12x86 "$DIST/3rdParty/x86/VCRedist/2012/vcredist_x86.exe" /q /norestart || rc=1
+    vc_install vc12x64 "$DIST/3rdParty/x64/VCRedist/2012/vcredist_x64.exe" /q /norestart || rc=1
+    override atl120 msvcp120 msvcr120 vcomp120 || return 1
+    vc_install vc13x86 "$DIST/3rdParty/x86/VCRedist/2013/vcredist_x86.exe" /q /norestart || rc=1
+    vc_install vc13x64 "$DIST/3rdParty/x64/VCRedist/2013/vcredist_x64.exe" /q /norestart || rc=1
+    vc_install vc17x86 "$DIST/3rdParty/x86/VCRedist/2017/VC_redist.x86.exe" /install /quiet /norestart || rc=1
+    vc_install vc17x64 "$DIST/3rdParty/x64/VCRedist/2017/VC_redist.x64.exe" /install /quiet /norestart || rc=1
+    detail "VC++ 2010 SP1, 2012, 2013, 2017 x86 and x64"
   else
-    echo "no VC++ runtimes in $DIST/3rdParty (VCRedist/2022 or pkg.*.xml)"; return 1
+    echo "no VC++ runtimes in $DIST/3rdParty (VCRedist/2022, pkg.*.xml or VCRedist/2010SP1)"; return 1
   fi
   return $rc
 }
