@@ -64,9 +64,7 @@ grep -qE "[[:space:]]$H([[:space:]]|\$)" /etc/hosts \
 [ $missing -eq 1 ] || echo "  ✓ ready"
 
 # ---- plan: actions, each a script with its arguments ----
-PLAN=(shims); [ -n "$GET" ] && PLAN+=(revit); PLAN+=(redist unpack)
-if [ "$YEAR" = 2020 ]; then PLAN+=(legacy2020 apps)   # until Revit 2020 moves to run-steps.sh
-else PLAN+=(bottle steps apps); fi
+PLAN=(shims); [ -n "$GET" ] && PLAN+=(revit); PLAN+=(redist unpack bottle steps apps)
 action_argv() { # $1 = action → A=(script, arguments), the script relative to the repo
   case "$1" in
     shims)      A=(scripts/get-shims.sh) ;;
@@ -75,14 +73,12 @@ action_argv() { # $1 = action → A=(script, arguments), the script relative to 
     unpack)     A=(scripts/unpack-revit.sh "$YEAR") ;;
     bottle)     A=(scripts/new-bottle.sh "$YEAR" "$BOTTLE") ;;
     steps)      A=(scripts/run-steps.sh "$YEAR" "$BOTTLE") ;;
-    legacy2020) A=(scripts/build-bottle.sh "$BOTTLE") ;;
     apps)       A=(scripts/make-apps.sh "$YEAR" "$BOTTLE") ;;
   esac
 }
 echo; echo "Plan:"; i=1
 for a in "${PLAN[@]}"; do action_argv "$a"; echo "  $i. ${A[*]}"; i=$((i + 1)); done
-if [ "$YEAR" = 2020 ]; then echo "Steps: those of scripts/build-bottle.sh (Revit 2020 still installs the old way)"
-else echo "Steps: ${STEPS[*]}"; fi
+echo "Steps: ${STEPS[*]}"
 [ $missing -eq 0 ] || { echo; echo "Fix the items marked ✗ and run ./revit install $YEAR$SFX again."; exit 1; }
 [ "${INSTALL_DRYRUN:-0}" = 1 ] && { echo "(dry run: nothing changed)"; exit 0; }
 
@@ -122,9 +118,6 @@ if [ ! -f "$(revit_dir_unix "$B" "$YEAR")/Revit.exe" ]; then
 fi
 problems=""
 [ ! -s "$RUN_DIR/failed.txt" ] || problems="$(sed 's/^/  /' "$RUN_DIR/failed.txt")"
-if [ "$YEAR" = 2020 ]; then   # d6 reports only in summary.txt until stage 2; 84 is AdskLicensing's expected code
-  problems="$(grep -E 'exit=' "$RUN_DIR/summary.txt" | grep -Ev 'exit=(0|3010|skip|ok|RUNNING)[[:space:]]|^ *licensing +exit=84 ')"
-fi
 if [ -n "$problems" ]; then
   echo; echo "Some steps failed (Revit may still work; details in $(tilde "$RUN_DIR")):"; printf '%s\n' "$problems"
   echo "To try them again: ./revit rebuild $YEAR$SFX"

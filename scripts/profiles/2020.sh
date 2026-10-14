@@ -1,11 +1,11 @@
 # Revit 2020: Setup.ini installer (multi-part download), .NET Framework 4.7, sign-in in Revit's own window (AdSSO).
-# Installs with scripts/build-bottle.sh until it moves to scripts/run-steps.sh (STEPS empty until then).
 INSTALLER=setupini
 DOTNET=netfx47                     # the installer's 4.7; 4.7.2 and 4.8 crash Revit 2020 under Wine
 PRODKEY=829L1
 SIGNIN=adsso
 LICENSING_OK="1"                   # the licensing installer's takeown and `sc sdshow` fail under Wine
-STEPS=()
+STEPS=(netfx vc fonts licensing svcshim adsso rcl rvt ret materials register ncryptshim ssoenv wbemshim richedit dynamo
+  d3d9dxvk warpshim rvtfix pdfprinter tlbpin samples)
 PKGS=""
 REVITINI=()
 THEME=0

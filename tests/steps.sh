@@ -74,6 +74,12 @@ expect "a profile loads" 0 '2024 829P1 22 Interoperability.RealDWGInstalledLocat
 reset; in_repo 'load_profile 2021'; expect "a year without a profile is not loaded" 1 ""
 reset; in_repo 'load_profile 2027; load_profile 2023; echo "[${ENSCAPE}] ${#ADDIN_STEPS[@]}"'
 expect "loading a profile clears the previous one" 0 "[] 5"
+reset; in_repo '. "$ROOT/scripts/lib/wine.sh"; for f in "$ROOT"/scripts/steps/*.sh; do . "$f"; done
+  for y in "${REVIT_SUPPORTED[@]}"; do load_profile "$y"
+    for s in ${STEPS[@]+"${STEPS[@]}"} ${ADDIN_STEPS[@]+"${ADDIN_STEPS[@]}"}; do declare -F "step_$s" >/dev/null || echo "missing: $y $s"; done
+  done; echo checked'
+expect "every step of every profile has a function" 0 "checked"; check "no profile names a missing step" test -z "$(grep missing <<<"$OUT")"
+reset; in_repo 'load_profile 2020 && echo "${#STEPS[@]} ${STEPS[0]} ${STEPS[21]}"'; expect "the 2020 profile has its 22 steps" 0 "22 netfx samples"
 
 # ---- run folder ----
 reset; in_repo 'a="$(run_dir_new rvt2024-t steps)"; b="$(run_dir_new rvt2024-t steps)"; [ "$a" != "$b" ] && [ -d "$a" ] && [ -d "$b" ] && echo two'
@@ -394,6 +400,21 @@ reset; mkbottle rvt2026-t 2026 2026; run_steps 2026 rvt2026-t dynamo gdoff
 expect "dynamo and gdoff skip what is not there" 0 ""; check "gdoff: in the summary" grep -qE '^   gdoff +exit=skip ' "$RUN/summary.txt"
 reset; mkbottle rvt2026-t 2026 2026; mkdist 2026; rm -f "$R/installers/extracted/revit2026/manifest/app.RVT.xml"
 run_steps 2026 rvt2026-t asc; expect "asc: an unreadable manifest fails the step, not a skip" 1 "asc"
+
+# the whole 2020 profile, in its order, on the fake CrossOver: every step finds what the steps before it left
+reset; mkbottle rvt2020-t 2020 ""; mkdist2020; RV20="$BOTTLES/rvt2020-t/drive_c/Program Files/Autodesk/Revit 2020"
+mkdir -p "$R/installers/redist/win7sp1/x64" "$T/bin"; touch "$R/installers/redist/dotNetFx40_Full_x86_x64.exe"
+for d in riched20 usp10 msls31; do echo "ms $d" > "$R/installers/redist/win7sp1/x64/$d.dll"; done
+printf '#!/bin/bash\nexit 0\n' > "$T/bin/winetricks"; chmod +x "$T/bin/winetricks"
+lic_rule 1 2020; release_rule 0x70805; sc_running
+rule "rvt.cmd" 0 "mkdir -p '$RV20/Samples'; touch '$RV20/Revit.exe' '$RV20/Samples/rac_basic_sample_project.rvt' '$RV20/Samples/rac_basic_sample_family.rfa'"
+STEP_ENV=(PATH="$T/bin:$PATH"); run_steps 2020 rvt2020-t
+expect "the whole 2020 profile runs" 0 "samples"; miss=""
+for s in netfx vc fonts licensing svcshim adsso rcl rvt ret materials register ncryptshim ssoenv wbemshim richedit dynamo \
+  d3d9dxvk warpshim rvtfix pdfprinter tlbpin samples; do grep -qE "^   $s +exit=0 " "$RUN/summary.txt" || miss+=" $s"; done
+check "2020: every step done (missing:$miss)" test -z "$miss"
+check "2020: no failed.txt" test ! -e "$RUN/failed.txt"
+check "2020: rvtfix keeps CefSharp's flag off" grep -q '"RVTFIX_CEF_ARGS" = ""' "$BOTTLES/rvt2020-t/cxbottle.conf"
 
 # ---- steps: add-ins ----
 reset; mkbottle rvt2024-t 2024 2024; run_steps 2024 rvt2024-t wpfsw trust check

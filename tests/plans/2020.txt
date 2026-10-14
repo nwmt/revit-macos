@@ -2,8 +2,9 @@ Plan:
   1. scripts/get-shims.sh
   2. scripts/get-redist.sh 2020
   3. scripts/unpack-revit.sh 2020
-  4. scripts/build-bottle.sh rvt2020-a
-  5. scripts/make-apps.sh 2020 rvt2020-a
-Steps: those of scripts/build-bottle.sh (Revit 2020 still installs the old way)
+  4. scripts/new-bottle.sh 2020 rvt2020-a
+  5. scripts/run-steps.sh 2020 rvt2020-a
+  6. scripts/make-apps.sh 2020 rvt2020-a
+Steps: netfx vc fonts licensing svcshim adsso rcl rvt ret materials register ncryptshim ssoenv wbemshim richedit dynamo d3d9dxvk warpshim rvtfix pdfprinter tlbpin samples
 
 Fix the items marked ✗ and run ./revit install 2020 again.
