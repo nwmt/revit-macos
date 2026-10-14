@@ -72,7 +72,9 @@ step_netfx() { # .NET Framework from Revit's installer on top of a real 4.0 (the
   netfx_as_old_windows "$net40" "$netx" "$ver"; rc=$?
   w winecfg -v win10 || return 1
   [ $rc = 0 ] || return 1
-  w wineboot -r   # the MSI asks for a reboot (pending file renames)
+  # the MSI asks for a reboot (pending file renames). Its code is only logged: unchecked since 2023 and 2024 installed
+  # fine; the Release check below is what counts
+  w wineboot -r || echo "wineboot -r returned $?"
   # the installers' exit codes say little under Wine: check what got installed
   rel="$(w reg query 'HKLM\Software\Microsoft\NET Framework Setup\NDP\v4\Full' /v Release 2>/dev/null | tr -d '\r' | awk '/Release/{print $3}')"
   [ $((rel)) -ge $min ] || { echo ".NET Framework $ver is not installed (Release=$((rel)))"; return 1; }
