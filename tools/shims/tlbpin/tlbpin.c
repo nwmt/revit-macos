@@ -27,6 +27,8 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <oleauto.h>
+#define SHIM_NAME "tlbpin"
+#include "hook.h"
 
 static const GUID LIBID_tom = {0x8cc497c9, 0xa1df, 0x11ce, {0x80, 0x98, 0x00, 0xaa, 0x00, 0x47, 0xbe, 0x5d}};
 
@@ -35,16 +37,6 @@ static WORD tom_maj, tom_min;
 static LCID tom_lcid;
 static SRWLOCK tom_lock = SRWLOCK_INIT;
 static LONG hits;
-
-static void trace(const char *fmt, ...)
-{
-    char buf[160];
-    va_list ap;
-    va_start(ap, fmt);
-    wvsprintfA(buf, fmt, ap);
-    va_end(ap);
-    OutputDebugStringA(buf);
-}
 
 /* like Wine's LoadRegTypeLib, but via unhooked exports */
 static HRESULT load_reg_typelib(REFGUID guid, WORD maj, WORD min, LCID lcid, ITypeLib **out)
@@ -81,7 +73,7 @@ static HRESULT WINAPI hook_LoadRegTypeLib(REFGUID guid, WORD maj, WORD min, LCID
             tom = *out;
             tom->lpVtbl->AddRef(tom);
             tom_maj = maj; tom_min = min; tom_lcid = lcid;
-            trace("[tlbpin] LIBID_tom %u.%u lcid 0x%lx cached\n", maj, min, lcid);
+            trace("LIBID_tom %u.%u lcid 0x%lx cached\n", maj, min, lcid);
         }
         ReleaseSRWLockExclusive(&tom_lock);
     }
@@ -117,27 +109,13 @@ static BOOL WINAPI hook_NtUserGetCursorPos(POINT *pt)
 static const BYTE stub_tail[24] = {0xf6, 0x04, 0x25, 0x08, 0x03, 0xfe, 0x7f, 0x01, 0x75, 0x03, 0x0f, 0x05,
                                    0xc3, 0xeb, 0x01, 0xc3, 0xff, 0x14, 0x25, 0x00, 0x10, 0xfe, 0x7f, 0xc3};
 
-static void patch_jump(void *target, void *dest)
-{
-    BYTE patch[12] = {0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xe0}; /* mov rax, imm64; jmp rax */
-    DWORD old;
-    CopyMemory(patch + 2, &dest, sizeof(dest));
-    if (!VirtualProtect(target, sizeof(patch), PAGE_EXECUTE_READWRITE, &old)) {
-        trace("[tlbpin] VirtualProtect failed %lu\n", GetLastError());
-        return;
-    }
-    CopyMemory(target, patch, sizeof(patch));
-    VirtualProtect(target, sizeof(patch), old, &old);
-    FlushInstructionCache(GetCurrentProcess(), target, sizeof(patch));
-}
-
 static void install_cursor_hook(void)
 {
     BYTE *stub = (BYTE *)GetProcAddress(GetModuleHandleW(L"win32u.dll"), "NtUserGetCursorPos");
     DWORD old;
     if (!stub || stub[0] != 0x4c || stub[1] != 0x8b || stub[2] != 0xd1 || stub[3] != 0xb8 ||
         memcmp(stub + 8, stub_tail, sizeof(stub_tail))) {
-        trace("[tlbpin] win32u!NtUserGetCursorPos: unknown stub, not hooked\n");
+        trace("win32u!NtUserGetCursorPos: unknown stub, not hooked\n");
         return;
     }
     cursor_tramp = VirtualAlloc(NULL, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
@@ -145,27 +123,17 @@ static void install_cursor_hook(void)
     CopyMemory(cursor_tramp, stub, 32);
     VirtualProtect(cursor_tramp, 4096, PAGE_EXECUTE_READ, &old);
     FlushInstructionCache(GetCurrentProcess(), cursor_tramp, 32);
-    patch_jump(stub, (void *)hook_NtUserGetCursorPos);
-    trace("[tlbpin] win32u!NtUserGetCursorPos %p -> hook %p (cache %u ms)\n", stub, (void *)hook_NtUserGetCursorPos,
+    write_jump(stub, (void *)hook_NtUserGetCursorPos);
+    trace("win32u!NtUserGetCursorPos %p -> hook %p (cache %u ms)\n", stub, (void *)hook_NtUserGetCursorPos,
           CURSOR_TTL_MS);
 }
 
 static void install_hook(void)
 {
-    BYTE patch[12] = {0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xe0}; /* mov rax, imm64; jmp rax */
     void *target = (void *)GetProcAddress(GetModuleHandleW(L"oleaut32.dll"), "LoadRegTypeLib");
-    void *dest = (void *)hook_LoadRegTypeLib;
-    DWORD old;
-    if (!target) { trace("[tlbpin] oleaut32!LoadRegTypeLib not found\n"); return; }
-    CopyMemory(patch + 2, &dest, sizeof(dest));
-    if (!VirtualProtect(target, sizeof(patch), PAGE_EXECUTE_READWRITE, &old)) {
-        trace("[tlbpin] VirtualProtect failed %lu\n", GetLastError());
-        return;
-    }
-    CopyMemory(target, patch, sizeof(patch));
-    VirtualProtect(target, sizeof(patch), old, &old);
-    FlushInstructionCache(GetCurrentProcess(), target, sizeof(patch));
-    trace("[tlbpin] oleaut32!LoadRegTypeLib %p -> hook %p\n", target, dest);
+    if (!target) { trace("oleaut32!LoadRegTypeLib not found\n"); return; }
+    if (write_jump(target, (void *)hook_LoadRegTypeLib))
+        trace("oleaut32!LoadRegTypeLib %p -> hook %p\n", target, (void *)hook_LoadRegTypeLib);
 }
 
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
@@ -183,7 +151,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
             install_cursor_hook();
         }
     } else if (reason == DLL_PROCESS_DETACH && (hits || cursor_hits)) {
-        trace("[tlbpin] LIBID_tom cache hits: %ld, cursor cache hits: %ld\n", hits, cursor_hits);
+        trace("LIBID_tom cache hits: %ld, cursor cache hits: %ld\n", hits, cursor_hits);
     }
     return TRUE;
 }

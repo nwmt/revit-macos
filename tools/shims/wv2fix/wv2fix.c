@@ -3,7 +3,7 @@
  * wv2fix -- CrossOver 26.3 Wine fix inside WebView2 browser processes (msedgewebview2.exe).
  * Gets into the process as version.dll from the WebView2 runtime folder (msedge.dll imports VERSION.dll; AppDefaults
  * msedgewebview2.exe version=native,builtin). All version.dll functions forward to version_orig.dll, a copy of
- * Wine's builtin version.dll (version.def). Installed by scripts/steps/fixes.sh, step wv2fix.
+ * Wine's builtin version.dll (version.def). Installed by the step wv2fix (scripts/steps/fixes.sh).
  *
  * Browser crash inside Revit (start screen, Project Browser 2027): on click Chromium does a "redraw lock" --
  * clears and restores WS_VISIBLE on its window via SetWindowLong(GWL_STYLE). The window is a child of a window in ANOTHER
@@ -29,8 +29,12 @@
  * Library) this DLL also loads tools/shims/rvtfix if rvtfix.dll sits next to the exe: rvtfix gives the browser the same
  * arguments as in Revit, and it has to be in place before the program creates its WebView2 environment. The program
  * reads its own file version at startup, which loads version.dll early enough.
+ *
+ * Diagnostics: OutputDebugString with the "[wv2fix]" prefix (CX_DEBUGMSG=+debugstr).
  */
 #include <windows.h>
+#define SHIM_NAME "wv2fix"
+#include "hook.h"
 
 typedef LONG (WINAPI *setlong_fn)(HWND, int, LONG);
 typedef LONG_PTR (WINAPI *setlongptr_fn)(HWND, int, LONG_PTR);
@@ -45,8 +49,6 @@ static move_fn orig_move;
 static show_fn orig_show;
 static enddefer_fn orig_enddefer;
 static LONG skipped, peeked;
-
-static void trace(const char *s) { OutputDebugStringA(s); }
 
 static DWORD foreign_parent(HWND hwnd) /* pid of the other process owning the nearest such ancestor, or 0 */
 {
@@ -66,7 +68,7 @@ static void pre_flush(HWND hwnd) /* flush surfaces beforehand, outside the USER 
     MSG m;
     if (hwnd && !foreign_parent(hwnd)) return;
     PeekMessageW(&m, NULL, 0, 0, PM_NOREMOVE);
-    if (InterlockedIncrement(&peeked) == 1) trace("[wv2fix] PeekMessage before changing a window in another process\n");
+    if (InterlockedIncrement(&peeked) == 1) trace("PeekMessage before changing a window in another process\n");
 }
 
 static BOOL skip_style(HWND hwnd, int index, LONG_PTR value)
@@ -75,11 +77,8 @@ static BOOL skip_style(HWND hwnd, int index, LONG_PTR value)
     if (index != GWL_STYLE) return FALSE;
     if ((GetWindowLongPtrW(hwnd, GWL_STYLE) ^ value) != WS_VISIBLE) return FALSE; /* more than WS_VISIBLE changes */
     if (!(pid = foreign_parent(hwnd))) return FALSE;
-    if (InterlockedIncrement(&skipped) <= 5) {
-        char msg[200];
-        wsprintfA(msg, "[wv2fix] skip SetWindowLong(GWL_STYLE) %p: WS_VISIBLE only, parent in process %lu\n", hwnd, pid);
-        trace(msg);
-    }
+    if (InterlockedIncrement(&skipped) <= 5)
+        trace("skip SetWindowLong(GWL_STYLE) %p: WS_VISIBLE only, parent in process %lu\n", hwnd, pid);
     return TRUE;
 }
 
@@ -115,11 +114,8 @@ static BOOL same_rect(HWND hwnd, int x, int y, int cx, int cy, UINT flags) /* wo
     MapWindowPoints(HWND_DESKTOP, parent, (POINT *)&r, 2);
     if (!(flags & SWP_NOMOVE) && (r.left != x || r.top != y)) return FALSE;
     if (!(flags & SWP_NOSIZE) && (r.right - r.left != cx || r.bottom - r.top != cy)) return FALSE;
-    if (InterlockedIncrement(&nooped) <= 5) {
-        char msg[200];
-        wsprintfA(msg, "[wv2fix] skip no-op SetWindowPos %p (%d,%d %dx%d)\n", hwnd, x, y, cx, cy);
-        trace(msg);
-    }
+    if (InterlockedIncrement(&nooped) <= 5)
+        trace("skip no-op SetWindowPos %p (%d,%d %dx%d)\n", hwnd, x, y, cx, cy);
     return TRUE;
 }
 
@@ -157,47 +153,14 @@ static BOOL WINAPI hook_enddefer(HDWP hdwp) /* windows inside HDWP are not visib
     return ret;
 }
 
-/* as in tools/shims/rvtfix: an export entry is an RVA from the module base, so the thunk must be within 4 GB above it */
-static BYTE *alloc_near(BYTE *base, SIZE_T size)
-{
-    MEMORY_BASIC_INFORMATION mbi;
-    BYTE *p = base;
-    while (p < base + 0x7fff0000 && VirtualQuery(p, &mbi, sizeof(mbi))) {
-        if (mbi.State == MEM_FREE) {
-            BYTE *a = (BYTE *)(((ULONG_PTR)mbi.BaseAddress + 0xffff) & ~(ULONG_PTR)0xffff);
-            if (a + size <= (BYTE *)mbi.BaseAddress + mbi.RegionSize) {
-                BYTE *r = VirtualAlloc(a, size, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
-                if (r) return r;
-            }
-        }
-        p = (BYTE *)mbi.BaseAddress + mbi.RegionSize;
-    }
-    return NULL;
-}
-
-static BOOL patch_export(HMODULE mod, const char *name, void *hook, void **orig, BYTE *thunk)
-{
-    BYTE *base = (BYTE *)mod;
-    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
-    IMAGE_DATA_DIRECTORY dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
-    IMAGE_EXPORT_DIRECTORY *exp = (IMAGE_EXPORT_DIRECTORY *)(base + dir.VirtualAddress);
-    DWORD *names = (DWORD *)(base + exp->AddressOfNames), *funcs = (DWORD *)(base + exp->AddressOfFunctions);
-    WORD *ords = (WORD *)(base + exp->AddressOfNameOrdinals);
-    DWORD i, old;
-    for (i = 0; i < exp->NumberOfNames; i++) {
-        if (lstrcmpA((char *)(base + names[i]), name)) continue;
-        DWORD *slot = &funcs[ords[i]];
-        *orig = base + *slot;
-        BYTE jmp[12] = {0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xe0}; /* mov rax, imm64; jmp rax */
-        CopyMemory(jmp + 2, &hook, sizeof(hook));
-        CopyMemory(thunk, jmp, sizeof(jmp));
-        if (!VirtualProtect(slot, sizeof(*slot), PAGE_READWRITE, &old)) return FALSE;
-        *slot = (DWORD)(thunk - base);
-        VirtualProtect(slot, sizeof(*slot), old, &old);
-        return TRUE;
-    }
-    return FALSE;
-}
+static const struct { const char *name; void *hook; void **orig; } hooks[] = {
+    {"SetWindowLongW", (void *)hook_setlong, (void **)&orig_setlong},
+    {"SetWindowLongPtrW", (void *)hook_setlongptr, (void **)&orig_setlongptr},
+    {"SetWindowPos", (void *)hook_setpos, (void **)&orig_setpos},
+    {"MoveWindow", (void *)hook_move, (void **)&orig_move},
+    {"ShowWindow", (void *)hook_show, (void **)&orig_show},
+    {"EndDeferWindowPos", (void *)hook_enddefer, (void **)&orig_enddefer},
+};
 
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
 {
@@ -209,22 +172,22 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
             lstrcmpiW(slash + 1, L"msedgewebview2.exe")) {
             lstrcpyW(slash + 1, L"rvtfix.dll");
             if (GetFileAttributesW(p) != INVALID_FILE_ATTRIBUTES)
-                trace(LoadLibraryW(p) ? "[wv2fix] rvtfix.dll next to the exe: loaded\n" : "[wv2fix] rvtfix.dll next to the exe: failed\n");
+                trace(LoadLibraryW(p) ? "rvtfix.dll next to the exe: loaded\n" : "rvtfix.dll next to the exe: failed\n");
         }
         if (GetEnvironmentVariableA("WV2FIX", v, sizeof(v)) && v[0] == '0') return TRUE;
         GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
                            (LPCWSTR)DllMain, &(HMODULE){0}); /* thunks point here, so never unload */
         HMODULE user = LoadLibraryW(L"user32.dll");
         BYTE *thunks = user ? alloc_near((BYTE *)user, 0x1000) : NULL;
-        if (thunks && patch_export(user, "SetWindowLongW", (void *)hook_setlong, (void **)&orig_setlong, thunks) &&
-            patch_export(user, "SetWindowLongPtrW", (void *)hook_setlongptr, (void **)&orig_setlongptr, thunks + 16) &&
-            patch_export(user, "SetWindowPos", (void *)hook_setpos, (void **)&orig_setpos, thunks + 32) &&
-            patch_export(user, "MoveWindow", (void *)hook_move, (void **)&orig_move, thunks + 48) &&
-            patch_export(user, "ShowWindow", (void *)hook_show, (void **)&orig_show, thunks + 64) &&
-            patch_export(user, "EndDeferWindowPos", (void *)hook_enddefer, (void **)&orig_enddefer, thunks + 80)) {
-            FlushInstructionCache(GetCurrentProcess(), thunks, 96);
-            trace("[wv2fix] user32: SetWindowPos/MoveWindow/ShowWindow/SetWindowLong*/EndDeferWindowPos -- PeekMessage for windows in another process\n");
-        } else trace("[wv2fix] user32: hooking failed\n");
+        int i, ok = 0, n = (int)(sizeof(hooks) / sizeof(hooks[0]));
+        for (i = 0; thunks && i < n; i++) {
+            if (patch_export(user, hooks[i].name, hooks[i].hook, hooks[i].orig, thunks + 16 * i)) ok++;
+            else trace("user32!%s: not hooked\n", hooks[i].name);
+        }
+        if (thunks) FlushInstructionCache(GetCurrentProcess(), thunks, 16 * n);
+        if (ok == n)
+            trace("user32: SetWindowPos/MoveWindow/ShowWindow/SetWindowLong*/EndDeferWindowPos -- PeekMessage for windows in another process\n");
+        else trace("user32: hooking failed\n");
     }
     return TRUE;
 }

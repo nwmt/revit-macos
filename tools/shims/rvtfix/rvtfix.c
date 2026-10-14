@@ -42,17 +42,19 @@
  *    the import table if the loader has not bound it yet, otherwise put IsWindow into its import address table slot.
  *
  * 4 and 5 run when the DLL loads (LdrRegisterDllNotification), or at once if it is already loaded.
+ *
+ * Diagnostics: OutputDebugString with the "[rvtfix]" prefix (CX_DEBUGMSG=+debugstr).
  */
 #include <windows.h>
 #include <ole2.h>
 #include <winternl.h>
+#define SHIM_NAME "rvtfix"
+#include "hook.h"
 
 typedef HRESULT (WINAPI *revoke_fn)(HWND);
 typedef HRESULT (WINAPI *register_fn)(HWND, IDropTarget *);
 static revoke_fn orig_revoke;
 static register_fn orig_register;
-
-static void trace(const char *s) { OutputDebugStringA(s); }
 
 static BOOL foreign(HWND hwnd)
 {
@@ -73,48 +75,6 @@ static HRESULT WINAPI hook_register(HWND hwnd, IDropTarget *target)
     return orig_register(hwnd, target);
 }
 
-/* An export entry is a 32-bit RVA from ole32's base, so the thunk must be within 4 GB above the base. */
-static BYTE *alloc_near(BYTE *base, SIZE_T size)
-{
-    MEMORY_BASIC_INFORMATION mbi;
-    BYTE *p = base;
-    while (p < base + 0x7fff0000 && VirtualQuery(p, &mbi, sizeof(mbi))) {
-        if (mbi.State == MEM_FREE) {
-            BYTE *a = (BYTE *)(((ULONG_PTR)mbi.BaseAddress + 0xffff) & ~(ULONG_PTR)0xffff);
-            if (a + size <= (BYTE *)mbi.BaseAddress + mbi.RegionSize) {
-                BYTE *r = VirtualAlloc(a, size, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
-                if (r) return r;
-            }
-        }
-        p = (BYTE *)mbi.BaseAddress + mbi.RegionSize;
-    }
-    return NULL;
-}
-
-static BOOL patch_export(HMODULE mod, const char *name, void *hook, void **orig, BYTE *thunk)
-{
-    BYTE *base = (BYTE *)mod;
-    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
-    IMAGE_DATA_DIRECTORY dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
-    IMAGE_EXPORT_DIRECTORY *exp = (IMAGE_EXPORT_DIRECTORY *)(base + dir.VirtualAddress);
-    DWORD *names = (DWORD *)(base + exp->AddressOfNames), *funcs = (DWORD *)(base + exp->AddressOfFunctions);
-    WORD *ords = (WORD *)(base + exp->AddressOfNameOrdinals);
-    DWORD i, old;
-    for (i = 0; i < exp->NumberOfNames; i++) {
-        if (lstrcmpA((char *)(base + names[i]), name)) continue;
-        DWORD *slot = &funcs[ords[i]];
-        *orig = base + *slot;
-        BYTE jmp[12] = {0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xe0}; /* mov rax, imm64; jmp rax */
-        CopyMemory(jmp + 2, &hook, sizeof(hook));
-        CopyMemory(thunk, jmp, sizeof(jmp));
-        if (!VirtualProtect(slot, sizeof(*slot), PAGE_READWRITE, &old)) return FALSE;
-        *slot = (DWORD)(thunk - base);
-        VirtualProtect(slot, sizeof(*slot), old, &old);
-        return TRUE;
-    }
-    return FALSE;
-}
-
 /* --- 2. WebView2: browser arguments --- */
 typedef struct opts_vtbl { /* ICoreWebView2EnvironmentOptions: IUnknown + get/put AdditionalBrowserArguments + ... */
     HRESULT (STDMETHODCALLTYPE *QueryInterface)(void *, REFIID, void **);
@@ -131,7 +91,6 @@ static WCHAR wv2_args[1024] = L"--disable-gpu --disable-software-rasterizer --di
 
 static HRESULT create_env_common(int i, PCWSTR folder, PCWSTR udf, void *options, void *handler)
 {
-    char msg[1600];
     if (options && wv2_args[0]) {
         opts_vtbl *vt = *(opts_vtbl **)options;
         LPWSTR cur = NULL;
@@ -141,12 +100,11 @@ static HRESULT create_env_common(int i, PCWSTR folder, PCWSTR udf, void *options
             if (buf[0]) lstrcatW(buf, L" ");
             lstrcatW(buf, wv2_args);
             HRESULT hr = vt->put_AdditionalBrowserArguments(options, buf);
-            wsprintfA(msg, "[rvtfix] WebView2 #%d: AdditionalBrowserArguments \"%ls\" -> \"%ls\" (hr=%08lx)\n", i, cur ? cur : L"", buf, hr);
-            trace(msg);
+            trace("WebView2 #%d: AdditionalBrowserArguments \"%ls\" -> \"%ls\" (hr=%08lx)\n", i, cur ? cur : L"", buf, hr);
             if (cur) CoTaskMemFree(cur);
         }
     } else {
-        wsprintfA(msg, "[rvtfix] WebView2 #%d: options=%p, arguments left unchanged\n", i, options); trace(msg);
+        trace("WebView2 #%d: options=%p, arguments left unchanged\n", i, options);
     }
     return loaders[i].orig(folder, udf, options, handler);
 }
@@ -158,7 +116,7 @@ static void *create_env_hooks[MAX_LOADERS] = {create_env_0, create_env_1, create
 
 static void patch_loader(HMODULE mod, const WCHAR *path)
 {
-    char msg[600]; int i;
+    int i;
     for (i = 0; i < nloaders; i++) if (loaders[i].mod == mod) return;
     if (nloaders == MAX_LOADERS) return;
     i = nloaders;
@@ -166,9 +124,8 @@ static void patch_loader(HMODULE mod, const WCHAR *path)
     if (thunk && patch_export(mod, "CreateCoreWebView2EnvironmentWithOptions", create_env_hooks[i], (void **)&loaders[i].orig, thunk)) {
         loaders[i].mod = mod; loaders[i].thunk = thunk; nloaders++;
         FlushInstructionCache(GetCurrentProcess(), thunk, 16);
-        wsprintfA(msg, "[rvtfix] WebView2 #%d: hooked %ls\n", i, path);
-    } else wsprintfA(msg, "[rvtfix] WebView2: failed to hook %ls\n", path);
-    trace(msg);
+        trace("WebView2 #%d: hooked %ls\n", i, path);
+    } else trace("WebView2: failed to hook %ls\n", path);
 }
 
 typedef struct { ULONG Flags; const UNICODE_STRING *FullDllName, *BaseDllName; void *DllBase; ULONG SizeOfImage; } dll_notif_data;
@@ -194,7 +151,7 @@ static void fix_webview2(void)
     DWORD n = GetEnvironmentVariableW(L"RVTFIX_WV2_ARGS", env, 1024);
     if (n && n < 1024) lstrcpyW(wv2_args, env);
     else if (!n && GetLastError() != ERROR_ENVVAR_NOT_FOUND) wv2_args[0] = 0;
-    if (!wv2_args[0]) { trace("[rvtfix] WebView2: disabled (RVTFIX_WV2_ARGS is empty)\n"); return; }
+    if (!wv2_args[0]) { trace("WebView2: disabled (RVTFIX_WV2_ARGS is empty)\n"); return; }
     HMODULE m = GetModuleHandleW(L"WebView2Loader.dll"); /* already loaded: patch it too; later ones in on_dll */
     if (m) patch_loader(m, L"(already loaded)");
 }
@@ -207,7 +164,6 @@ static void fix_cef(void)
 {
     WCHAR args[1024], path[MAX_PATH], *slash;
     const WCHAR *def = L"--in-process-gpu";                  /* 2023: CefSharp\libcef.dll */
-    char msg[1600];
     if (!GetModuleFileNameW(NULL, path, MAX_PATH) || !(slash = wcsrchr(path, L'\\'))) return;
     lstrcpyW(slash + 1, L"CefSharp\\libcef.dll");
     if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) {
@@ -218,7 +174,7 @@ static void fix_cef(void)
     DWORD n = GetEnvironmentVariableW(L"RVTFIX_CEF_ARGS", args, 1024);
     if (!n && GetLastError() != ERROR_ENVVAR_NOT_FOUND) args[0] = 0;
     else if (!n || n >= 1024) lstrcpyW(args, def);
-    if (!args[0]) { trace("[rvtfix] CefSharp: disabled (RVTFIX_CEF_ARGS is empty)\n"); return; }
+    if (!args[0]) { trace("CefSharp: disabled (RVTFIX_CEF_ARGS is empty)\n"); return; }
     const WCHAR *cur = GetCommandLineW();
     cef_cmdline = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (lstrlenW(cur) + 2 + lstrlenW(args)) * sizeof(WCHAR)); /* never freed */
     if (!cef_cmdline) return;
@@ -233,8 +189,7 @@ static void fix_cef(void)
             FlushInstructionCache(GetCurrentProcess(), thunk, 16); ok++;
         }
     }
-    wsprintfA(msg, "[rvtfix] CefSharp: GetCommandLineW += \"%ls\" (%d of 2 exports)\n", args, ok);
-    trace(msg);
+    trace("CefSharp: GetCommandLineW += \"%ls\" (%d of 2 exports)\n", args, ok);
 }
 
 /* --- 4, 5. Autodesk DLLs --- */
@@ -258,17 +213,15 @@ static void patch_ogs(BYTE *base)
     IMAGE_SECTION_HEADER *s = IMAGE_FIRST_SECTION(nt);
     BYTE *hit = NULL;
     int i, n = 0;
-    char msg[200];
     for (i = 0; i < nt->FileHeader.NumberOfSections; i++, s++) {
         BYTE *p = base + s->VirtualAddress, *end = p + (s->Misc.VirtualSize ? s->Misc.VirtualSize : s->SizeOfRawData);
         for (; p + sizeof(from) <= end; p++)
             if (*p == 'D' && !memcmp(p, from, sizeof(from))) { hit = p; n++; }
     }
     if (n == 1 && write_mem(hit, to, sizeof(to)))
-        wsprintfA(msg, "[rvtfix] OGSDeviceDX11.dll: L\"D3D11.dll\" -> L\"d3dwp.dll\" at +0x%lx\n", (DWORD)(hit - base));
+        trace("OGSDeviceDX11.dll: L\"D3D11.dll\" -> L\"d3dwp.dll\" at +0x%lx\n", (DWORD)(hit - base));
     else
-        wsprintfA(msg, "[rvtfix] OGSDeviceDX11.dll: %d L\"D3D11.dll\" found, expected 1: left as is\n", n);
-    trace(msg);
+        trace("OGSDeviceDX11.dll: %d L\"D3D11.dll\" found, expected 1: left as is\n", n);
 }
 
 static void patch_mfc(BYTE *base)
@@ -278,7 +231,6 @@ static void patch_mfc(BYTE *base)
     IMAGE_DATA_DIRECTORY dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
     IMAGE_IMPORT_DESCRIPTOR *imp;
     const char *how = "not imported";
-    char msg[200];
     for (imp = (IMAGE_IMPORT_DESCRIPTOR *)(base + dir.VirtualAddress); dir.VirtualAddress && imp->Name; imp++) {
         if (lstrcmpiA((char *)(base + imp->Name), "user32.dll") || !imp->OriginalFirstThunk) continue;
         IMAGE_THUNK_DATA *names = (IMAGE_THUNK_DATA *)(base + imp->OriginalFirstThunk);
@@ -296,15 +248,14 @@ static void patch_mfc(BYTE *base)
             }
         }
     }
-    wsprintfA(msg, "[rvtfix] DesktopMFC.dll: USER32!%s: %s\n", from, how);
-    trace(msg);
+    trace("DesktopMFC.dll: USER32!%s: %s\n", from, how);
 }
 
 static void patch_autodesk(HMODULE mod, const WCHAR *name)
 {
     if (!lstrcmpiW(name, L"OGSDeviceDX11.dll")) {
         if (have_d3dwp) patch_ogs((BYTE *)mod);
-        else trace("[rvtfix] OGSDeviceDX11.dll: no d3dwp.dll next to Revit.exe, left as is\n");
+        else trace("OGSDeviceDX11.dll: no d3dwp.dll next to Revit.exe, left as is\n");
     } else if (!lstrcmpiW(name, L"DesktopMFC.dll")) patch_mfc((BYTE *)mod);
 }
 
@@ -325,19 +276,19 @@ static void watch_dlls(void)
 {
     ldr_register_fn reg = (ldr_register_fn)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "LdrRegisterDllNotification");
     void *cookie;
-    if (!reg || reg(0, on_dll, NULL, &cookie)) trace("[rvtfix] no LdrRegisterDllNotification: DLLs loaded later are not fixed\n");
+    if (!reg || reg(0, on_dll, NULL, &cookie)) trace("no LdrRegisterDllNotification: DLLs loaded later are not fixed\n");
 }
 
 static void fix_dragdrop(void)
 {
     HMODULE ole = LoadLibraryW(L"ole32.dll");
     BYTE *thunks;
-    if (!ole || !(thunks = alloc_near((BYTE *)ole, 0x1000))) { trace("[rvtfix] ole32: no thunk\n"); return; }
+    if (!ole || !(thunks = alloc_near((BYTE *)ole, 0x1000))) { trace("ole32: no thunk\n"); return; }
     if (patch_export(ole, "RevokeDragDrop", (void *)hook_revoke, (void **)&orig_revoke, thunks) &&
         patch_export(ole, "RegisterDragDrop", (void *)hook_register, (void **)&orig_register, thunks + 16))
-        trace("[rvtfix] ole32!RevokeDragDrop/RegisterDragDrop: foreign window check\n");
+        trace("ole32!RevokeDragDrop/RegisterDragDrop: foreign window check\n");
     else
-        trace("[rvtfix] ole32: export not found\n");
+        trace("ole32: export not found\n");
     FlushInstructionCache(GetCurrentProcess(), thunks, 32);
 }
 
