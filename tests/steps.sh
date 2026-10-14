@@ -336,6 +336,30 @@ run_steps 2024 rvt2024-t rvt; expect "rvt: RVT.msi that leaves no Revit.exe is n
 reset; mkbottle rvt2024-t 2024 ""; mkdist 2024; mkdir -p "$AL2024/16.1.0.1/helper"; ln -s 16.1.0.1 "$AL2024/Current"
 : > "$CALLS"; rule "isUpgraded" 1; run_steps 2024 rvt2024-t rvt
 expect "rvt: a silent licensing service stops it" 1 "Step rvt failed"; check "rvt: RVT.msi did not run" not_called "rvt.cmd"
+reset; mkbottle rvt2020-t 2020 ""; mkdist2020; mkdir -p "$AL2020/16.1.0.1/helper"; ln -s 16.1.0.1 "$AL2020/Current"
+run_steps 2020 rvt2020-t rvt; expect "rvt (2020)" 0 ""
+check "rvt (2020): Setup.exe's properties" grep -qF 'TRANSFORMS=:en-US.mst;:all.mst ADSK_SETUP_EXE=1 ADSK_EULA_STATUS=#1 ADLM_PRODKEY=829L1 ADLM_EULA_COUNTRY=US INSTALLDIR="C:\Program Files\Autodesk\Revit 2020"' "$RUN/rvt.cmd"
+check "rvt (2020): RVT.msi registers itself (no ODIS properties)" test -z "$(grep -E 'CLM_SKIP_REGISTER|REVITLANGUAGE' "$RUN/rvt.cmd")"
+reset; mkbottle rvt2020-t 2020 2020; mkdist2020; run_steps 2020 rvt2020-t rcl ret materials
+expect "rcl, ret, materials (2020)" 0 ""
+check "rcl: into Revit Content 2020" grep -qF 'TRANSFORMS=:en-US.mst ADSK_SETUP_EXE=1 ADSK_EULA_STATUS=#1 ADLM_PRODKEY=829L1 ADLM_EULA_COUNTRY=US INSTALLDIR="C:\Program Files\Autodesk\Revit Content 2020"' "$RUN/rcl.cmd"
+check "ret: RET.msi" grep -q 'x64\\RET\\RET.msi' "$RUN/ret.cmd"
+check "materials: three libraries" test -f "$RUN/cm.cmd" -a -f "$RUN/cmilb.cmd" -a -f "$RUN/cmplb.cmd"
+check "materials: the PLB one is the Prism base library" grep -q PrismBaseImageLibrary2020.msi "$RUN/cmplb.cmd"
+check "materials: one line each" test "$(grep -cE '^   (cm|cmilb|cmplb) +exit=0 ' "$RUN/summary.txt")" = 3
+reset; mkbottle rvt2020-t 2020 2020; mkdist2020; rule "cmilb.cmd" 67; run_steps 2020 rvt2020-t materials
+expect "materials: a failed library fails the step" 1 "materials"; check "materials: the next one still ran" test -f "$RUN/cmplb.cmd"
+# msi does not check its file and the fake msiexec succeeds: each step checks its MSI itself
+reset; mkbottle rvt2020-t 2020 2020; mkdist2020; rm "$D20/x64/RCL/RCL.msi" "$D20/x64/RET/RET.msi" "$D20/Content/ADSKMaterials/2020/ILB/BaseImageLibrary2020.msi"
+run_steps 2020 rvt2020-t rcl ret materials; expect "rcl, ret, materials: a missing MSI fails" 1 ""
+check "missing MSI: rcl, ret and materials failed" test "$(tr '\n' ' ' < "$RUN/failed.txt")" = "rcl ret materials "
+reset; mkbottle rvt2024-t 2024 2024; mkdist 2024; run_steps 2024 rvt2024-t rcl ret materials
+expect "rcl, ret, materials: ODIS installers skip them" 0 ""
+check "rcl (2024): skip" grep -qE '^   rcl +exit=skip ' "$RUN/summary.txt"; check "rcl (2024): no msiexec" not_called "[cmd] [/c]"
+reset; mkbottle rvt2020-t 2020 2020; S="$BOTTLES/rvt2020-t/drive_c/Program Files/Autodesk/Revit 2020/Samples"; mkdir -p "$S"
+touch "$S/rac_basic_sample_project.rvt" "$S/rac_basic_sample_family.rfa"; run_steps 2020 rvt2020-t samples
+expect "samples" 0 ""; check "samples: copies in C:\\rvt-tests" test -f "$BOTTLES/rvt2020-t/drive_c/rvt-tests/rac_basic_sample_project.rvt"
+rm "$S/rac_basic_sample_family.rfa"; run_steps 2020 rvt2020-t samples; expect "samples: a missing sample fails" 1 "samples"
 reset; mkbottle rvt2025-t 2025 2025; mkdist 2025; D="$R/installers/extracted/revit2025"; mkdir -p "$D/x64/BAD"
 printf '<Packages><Package name="BAD" path="x64/BAD/pkg.BAD.xml"/></Packages>' > "$D/manifest/app.RVT.xml"
 echo '<Package><InstallFile type="ADIX" file="x64/BAD/BAD.adix"/></Package>' > "$D/x64/BAD/pkg.BAD.xml"

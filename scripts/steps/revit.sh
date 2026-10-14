@@ -1,14 +1,13 @@
-# Install steps: Revit itself, its ODIS packages, Shared Components, Revit.ini, Generative Design, Dynamo settings.
+# Install steps: Revit itself, its ODIS packages or the content and material libraries of the Setup.ini installer (2020),
+# Shared Components, Revit.ini, Generative Design, Dynamo settings, sample copies.
 # Sourced by scripts/run-steps.sh; see the step contract there.
 
-step_rvt() { # RVT.msi: LaunchCondition "Installed or ADSK_SETUP_EXE or ADSK_ODIS_SETUP"; properties from pkg.RVT.xml.
-  # licIsSvcUpgraded runs `InstHelper upgrade isUpgraded` from the AdskLicensing version folder and fails the install
-  # (1603) unless the licensing service answers: we run the same first, so a silent service stops here with the
-  # helper's output in the log. licRegister would look for FNP_Act_Installer.dll, gone in AdskLicensing 15 →
-  # CLM_SKIP_REGISTER=1 and the register step. REVITLANGUAGE is the three-letter code (RVT.msi Property: ENU).
+step_rvt() { # RVT.msi: LaunchCondition "Installed or ADSK_SETUP_EXE or ADSK_ODIS_SETUP"; properties from pkg.RVT.xml
+  # (Setup.ini installer: what Setup.exe passes). licIsSvcUpgraded runs `InstHelper upgrade isUpgraded` from the
+  # AdskLicensing version folder and fails the install (1603) unless the licensing service answers: we run the same
+  # first, so a silent service stops here with the helper's output in the log.
   # An update that is an MSP patch of RVT.msi (2024: x64/RVTSP*.msp, pkg.RVTSP.xml) goes in with PATCH=.
-  local ver x f patch=() rc
-  [ "$INSTALLER" = odis ] || { echo "step rvt: the $INSTALLER installer is handled by d6 until stage 2"; return 1; }
+  local ver x f patch=() odis=() rc
   ver="$(readlink "$(al_dir)/Current")"; [ -n "$ver" ] || ver=Current
   w "$AL_WIN\\$ver\\helper\\AdskLicensingInstHelper.exe" upgrade isUpgraded \
     || { echo "the Autodesk licensing service does not answer, so RVT.msi would fail"; return 1; }
@@ -17,13 +16,56 @@ step_rvt() { # RVT.msi: LaunchCondition "Installed or ADSK_SETUP_EXE or ADSK_ODI
     f="$(grep -o 'InstallFile type="MSP"[^>]* file="[^"]*"' "$x" | sed 's/.* file="//; s/"$//')"
     [ -f "$DIST/$f" ] && patch=("PATCH=$(win "$DIST/$f")")
   fi
+  # ODIS installers: licRegister would look for FNP_Act_Installer.dll, gone in AdskLicensing 15 → CLM_SKIP_REGISTER=1
+  # and step register; REVITLANGUAGE is the three-letter code (RVT.msi Property: ENU). The Setup.ini installer (2020)
+  # takes neither: its RVT.msi registers with AdskLicensing 9.2 itself
+  if [ "$INSTALLER" = odis ]; then odis=(REVITLANGUAGE=ENU CLM_SKIP_REGISTER=1); fi
   msi rvt "$(win "$DIST")\\x64\\RVT\\RVT.msi" "TRANSFORMS=:$LANG_UI.mst;:all.mst" \
     ADSK_SETUP_EXE=1 ADSK_EULA_STATUS=#1 "ADLM_PRODKEY=$PRODKEY" ADLM_EULA_COUNTRY=US \
-    REVITLANGUAGE=ENU CLM_SKIP_REGISTER=1 "INSTALLDIR=C:\\Program Files\\Autodesk\\Revit $YEAR" \
+    ${odis[@]+"${odis[@]}"} "INSTALLDIR=C:\\Program Files\\Autodesk\\Revit $YEAR" \
     ${patch[@]+"${patch[@]}"}; rc=$?
   accept_codes "$rc" 0 194 || { echo "RVT.msi returned $rc: $RUN_DIR/rvt.msi.log"; return 1; }
   # no Revit.exe check here: since 2025 it comes from an ADIX package (step pkgs); install.sh checks it at the end
   detail "RVT.msi${patch[0]:+ + ${patch[0]##*\\}}$([ -f "$RD/Revit.exe" ] && echo ': Revit.exe in place')"
+}
+
+step_rcl() { # Revit Content (templates, families, libraries) of the Setup.ini installer, with Setup.exe's properties;
+  # ODIS installers ship it as packages (step pkgs)
+  [ "$INSTALLER" = setupini ] || { skip "ODIS installers ship the content as packages (step pkgs)"; return 0; }
+  [ -f "$DIST/x64/RCL/RCL.msi" ] || { echo "no $DIST/x64/RCL/RCL.msi"; return 1; }
+  msi rcl "$(win "$DIST")\\x64\\RCL\\RCL.msi" "TRANSFORMS=:$LANG_UI.mst" \
+    ADSK_SETUP_EXE=1 ADSK_EULA_STATUS=#1 "ADLM_PRODKEY=$PRODKEY" ADLM_EULA_COUNTRY=US \
+    "INSTALLDIR=C:\\Program Files\\Autodesk\\Revit Content $YEAR"
+  accept_codes $? 0 194 || { echo "RCL.msi failed: $RUN_DIR/rcl.msi.log"; return 1; }
+  detail "RCL.msi → Revit Content $YEAR"
+}
+
+step_ret() { # Revit Extensions of the Setup.ini installer (ODIS: package RET, step pkgs)
+  [ "$INSTALLER" = setupini ] || { skip "ODIS installers ship it as a package (step pkgs)"; return 0; }
+  [ -f "$DIST/x64/RET/RET.msi" ] || { echo "no $DIST/x64/RET/RET.msi"; return 1; }
+  msi ret "$(win "$DIST")\\x64\\RET\\RET.msi"; accept_codes $? 0 194 || { echo "RET.msi failed: $RUN_DIR/ret.msi.log"; return 1; }
+  detail "RET.msi"
+}
+
+step_materials() { # Autodesk material library and its base image library, Prism base images: the minimal set of the
+  # Setup.ini installer (ODIS: packages CM4, CMILB4, Prism*, step pkgs)
+  local m rc=0 r name f
+  [ "$INSTALLER" = setupini ] || { skip "ODIS installers ship them as packages (step pkgs)"; return 0; }
+  for m in "cm CM/MaterialLibrary$YEAR.msi" "cmilb ILB/BaseImageLibrary$YEAR.msi" "cmplb PLB/PrismBaseImageLibrary$YEAR.msi"; do
+    name="${m%% *}"; f="Content/ADSKMaterials/$YEAR/${m#* }"
+    [ -f "$DIST/$f" ] || { echo "no $DIST/$f"; rc=1; continue; }
+    msi "$name" "$(win "$DIST/$f")"; r=$?
+    say "$name" "$r" "${f##*/}"
+    accept_codes "$r" 0 194 || rc=1
+  done
+  [ $rc = 0 ] && detail "material libraries: CM, ILB, PLB"
+  return $rc
+}
+
+step_samples() { # copies of two sample files for tests and benchmarks in C:\rvt-tests (the originals stay in Samples)
+  mkdir -p "$B/drive_c/rvt-tests" || return 1
+  cp "$RD/Samples/rac_basic_sample_project.rvt" "$RD/Samples/rac_basic_sample_family.rfa" "$B/drive_c/rvt-tests/" || return 1
+  detail "Samples\\rac_basic_sample_* → C:\\rvt-tests"
 }
 
 step_pkgs() { # product packages from manifest/app.RVT.xml except RVT (step rvt): ADIX through tools/adix.py, MSI

@@ -12,7 +12,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/scripts/lib/common.sh"; . "$ROOT/scripts/lib/wine.sh"; . "$ROOT/scripts/lib/shims.sh"
 for _f in "$ROOT"/scripts/steps/*.sh; do . "$_f"; done; unset _f
 CRITICAL="netfx vc dotnet licensing svcshim rvt"                              # the steps after these need them
-NEEDS_INSTALLER="vc netfx dotnet licensing idmgr adsso rvt pkgs asc register" # these read the unpacked installer
+NEEDS_INSTALLER="vc netfx dotnet licensing idmgr adsso rvt rcl ret materials pkgs asc register" # these read the unpacked installer
 
 [ $# -ge 2 ] || usage_die "Usage: scripts/run-steps.sh <year> <bottle> [step…]"
 YEAR_ARG="$1"; NAME_ARG="$2"; shift 2
