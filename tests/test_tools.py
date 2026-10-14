@@ -170,5 +170,26 @@ class WinShortcut(Tmp):
         self.assertEqual(r.stdout.rstrip("\n").split("\t"), ["", "/viewer /language ENU", "C:\\Revit.ico"])
 
 
+class GenForwards(Tmp):
+    GEN = os.path.join(TOOLS, "shims", "ncryptshim", "gen_forwards.py")
+
+    def test_writes_the_three_files(self):
+        open(self.path("exports.txt"), "w").write("NCryptImportKey\nNCryptDeleteKey\nBCryptEncrypt\n")
+        r = subprocess.run([sys.executable, "-I", self.GEN, self.path("exports.txt"), self.path("gen")],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("forwards=1 bcrypt-forwarders=1", r.stdout)
+        self.assertIn("jmp *__real_NCryptDeleteKey(%rip)", open(self.path("gen/forwards.S")).read())
+        d = open(self.path("gen/ncrypt.def")).read()
+        self.assertIn("    NCryptImportKey\n", d)
+        self.assertIn("    BCryptEncrypt = bcrypt.BCryptEncrypt", d)
+
+    def test_missing_exports_file(self):
+        r = subprocess.run([sys.executable, "-I", self.GEN, self.path("none.txt"), self.path("gen")],
+                           capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("gen_forwards:", r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
