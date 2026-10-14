@@ -298,6 +298,27 @@ reset; mkbottle rvt2024-t 2024 2024; mkdist 2024; mkdir -p "$AL2024/16.1.0.1/hel
 run_steps 2024 rvt2024-t register
 expect "register runs the licensing helper" 0 ""; check "register: in the summary" grep -qE '^   register +exit=0 +829P1 2024.0.0.F USER' "$RUN/summary.txt"
 check "register: product key and version" called "[register] [--pk] [829P1] [--pv] [2024.0.0.F]"
+AL2020="$BOTTLES/rvt2020-t/drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing"
+reset; mkbottle rvt2020-t 2020 2020; mkdist2020; lic_rule 1 2020; run_steps 2020 rvt2020-t licensing
+expect "licensing (2020): its expected 1 is success" 0 ""
+check "licensing (2020): the installer from x86/AdskLicensing" called "[C:\\licensing.exe] [--mode] [unattended]"
+check "licensing (2020): Current points at the version" test "$(readlink "$AL2020/Current")" = 16.1.0.1
+reset; mkbottle rvt2020-t 2020 2020; mkdist2020; lic_rule 84 2020; run_steps 2020 rvt2020-t licensing
+expect "licensing (2020): 84 is not its code" 1 "Step licensing failed"
+sc_running() { rule "sc query" 0 "echo '        STATE              : 4  RUNNING'"; }
+reset; mkbottle rvt2020-t 2020 2020; mkdir -p "$AL2020/16.1.0.1"; ln -s 16.1.0.1 "$AL2020/Current"; sc_running
+run_steps 2020 rvt2020-t svcshim; expect "svcshim (2020): the service runs" 0 ""
+check "svcshim (2020): the service starts from the version folder, not Current" \
+  called '"C:\Program Files (x86)\Common Files\Autodesk Shared\AdskLicensing\svcshim.exe" "C:\Program Files (x86)\Common Files\Autodesk Shared\AdskLicensing\16.1.0.1\AdskLicensingService\AdskLicensingService.exe"]'
+reset; mkbottle rvt2020-t 2020 2020; mkdir -p "$AL2020"; sc_running; run_steps 2020 rvt2020-t svcshim
+expect "svcshim (2020): no Current link fails" 1 "Step svcshim failed"
+reset; mkbottle rvt2024-t 2024 2024; mkdir -p "$AL2024/16.1.0.1"; ln -s 16.1.0.1 "$AL2024/Current"; sc_running
+run_steps 2024 rvt2024-t svcshim; expect "svcshim (2024): the service runs" 0 ""
+check "svcshim (2024): ImagePath is svcshim.exe alone" called '\AdskLicensing\svcshim.exe"] [/f]'
+reset; mkbottle rvt2020-t 2020 2020; mkdist2020; mkdir -p "$AL2020/16.1.0.1/helper"; ln -s 16.1.0.1 "$AL2020/Current"
+run_steps 2020 rvt2020-t register
+expect "register (2020)" 0 ""; check "register (2020): product key and version" called "[register] [--pk] [829L1] [--pv] [2020.0.0.F]"
+check "register (2020): RevitConfig.pit from Setup/" test -f "$BOTTLES/rvt2020-t/drive_c/ProgramData/Autodesk/Revit/Revit 2020/Setup/RevitConfig.pit"
 
 # ---- steps: Revit and fixes ----
 reset; mkbottle rvt2024-t 2024 ""; mkdist 2024; D="$R/installers/extracted/revit2024"
