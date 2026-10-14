@@ -21,7 +21,7 @@ and what did not. Open an issue with the **Test report** template. `./revit logs
 7. Mark a feature as working only after a real run. Untested is "not tested",
    a guess is a guess.
 8. Status words: see the scale in the [README](README.md#which-versions-work).
-9. `tests/revit-cli.sh`, `tests/plans.sh`, `tests/steps.sh` and
+9. `tests/revit-cli.sh`, `tests/plans.sh`, `tests/steps.sh`, `tests/shims.sh` and
    `python3 -I -m unittest discover -s tests -p 'test_*.py'` must pass. After a
    deliberate change to a year's plan or steps, `UPDATE=1 tests/plans.sh` rewrites
    `tests/plans/`; review that diff.
@@ -67,6 +67,10 @@ Wording:
 Shim DLLs are built and published by GitHub Actions, never by hand: push a tag `vX.Y.Z`.
 Then set `SHIMS_VERSION` and `SHIMS_SHA256` in `scripts/lib/shims.sh` to the new release, so
 `./revit install` downloads it. Until then, clones with changed shim sources build them from source.
+
+Locally, `scripts/build-shims.sh [name…]` builds shims into `build/<name>/` (the compiler comes from
+`scripts/get-toolchain.sh`). The list of shims is `SHIMS` in `scripts/lib/shims.sh`; each one's flags are in
+`build-shims.sh`.
 
 Never commit or link Autodesk software. Everyone uses their own installer and
 license from their Autodesk Account.

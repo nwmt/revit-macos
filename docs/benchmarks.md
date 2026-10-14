@@ -50,5 +50,5 @@ Windows laptop, done over remote desktop, which lowers its graphics score.
   using a lot of CPU during the run. To be re-measured. There is no Windows reference for 2026.
 - **2027:** measured on 2027.3 (build 27.3.0.28), 4 runs on the normal bottle and a copy of it. Runs were steady:
   modeling 87.2 / 86.8 / 87.5 / 87.8 s, graphics 28.7 / 29.4 / 28.7 / 28.9 s. Earlier it was 99.0 s: since shims
-  0.4.0, `tools/tlbpin` caches the cursor position. Windows reference: Revit 2027.0 on a laptop with an Intel Core
+  0.4.0, `tools/shims/tlbpin` caches the cursor position. Windows reference: Revit 2027.0 on a laptop with an Intel Core
   Ultra 9 275HX and 128 GB. The Mac takes about 1.3× as long for modeling.

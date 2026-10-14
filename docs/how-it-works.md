@@ -10,9 +10,9 @@ Revit is a Windows x64 program. On an Apple Silicon Mac it runs like this:
   download and install the MSI packages directly, one by one, in the order Autodesk's own manifests list them.
   From 2025 on, most of Revit ships as ADIX packages, which we unpack ourselves.
 - **Small fixes ("shims") where Wine falls short.** Each one fixes one specific failure. Their sources are in
-  `tools/`; GitHub Actions builds them for each release, and `./revit install` downloads that build, checksum-checked.
+  `tools/shims/`; GitHub Actions builds them for each release, and `./revit install` downloads that build, checksum-checked.
   A clone whose shim sources differ from the release builds them itself. No Autodesk files are redistributed, and
-  no Autodesk EXE or DLL is changed: fixes inside Revit's own DLLs are made in memory by `tools/rvtfix`. The steps
+  no Autodesk EXE or DLL is changed: fixes inside Revit's own DLLs are made in memory by `tools/shims/rvtfix`. The steps
   below do change Revit's settings and add-ins, but not Autodesk's installer packages.
 
 ## What ./revit install does
@@ -52,7 +52,7 @@ In install order. Normal install steps have "—" in What breaks.
 | `d3d9dxvk` | UI, Dynamo and Direct3D 9 panels hang or are unreliable | DXVK for Direct3D 9 | all |
 | `richedit` | Text in views and dialogs fails; crash on text when creating a project | Microsoft RichEdit DLLs for Revit | all |
 | `tlbpin` | Creating views with text is 2–3× slower; long edits poll the mouse slowly | Cache for a type library and for the cursor position | all |
-| `warpshim` | Materials dialog does not open | Software D3D11 device → normal device, through `tools/rvtfix` | all |
+| `warpshim` | Materials dialog does not open | Software D3D11 device → normal device, through `tools/shims/rvtfix` | all |
 | `gdoff` | Generative Design error on start | Turn the add-in off | 2023+ |
 | `rvtfix` | Start screen blank or white; 2026+: the browser uses about 60% CPU and the view is slow; crash when opening a view (a Windows function Wine lacks) | Browser draws inside Revit, with flags that make it draw; the missing function answered in memory | 2023+ (2020: for `warpshim`) |
 | `wv2fix` | The built-in browser (WebView2) crashes on clicks and resizes | Own `version.dll` in the browser process | 2024+ |
@@ -86,28 +86,30 @@ apply to them.
 |---|---|---|
 | `trust` | Revit asks "This signed add-in has been found" on every start: under Wine it cannot save **Always Load** | Trust the add-ins' publishers ahead, as **Always Load** would |
 | `wpfsw` (2023–2026) | Black rectangles across Revit after add-ins load | WPF draws in software; `wpfhw` turns it back |
-| `enscape` (not by default; 2020) | Pressing Start in Enscape 3.4.4 crashes Revit; once past that, black models, a hang when its window is resized, and keys and mouse that do not move the view | Install Enscape with a `System.ValueTuple` that fits .NET 4.7; `tools/vkshim` as `vulkan-1.dll` in `system32`, loaded by Revit.exe only; Metal argument buffers and synchronous queue submits in MoltenVK, set in the bottle's environment |
-| `enscape` (not by default; 2027) | Enscape 4.18 turns down the Mac GPU, and its license check cannot read the computer ID (no `wminet_utils.dll`); then its menus hang it, Asset Library stays blank, and the Chaos sign-in and Asset Library services do not start | Install Enscape without its UI; `wminet_utils.dll` (for the computer ID) from the .NET 4.8 installer Enscape ships; for `Enscape.RendererHost.exe`: `tools/vkshim` as `vulkan-1.dll`, no `d3d11` (its interface draws in software), `tools/wv2fix` loading `tools/rvtfix` for its browser; the MoltenVK settings as for 2020; the two Chaos services through `tools/svcshim` |
+| `enscape` (not by default; 2020) | Pressing Start in Enscape 3.4.4 crashes Revit; once past that, black models, a hang when its window is resized, and keys and mouse that do not move the view | Install Enscape with a `System.ValueTuple` that fits .NET 4.7; `tools/shims/vkshim` as `vulkan-1.dll` in `system32`, loaded by Revit.exe only; Metal argument buffers and synchronous queue submits in MoltenVK, set in the bottle's environment |
+| `enscape` (not by default; 2027) | Enscape 4.18 turns down the Mac GPU, and its license check cannot read the computer ID (no `wminet_utils.dll`); then its menus hang it, Asset Library stays blank, and the Chaos sign-in and Asset Library services do not start | Install Enscape without its UI; `wminet_utils.dll` (for the computer ID) from the .NET 4.8 installer Enscape ships; for `Enscape.RendererHost.exe`: `tools/shims/vkshim` as `vulkan-1.dll`, no `d3d11` (its interface draws in software), `tools/shims/wv2fix` loading `tools/shims/rvtfix` for its browser; the MoltenVK settings as for 2020; the two Chaos services through `tools/shims/svcshim` |
 | `enscape-off` (not by default) | — | Remove the Enscape manifest so Enscape does not load; `enscape-on` restores it |
 
 ## Our shims in tools/
 
 | Tool | What it fixes |
 |---|---|
-| `tools/svcshim` | Autodesk licensing service does not register as a Windows service under Wine. The shim runs as the service and keeps the real one running (for Revit 2020 from the licensing service's version folder: that service takes its version from the folder's name). For Enscape 4.18 (2027) it runs Chaos sign-in and Asset Library as services, so they start with the bottle. |
-| `tools/ncrypt-shim` | Revit crashes on start and on save: Wine cannot import or sign with Revit's ECDSA key. The shim does it through Wine's bcrypt. |
-| `tools/wbem-shim` | Revit crashes on New Project and in Options: Wine's WMI handles only one async query at a time. The shim runs them one by one. |
-| `tools/tlbpin` | Views with text are 2–3× slower: RichEdit reloads a type library for every text element. Long edits check the mouse hundreds of thousands of times, and while the mouse is still each check asks macOS (~12 us instead of under 1 us). The shim caches the type library and reuses the cursor position for 10 ms. |
-| `tools/d3d11-warp-shim` | Materials dialog does not open: it asks for a software D3D11 (WARP) device that D3DMetal lacks. The shim gives it the normal device. |
-| `tools/rvtfix` | Revit 2026+: crash from a drag-and-drop call on the browser's window, and white web panels with high CPU. Revit 2023–2025: blank start screen (CefSharp). Revit 2023+: crash when opening a view (a Windows function Wine lacks). The shim fixes the call, adds browser flags, answers the missing function and points Revit's graphics DLL at `tools/d3d11-warp-shim`, all in memory: Revit's files stay as installed. Enscape 4.18 (2027) gets the same browser flags for its Asset Library. |
-| `tools/wv2fix` | Revit 2024+: the built-in web browser (WebView2) crashes on clicks and resizes. The shim flushes pending drawing before such window changes and skips changes that change nothing. In Enscape 4.18 (2027) it loads `tools/rvtfix` as soon as Enscape starts. |
-| `tools/vkshim` | Enscape 3.4.4 in Revit 2020 and 4.18 in 2027: Enscape turns down the Mac GPU (it asks for a Windows memory-sharing extension and a blend feature that MoltenVK lacks), creates a query type that MoltenVK refuses, and under Wine its view never gets the keyboard focus. The shim reports the missing pieces, gives it a query type MoltenVK has, and on a click activates Enscape's view as Windows does. DXVK, which draws Revit's own interface, sees Vulkan unchanged. |
-| `tools/pdf-printer` | The bottle has no printers. Adds the **Revit PDF** printer; Ghostscript turns its output into PDFs in `~/Documents/Revit-PDF`. |
+| `tools/shims/svcshim` | Autodesk licensing service does not register as a Windows service under Wine. The shim runs as the service and keeps the real one running (for Revit 2020 from the licensing service's version folder: that service takes its version from the folder's name). For Enscape 4.18 (2027) it runs Chaos sign-in and Asset Library as services, so they start with the bottle. |
+| `tools/shims/ncryptshim` | Revit crashes on start and on save: Wine cannot import or sign with Revit's ECDSA key. The shim does it through Wine's bcrypt. |
+| `tools/shims/wbemshim` | Revit crashes on New Project and in Options: Wine's WMI handles only one async query at a time. The shim runs them one by one. |
+| `tools/shims/tlbpin` | Views with text are 2–3× slower: RichEdit reloads a type library for every text element. Long edits check the mouse hundreds of thousands of times, and while the mouse is still each check asks macOS (~12 us instead of under 1 us). The shim caches the type library and reuses the cursor position for 10 ms. |
+| `tools/shims/d3dwp` | Materials dialog does not open: it asks for a software D3D11 (WARP) device that D3DMetal lacks. The shim gives it the normal device. |
+| `tools/shims/rvtfix` | Revit 2026+: crash from a drag-and-drop call on the browser's window, and white web panels with high CPU. Revit 2023–2025: blank start screen (CefSharp). Revit 2023+: crash when opening a view (a Windows function Wine lacks). The shim fixes the call, adds browser flags, answers the missing function and points Revit's graphics DLL at `tools/shims/d3dwp`, all in memory: Revit's files stay as installed. Enscape 4.18 (2027) gets the same browser flags for its Asset Library. |
+| `tools/shims/wv2fix` | Revit 2024+: the built-in web browser (WebView2) crashes on clicks and resizes. The shim flushes pending drawing before such window changes and skips changes that change nothing. In Enscape 4.18 (2027) it loads `tools/shims/rvtfix` as soon as Enscape starts. |
+| `tools/shims/vkshim` | Enscape 3.4.4 in Revit 2020 and 4.18 in 2027: Enscape turns down the Mac GPU (it asks for a Windows memory-sharing extension and a blend feature that MoltenVK lacks), creates a query type that MoltenVK refuses, and under Wine its view never gets the keyboard focus. The shim reports the missing pieces, gives it a query type MoltenVK has, and on a click activates Enscape's view as Windows does. DXVK, which draws Revit's own interface, sees Vulkan unchanged. |
+| `tools/shims/pdfprinter` | The bottle has no printers. Adds the **Revit PDF** printer; Ghostscript turns its output into PDFs in `~/Documents/Revit-PDF`. |
 | `tools/revitini.py` | Writes the `Revit.ini` settings of the `revitini` step (UTF-16, as Revit keeps it). |
 | `tools/win_shortcut.py` | Reads the Start Menu shortcuts the installer creates and builds the macOS apps from them, with the same command line and icon. |
 | `tools/adsk_sfx.py` | Unpacks Autodesk multi-part downloads (Revit 2020, 2023, the 2024 base release) on the Mac. Their own self-extractor runs out of memory under Wine. |
 | `tools/trustpub.py` | Trusts the publishers of the installed add-ins, as **Always Load** would (the `trust` step). |
 | `tools/adix.py`, `tools/odis.py` | Read Autodesk's installer manifests and unpack ADIX packages (files and registry) into the bottle, instead of the ODIS installer. |
+
+Each shim builds with `scripts/build-shims.sh <name>` into `build/<name>/`.
 
 ## Advanced: one step at a time
 

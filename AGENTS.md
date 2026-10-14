@@ -11,11 +11,12 @@ install.sh          the install itself: ./install.sh <year> [bottle]; runs a fix
 scripts/            run-steps.sh runs the install and add-in steps (scripts/steps/) with a year's profile
                     (scripts/profiles/<year>.sh); scripts/lib/ holds the shared code; the other scripts download,
                     unpack, make the bottle and the apps, build the shims
-tools/              our shim DLLs (C, llvm-mingw) and Python helpers; users get them prebuilt (scripts/get-shims.sh)
+tools/              our shims in tools/shims/<name>/ (C, llvm-mingw; built by scripts/build-shims.sh) and Python
+                    helpers; users get the shims prebuilt (scripts/get-shims.sh)
 versions/<year>.md  status, what works, known issues for one Revit version
 docs/               troubleshooting, how it works
 installers/         user-supplied installers and runtimes (gitignored except README and checksums)
-tests/              sandbox tests: revit-cli.sh, plans.sh, steps.sh; test_tools.py for the Python helpers
+tests/              sandbox tests: revit-cli.sh, plans.sh, steps.sh, shims.sh; test_tools.py for the Python helpers
 ```
 
 ## Rules
