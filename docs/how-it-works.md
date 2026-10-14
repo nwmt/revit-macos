@@ -54,7 +54,7 @@ In install order. Normal install steps have "—" in What breaks.
 | `tlbpin` | Creating views with text is 2–3× slower; long edits poll the mouse slowly | Cache for a type library and for the cursor position | all |
 | `warpshim` | Materials dialog does not open | Software D3D11 device → normal device, through `tools/rvtfix` | all |
 | `gdoff` | Generative Design error on start | Turn the add-in off | 2023+ |
-| `rvtfix` | Start screen blank or white; 2026+: the browser uses about 60% CPU and the view is slow; crash when opening a view (a Windows function Wine lacks) | Browser draws inside Revit, with flags that make it draw; the missing function answered in memory | 2023+ |
+| `rvtfix` | Start screen blank or white; 2026+: the browser uses about 60% CPU and the view is slow; crash when opening a view (a Windows function Wine lacks) | Browser draws inside Revit, with flags that make it draw; the missing function answered in memory | 2023+ (2020: for `warpshim`) |
 | `wv2fix` | The built-in browser (WebView2) crashes on clicks and resizes | Own `version.dll` in the browser process | 2024+ |
 | `pdfprinter` | No printer, so Print and Page Setup do not open | **Revit PDF** printer: PostScript → Ghostscript → PDF in `~/Documents/Revit-PDF` | 2020, 2023–2025 |
 | `dynamo` | Dynamo's 3D preview draws black squares, lags or crashes | Dynamo without hardware acceleration and background preview | 2020, 2023–2025 |
@@ -94,7 +94,7 @@ apply to them.
 
 | Tool | What it fixes |
 |---|---|
-| `tools/svcshim` (2023+), `tools/AdskSvcShim.cs` (2020, built in the bottle) | Autodesk licensing service does not register as a Windows service under Wine. The shim runs as the service and keeps the real one running. For Enscape 4.18 (2027) it runs Chaos sign-in and Asset Library as services, so they start with the bottle. |
+| `tools/svcshim` | Autodesk licensing service does not register as a Windows service under Wine. The shim runs as the service and keeps the real one running (for Revit 2020 from the licensing service's version folder: that service takes its version from the folder's name). For Enscape 4.18 (2027) it runs Chaos sign-in and Asset Library as services, so they start with the bottle. |
 | `tools/ncrypt-shim` | Revit crashes on start and on save: Wine cannot import or sign with Revit's ECDSA key. The shim does it through Wine's bcrypt. |
 | `tools/wbem-shim` | Revit crashes on New Project and in Options: Wine's WMI handles only one async query at a time. The shim runs them one by one. |
 | `tools/tlbpin` | Views with text are 2–3× slower: RichEdit reloads a type library for every text element. Long edits check the mouse hundreds of thousands of times, and while the mouse is still each check asks macOS (~12 us instead of under 1 us). The shim caches the type library and reuses the cursor position for 10 ms. |
@@ -115,8 +115,7 @@ For normal use, `./revit rebuild <year>` runs everything again from scratch. To 
 bottle:
 
 ```bash
-scripts/run-steps.sh <year> <bottle> <step…>   # Revit 2023 and newer: install and add-in steps
-scripts/d6-install-revit.sh <bottle> <step…>   # Revit 2020, until it moves to run-steps.sh
+scripts/run-steps.sh <year> <bottle> <step…>   # install and add-in steps
 ```
 
 Each run writes its logs to `logs/<bottle>/<time>-steps/`: one log per step and `summary.txt`.
