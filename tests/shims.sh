@@ -146,6 +146,14 @@ else fail "sandbox git: tag v1.1.0 and the pin"; fi
 expect "after the pin: v1.1.0 is downloaded, no source build" 0 "prebuilt shims v1.1.0 in build/"; check "after the pin: no compiler" absent get-toolchain
 run "$R/scripts/get-shims.sh"; expect "after the pin, again: already there" 0 "prebuilt shims v1.1.0 already in build/"
 
+# a folder in build/ that links elsewhere: the cleanup does not follow it (from source, and before a release is copied)
+reset nocc; mkdir -p "$T/outside" "$R/build"; echo keep > "$T/outside/keep.dll"; ln -s "$T/outside" "$R/build/probe"
+run env SHIMS_FROM_SOURCE=1 "$R/scripts/get-shims.sh"
+check "from source: a linked folder in build/ keeps its files" test -f "$T/outside/keep.dll"
+echo keep > "$T/outside/keep.dll"; mkzip "$T/new.zip" $ALL; pin_zip "$T/new.zip"; run env FAKE_ZIP="$T/new.zip" "$R/scripts/get-shims.sh"
+expect "a release next to a linked folder" 0 "prebuilt shims v$V in build/"
+check "release: a linked folder in build/ keeps its files" test -f "$T/outside/keep.dll"
+
 # ---- build-release.sh ----
 reset; run "$R/scripts/build-release.sh" 9.9.9
 expect "build-release packs the shims" 0 "revit-macos-shims-9.9.9.zip"

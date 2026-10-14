@@ -7,9 +7,14 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; . "$ROOT/scripts/lib/common.sh"; . "$ROOT/scripts/lib/shims.sh"; lock_take "get-shims.sh"
 DL=""; trap '[ -z "$DL" ] || rm -rf "$DL"' EXIT   # this script's download folder, nothing else
+clean_build() { # the release marker, LICENSE and every .dll/.exe in build/<shim>/; a linked folder is not followed
+  local d
+  rm -f "$ROOT/build/.prebuilt" "$ROOT/build/LICENSE"
+  for d in "$ROOT"/build/*/; do [ -L "${d%/}" ] || rm -f "$d"*.dll "$d"*.exe; done
+}
 from_source() { # without the marker build-shims.sh takes no release file, and none may stay to be copied later
   echo "$1 — building from source"
-  rm -f "$ROOT/build/.prebuilt" "$ROOT/build/LICENSE" "$ROOT"/build/*/*.dll "$ROOT"/build/*/*.exe
+  clean_build
   [ -z "$DL" ] || rm -rf "$DL"   # exec skips the EXIT trap
   exec "$ROOT/scripts/get-toolchain.sh"
 }
@@ -38,7 +43,7 @@ echo "$SHIMS_SHA256  $DL/$ZIP" | shasum -a 256 -c --quiet - || from_source "chec
 unzip -q -o "$DL/$ZIP" -d "$DL/x"   # the archive holds build/<shim>/<file>
 release_complete "$DL/x/build" || from_source "release v$SHIMS_VERSION does not hold every shim of these sources"
 # in place of every release or built file: no file of another build may sit next to the release's
-rm -f "$ROOT/build/.prebuilt" "$ROOT/build/LICENSE" "$ROOT"/build/*/*.dll "$ROOT"/build/*/*.exe
+clean_build
 mkdir -p "$ROOT/build" && cp -R "$DL/x/build/." "$ROOT/build/"
 echo "$SHIMS_VERSION" > "$ROOT/build/.prebuilt"
 echo ">> prebuilt shims v$SHIMS_VERSION in build/:"; unzip -Z1 "$DL/$ZIP" | sed 's/^/   /'
