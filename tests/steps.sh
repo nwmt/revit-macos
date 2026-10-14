@@ -389,6 +389,13 @@ expect "d3d9dxvk and wv2fix" 0 "wv2fix"
 check "d3d9dxvk: the copy has no builtin marker" grep -q "DXVK native  DLL" "$BOTTLES/rvt2024-t/drive_c/windows/system32/d3d9.dll"
 check "wv2fix: version_orig.dll without the marker" grep -q "Wine orig    DLL" "$BOTTLES/rvt2024-t/drive_c/windows/system32/version_orig.dll"
 check "wv2fix: native version.dll for the browser only" called "[HKCU\\Software\\Wine\\AppDefaults\\msedgewebview2.exe\\DllOverrides] [/v] [version]"
+reset; mkbottle rvt2024-t 2024 2024; run_steps 2024 rvt2024-t warpshim
+expect "warpshim" 0 "warpshim"
+check "warpshim: d3dwp.dll next to Revit.exe" grep -q "fake d3dwp" "$BOTTLES/rvt2024-t/drive_c/Program Files/Autodesk/Revit 2024/d3dwp.dll"
+check "warpshim: our version.dll in system32 (it loads rvtfix into the material preview process)" \
+  grep -q "fake wv2fix" "$BOTTLES/rvt2024-t/drive_c/windows/system32/version.dll"
+check "warpshim: native version.dll for AdPreviewGenerator.exe" called "[HKCU\\Software\\Wine\\AppDefaults\\AdPreviewGenerator.exe\\DllOverrides] [/v] [version]"
+check "warpshim: not for the browser (that is wv2fix)" not_called "[HKCU\\Software\\Wine\\AppDefaults\\msedgewebview2.exe\\DllOverrides]"
 reset; mkbottle rvt2024-t 2024 2024; run_steps 2024 rvt2024-t pdfprinter
 expect "pdfprinter" 0 "pdfprinter"
 check "pdfprinter: the port path is quoted for /bin/sh (the sandbox path has a space)" called "|'$R/scripts/ps2pdf-port.sh'"

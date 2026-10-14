@@ -52,7 +52,7 @@ In install order. Normal install steps have "—" in What breaks.
 | `d3d9dxvk` | UI, Dynamo and Direct3D 9 panels hang or are unreliable | DXVK for Direct3D 9 | all |
 | `richedit` | Text in views and dialogs fails; crash on text when creating a project | Microsoft RichEdit DLLs for Revit | all |
 | `tlbpin` | Creating views with text is 2–3× slower; long edits poll the mouse slowly | Cache for a type library and for the cursor position | all |
-| `warpshim` | Materials dialog does not open | Software D3D11 device → normal device, through `tools/shims/rvtfix` | all |
+| `warpshim` | Materials dialog does not open; its previews crash (`AdPreviewGenerator.exe`) | Software D3D11 device → normal device, through `tools/shims/rvtfix`, in Revit and in the preview process (loaded there by `tools/shims/wv2fix`) | all |
 | `gdoff` | Generative Design error on start | Turn the add-in off | 2023+ |
 | `rvtfix` | Start screen blank or white; 2026+: the browser uses about 60% CPU and the view is slow; crash when opening a view (a Windows function Wine lacks) | Browser draws inside Revit, with flags that make it draw; the missing function answered in memory | 2023+ (2020: for `warpshim`) |
 | `wv2fix` | The built-in browser (WebView2) crashes on clicks and resizes | Own `version.dll` in the browser process | 2024+ |

@@ -160,7 +160,7 @@ enscape4() { # Enscape 4.18 LTS for Revit 2027; the renderer is its own process,
   w reg add "$a" /v d3d11 /d '' /f || return 1
   # Asset Library is a WebView2 browser: it needs the same browser arguments as Revit's (tools/shims/rvtfix) from the start of
   # the process. Our version.dll (tools/shims/wv2fix) loads rvtfix.dll that sits next to the exe
-  wv2fix_install || return 1
+  wv2fix_install msedgewebview2.exe || return 1
   ensure_shim rvtfix || return 1
   cp "$ROOT/build/rvtfix/rvtfix.dll" "$B/drive_c/Program Files/Enscape/RendererHost/rvtfix.dll" || return 1
   app_override Enscape.RendererHost.exe version || return 1

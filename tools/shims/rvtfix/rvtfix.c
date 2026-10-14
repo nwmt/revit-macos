@@ -2,7 +2,8 @@
  * SPDX-License-Identifier: MIT
  * rvtfix -- fixes for Wine behavior inside the Revit process, made in memory: no Autodesk file is changed
  * (Autodesk assemblies are signed: Revit checks add-in .sig files and won't load modified ones -- "Verify failed!").
- * Loaded by our ncrypt.dll (tools/shims/ncryptshim) if it sits next to Revit.exe.
+ * Loaded by our ncrypt.dll (tools/shims/ncryptshim) if it sits next to Revit.exe, and by our version.dll
+ * (tools/shims/wv2fix) in AdPreviewGenerator.exe (material previews: fix 4) and in Enscape's renderer (fix 2).
  *
  * 1. RegisterDragDrop/RevokeDragDrop on a window of ANOTHER process.
  *    Revit 2026 start screen (ModelBrowser add-in): after WebView2 initializes,
@@ -25,7 +26,7 @@
  *    "--in-process-gpu" keeps the GPU thread inside Revit. Revit sets CefSettings itself, but CEF also reads the
  *    browser process command line (GetCommandLineW), so give it ours plus the flag: replace the GetCommandLineW exports
  *    of kernelbase and kernel32 (Wine's returns its own copy, not the PEB string) before libcef.dll loads.
- *    Only if libcef.dll sits next to Revit.exe (2025) or in its CefSharp folder (2023).
+ *    Only in Revit.exe, and only if libcef.dll sits next to it (2025) or in its CefSharp folder (2023).
  *    2025 also gets "--disable-gpu": with only --in-process-gpu its start screen turns black after a few
  *    maximize/restore toggles (until the window is resized); software drawing keeps it right at the same speed.
  *    Not tried on 2023 yet, so 2023 keeps the flag it was tested with.
@@ -165,6 +166,7 @@ static void fix_cef(void)
     WCHAR args[1024], path[MAX_PATH], *slash;
     const WCHAR *def = L"--in-process-gpu";                  /* 2023: CefSharp\libcef.dll */
     if (!GetModuleFileNameW(NULL, path, MAX_PATH) || !(slash = wcsrchr(path, L'\\'))) return;
+    if (lstrcmpiW(slash + 1, L"Revit.exe")) return; /* AdPreviewGenerator.exe sits in the same folder: not its flags */
     lstrcpyW(slash + 1, L"CefSharp\\libcef.dll");
     if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) {
         lstrcpyW(slash + 1, L"libcef.dll");
