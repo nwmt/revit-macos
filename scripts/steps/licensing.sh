@@ -29,7 +29,7 @@ step_licensing() { # AdskLicensing (BitRock InstallBuilder), switches from pkg.l
 }
 
 step_svcshim() { # the licensing service (Go, kardianos/service) does not answer SCM under Wine (1053):
-  # tools/svcshim registers as the service and runs it as a child in console mode. AdskLicensing 9.2 (Setup.ini
+  # tools/shims/svcshim registers as the service and runs it as a child in console mode. AdskLicensing 9.2 (Setup.ini
   # installers, 2020) takes its version from its folder's name: started through Current it answers /hubversion with
   # "Current", and RVT.msi's licIsSvcUpgraded fails (exit 100) → svcshim gets the path in the version folder
   local img="\"$AL_WIN\\svcshim.exe\"" ver

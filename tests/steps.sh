@@ -29,11 +29,12 @@ reset() { # a fresh sandbox: the repo's scripts and tools, fake prebuilt shims, 
   mkdir -p "$R" "$H/Applications" "$BOTTLES" "$CXF/bin" "$CXF/lib/dxvk/x86_64-windows" "$CXF/lib/wine/x86_64-windows" \
     || { echo "sandbox setup failed"; exit 1; }
   cp -R "$REPO/scripts" "$REPO/tools" "$R/"
-  local f; for f in d3dwp/d3dwp.dll ncrypt-shim/ncrypt.dll pdf-printer/add_printer.exe rvtfix/rvtfix.dll \
-    svcshim/svcshim.exe tlbpin/msls31.dll vkshim/vulkan-1.dll wbem-shim/wbemshim.dll wv2fix/version.dll; do
+  local f; for f in d3dwp/d3dwp.dll ncryptshim/ncrypt.dll pdfprinter/add_printer.exe rvtfix/rvtfix.dll \
+    svcshim/svcshim.exe tlbpin/msls31.dll vkshim/vulkan-1.dll wbemshim/wbemshim.dll wv2fix/version.dll; do
     mkdir -p "$R/build/$(dirname "$f")"; echo "fake $f" > "$R/build/$f"
   done
-  echo 0.0.0 > "$R/build/.prebuilt"            # no toolchain in the sandbox: build scripts take these
+  sed -n 's/^SHIMS_VERSION=//p' "$R/scripts/lib/shims.sh" > "$R/build/.prebuilt"   # no toolchain: the steps take these
+  printf '#!/bin/bash\necho "no toolchain in the sandbox" >&2\nexit 1\n' > "$R/scripts/get-toolchain.sh"
   builtin_dll "$CXF/lib/dxvk/x86_64-windows/d3d9.dll"; builtin_dll "$CXF/lib/wine/x86_64-windows/version.dll"
   cat > "$CXF/bin/wine" <<EOF
 #!/bin/bash
@@ -56,7 +57,7 @@ builtin_dll() { # a file that carries Wine's builtin marker where Wine puts it (
 }
 rule() { printf '%s\t%s\t%s\n' "$1" "$2" "${3:-}" >> "$RULES"; }   # $1 = text in wine's arguments, $2 = exit, $3 = code
 # control variables of the caller's shell must not reach the sandbox (a RUN_DIR could point at a real folder)
-SANDBOX_ENV=(env -u RUN_DIR -u RUN_KIND -u CX_RECREATE -u INSTALL_DRYRUN -u REVIT_LANG -u ODIS_PKGS -u REVIT_THEME HOME="$H" REVIT_CX="$CXF")
+SANDBOX_ENV=(env -u SHIMS_FROM_SOURCE -u RUN_DIR -u RUN_KIND -u CX_RECREATE -u INSTALL_DRYRUN -u REVIT_LANG -u ODIS_PKGS -u REVIT_THEME HOME="$H" REVIT_CX="$CXF")
 in_repo() { # $1 = bash code run with ROOT set and common.sh loaded (cwd /, fake HOME and CrossOver). Sets OUT, RC
   OUT="$(cd / && "${SANDBOX_ENV[@]}" ROOT="$R" /bin/bash -c '. "$ROOT/scripts/lib/common.sh"; '"$1" 2>&1)"; RC=$?
 }
@@ -150,7 +151,7 @@ reset; mkbottle rvt2024-t 2024 2024; rule "cmd /c" 103
 in_bottle 'msi rvt "Z:\\x\\RVT.msi" "INSTALLDIR=C:\\Program Files\\Autodesk\\Revit 2024" A=1; echo rc=$?; cat "$RUN_DIR/rvt.cmd"'
 expect "msi returns msiexec's code" 0 "rc=103"
 check "msi quotes values with spaces" grep -qF 'INSTALLDIR="C:\Program Files\Autodesk\Revit 2024" A=1' <<<"$OUT"
-reset; mkbottle rvt2024-t 2024 2024; in_bottle 'ensure_shim wbem-shim && echo built; ensure_shim nonsense; echo rc=$?'
+reset; mkbottle rvt2024-t 2024 2024; in_bottle 'ensure_shim wbemshim && echo built; ensure_shim nonsense; echo rc=$?'
 expect "ensure_shim takes the prebuilt shim" 0 "built"; check "ensure_shim refuses an unknown shim" grep -q "rc=1" <<<"$OUT"
 
 # ---- run-steps.sh ----

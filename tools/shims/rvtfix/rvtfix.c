@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: MIT
  * rvtfix -- fixes for Wine behavior inside the Revit process, made in memory: no Autodesk file is changed
  * (Autodesk assemblies are signed: Revit checks add-in .sig files and won't load modified ones -- "Verify failed!").
- * Loaded by our ncrypt.dll (tools/ncrypt-shim) if it sits next to Revit.exe.
+ * Loaded by our ncrypt.dll (tools/shims/ncryptshim) if it sits next to Revit.exe.
  *
  * 1. RegisterDragDrop/RevokeDragDrop on a window of ANOTHER process.
  *    Revit 2026 start screen (ModelBrowser add-in): after WebView2 initializes,
@@ -32,7 +32,7 @@
  *    Custom flags: RVTFIX_CEF_ARGS; empty disables.
  *
  * 4. Material browser: OGSDeviceDX11.dll asks D3D11 for a WARP device, which D3DMetal lacks -> "Can't get OGS device",
- *    the dialog does not open. Our d3dwp.dll (tools/d3d11-warp-shim) asks for HARDWARE instead. Fix: in the loaded
+ *    the dialog does not open. Our d3dwp.dll (tools/shims/d3dwp) asks for HARDWARE instead. Fix: in the loaded
  *    OGSDeviceDX11.dll replace the name it loads, L"D3D11.dll", with L"d3dwp.dll" (same length).
  *    Only if d3dwp.dll sits next to Revit.exe.
  *

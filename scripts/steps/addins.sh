@@ -120,7 +120,7 @@ enscape3() { # Enscape 3.4.4 (Revit 2019–2023). Without UI its MSI needs ACCEP
   vt="$B/drive_c/Program Files/Enscape/Bin64/System.ValueTuple.dll"
   [ -f "$vt.orig" ] || cp "$vt" "$vt.orig" || return 1
   unzip -p "$i/redist/nuget/system.valuetuple.4.5.0.nupkg" lib/net47/System.ValueTuple.dll > "$vt" || return 1
-  # Vulkan fixes (tools/vkshim): Enscape's GPU check, its query pools and the focus of its view. Into system32: DXVK
+  # Vulkan fixes (tools/shims/vkshim): Enscape's GPU check, its query pools and the focus of its view. Into system32: DXVK
   # (d3d9dxvk) loads vulkan-1.dll from there at Revit's start, before Enscape does
   ensure_shim vkshim || return 1
   put_native_dll vulkan-1 "$ROOT/build/vkshim/vulkan-1.dll" "" Revit.exe || return 1
@@ -151,22 +151,22 @@ enscape4() { # Enscape 4.18 LTS for Revit 2027; the renderer is its own process,
     cp "$tmp/vcruntime140_clr0400_dll_amd64" "$s32/vcruntime140_clr0400.dll" &&
     cp "$tmp/ucrtbase_clr0400_dll_amd64" "$s32/ucrtbase_clr0400.dll"; rc=$?
   rm -rf "$tmp"; [ $rc = 0 ] || { echo "wminet_utils.dll from .NET 4.8 failed"; return 1; }
-  # Vulkan fixes (tools/vkshim): Enscape turns down the Mac GPU (logicOp); its view takes keys and the mouse only when active
+  # Vulkan fixes (tools/shims/vkshim): Enscape turns down the Mac GPU (logicOp); its view takes keys and the mouse only when active
   ensure_shim vkshim || return 1
   put_native_dll vulkan-1 "$ROOT/build/vkshim/vulkan-1.dll" "" Enscape.RendererHost.exe || return 1
   # no Direct3D 11 for Enscape's own windows (Avalonia): through D3DMetal, closing a menu deadlocks with the renderer in
   # CrossOver's Mac driver; through any D3D the window's Metal layer hides the Asset Library browser. Without d3d11
   # Avalonia draws in software
   w reg add "$a" /v d3d11 /d '' /f || return 1
-  # Asset Library is a WebView2 browser: it needs the same browser arguments as Revit's (tools/rvtfix) from the start of
-  # the process. Our version.dll (tools/wv2fix) loads rvtfix.dll that sits next to the exe
+  # Asset Library is a WebView2 browser: it needs the same browser arguments as Revit's (tools/shims/rvtfix) from the start of
+  # the process. Our version.dll (tools/shims/wv2fix) loads rvtfix.dll that sits next to the exe
   wv2fix_install || return 1
   ensure_shim rvtfix || return 1
   cp "$ROOT/build/rvtfix/rvtfix.dll" "$B/drive_c/Program Files/Enscape/RendererHost/rvtfix.dll" || return 1
   app_override Enscape.RendererHost.exe version || return 1
   bottle_env MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=1 MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS=1 || return 1
   # Chaos Unified Login (sign-in) and Cosmos (Asset Library) start from the Windows StartUp folder, which Wine does not
-  # run: auto-start services through tools/svcshim instead; Wine starts those with the bottle
+  # run: auto-start services through tools/shims/svcshim instead; Wine starts those with the bottle
   ensure_shim svcshim || return 1
   cp "$ROOT/build/svcshim/svcshim.exe" "$B/drive_c/Program Files/Chaos/svcshim.exe" || return 1
   for svc in 'ChaosUnifiedLogin|Chaos Unified Login|"C:\Program Files\Chaos\UnifiedLogin\ulasupervisor.exe"' \

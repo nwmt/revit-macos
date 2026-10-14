@@ -3,7 +3,7 @@
  * wv2fix -- CrossOver 26.3 Wine fix inside WebView2 browser processes (msedgewebview2.exe).
  * Gets into the process as version.dll from the WebView2 runtime folder (msedge.dll imports VERSION.dll; AppDefaults
  * msedgewebview2.exe version=native,builtin). All version.dll functions forward to version_orig.dll, a copy of
- * Wine's builtin version.dll (version.def). Installed by scripts/install-odis.sh, step wv2fix.
+ * Wine's builtin version.dll (version.def). Installed by scripts/steps/fixes.sh, step wv2fix.
  *
  * Browser crash inside Revit (start screen, Project Browser 2027): on click Chromium does a "redraw lock" --
  * clears and restores WS_VISIBLE on its window via SetWindowLong(GWL_STYLE). The window is a child of a window in ANOTHER
@@ -26,7 +26,7 @@
  * Disable: WV2FIX=0 environment variable.
  *
  * In a program that embeds WebView2 (AppDefaults <exe> version=native,builtin; Enscape.RendererHost.exe for its Asset
- * Library) this DLL also loads tools/rvtfix if rvtfix.dll sits next to the exe: rvtfix gives the browser the same
+ * Library) this DLL also loads tools/shims/rvtfix if rvtfix.dll sits next to the exe: rvtfix gives the browser the same
  * arguments as in Revit, and it has to be in place before the program creates its WebView2 environment. The program
  * reads its own file version at startup, which loads version.dll early enough.
  */
@@ -157,7 +157,7 @@ static BOOL WINAPI hook_enddefer(HDWP hdwp) /* windows inside HDWP are not visib
     return ret;
 }
 
-/* as in tools/rvtfix: an export entry is an RVA from the module base, so the thunk must be within 4 GB above it */
+/* as in tools/shims/rvtfix: an export entry is an RVA from the module base, so the thunk must be within 4 GB above it */
 static BYTE *alloc_near(BYTE *base, SIZE_T size)
 {
     MEMORY_BASIC_INFORMATION mbi;

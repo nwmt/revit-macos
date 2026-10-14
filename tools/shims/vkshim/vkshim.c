@@ -1,5 +1,5 @@
-// vulkan-1.dll for Enscape 3.4.4 in Revit 2020 (the enscape step of scripts/d8-addins.sh; built by
-// scripts/build-vkshim.sh). Every other export is forwarded to winevulkan (vulkan-1.def).
+// vulkan-1.dll for Enscape 3.4.4 in Revit 2020 (the enscape step of scripts/steps/addins.sh; built by
+// scripts/build-shims.sh). Every other export is forwarded to winevulkan (vulkan-1.def).
 // Enscape rejects the Mac GPU: it requires VK_KHR_external_memory_win32 (used only for CUDA interop on NVIDIA) and
 // the logicOp feature (shaderStorageImageMultisample is on its list too); MoltenVK has none of them. The shim
 // reports them and drops what the driver lacks when the device is created. Win32 handle functions are stubs

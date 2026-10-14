@@ -7,7 +7,7 @@
  * the Revit journal shows "WARP device could not be initialized" -> "Can't get OGS device" -> Materials won't open.
  *
  * Fix: OGSDeviceDX11.dll loads L"D3D11.dll" via LoadLibraryW and gets D3D11CreateDevice via GetProcAddress.
- * tools/rvtfix replaces that name with L"d3dwp.dll" in the loaded OGSDeviceDX11.dll; this DLL sits next to Revit.exe.
+ * tools/shims/rvtfix replaces that name with L"d3dwp.dll" in the loaded OGSDeviceDX11.dll; this DLL sits next to Revit.exe.
  * WARP/REFERENCE are replaced with HARDWARE (default adapter); everything else goes to the real d3d11 unchanged.
  * Diagnostics: OutputDebugString with the "[d3dwp]" prefix (CX_DEBUGMSG=+debugstr).
  */

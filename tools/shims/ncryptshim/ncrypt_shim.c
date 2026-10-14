@@ -293,7 +293,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
         DisableThreadLibraryCalls(inst);
         InitializeCriticalSection(&objs_cs);
         shim_resolve(inst);
-        /* Revit 2026: our ncrypt.dll loads early (imported by PersistenceDB), so it pulls in tools/rvtfix
+        /* Revit 2026: our ncrypt.dll loads early (imported by PersistenceDB), so it pulls in tools/shims/rvtfix
            (Wine fixes inside the Revit process) if rvtfix.dll sits next to Revit.exe. */
         WCHAR p[MAX_PATH], *slash;
         if (GetModuleFileNameW(NULL, p, MAX_PATH) && (slash = wcsrchr(p, L'\\')) && slash - p < MAX_PATH - 12) {
