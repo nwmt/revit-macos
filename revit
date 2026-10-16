@@ -57,6 +57,7 @@ Usage: ./revit <command> <year> [bottle]
   debug     start Revit and record a log
   rebuild   delete the bottle and install Revit again
   remove    delete Revit, its bottle and its apps
+  status    list the Revit bottles on this Mac (no year)
 
 Example: ./revit install 2025
 Each Revit year lives in its own bottle, rvt<year>-a. To use another bottle, add its name at the end.
@@ -113,10 +114,37 @@ if [ -n "$EVENTS_DIR" ]; then
 fi
 [ -z "$FLAG_ERR" ] || die "$FLAG_ERR"
 case "$CMD" in
-  install|check|addins|stop|logs|debug|rebuild|remove) ;;
+  install|check|addins|stop|logs|debug|rebuild|remove|status) ;;
   ""|help|-h|--help) usage; exit 0 ;;
   *) echo "Unknown command: $CMD" >&2; echo >&2; usage >&2; exit 1 ;;
 esac
+status_addins() { :; }   # Task 9
+if [ "$CMD" = status ]; then
+  RESULT_HINT=failed
+  b_json=""; human=""
+  for b in "$BOTTLES"/*/; do
+    b="${b%/}"; [ -L "$b" ] && continue
+    ys="$(bottle_years "$b" | sort -u | tr '\n' ' ')"; ys="${ys% }"
+    case "$ys" in [0-9][0-9][0-9][0-9]) ;; *) continue ;; esac   # one Revit year, or not ours
+    n="$(basename "$b")"; rv=false; [ -f "$(revit_dir_unix "$b" "$ys")/Revit.exe" ] && rv=true
+    run_=false; revit_running "$b" "$ys" && run_=true
+    b_json+="${b_json:+,}{\"name\":$(json_str "$n"),\"year\":$(json_str "$ys"),\"revit\":$rv,\"running\":$run_,\"addins\":[$(status_addins "$b" "$ys")]}"
+    human+="$(printf '  %-14s Revit %s%s' "$n" "$ys" "$([ $run_ = true ] && echo ', running')")"$'\n'
+  done
+  busy=false; lock_free || busy=true
+  if [ "$JSON" = 1 ]; then
+    cxf=false; [ -x "$CX/bin/cxbottle" ] && cxf=true; ros=false; /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null && ros=true
+    printf '{"crossover":{"found":%s,"path":%s,"version":%s},"rosetta":%s,' "$cxf" "$(json_str "$CX")" "$(json_str "$(crossover_version)")" "$ros"
+    printf '"busy":{"busy":%s,"command":%s,"run_id":%s,"pid":%s,"pid_start":%s,"pgid":%s,"ctx":%s},' "$busy" \
+      "$(json_str "$([ $busy = true ] && lock_owner)")" "$(json_str "$(lock_owner_field run_id)")" "$(json_str "$(lock_owner_field pid)")" \
+      "$(json_str "$(lock_owner_field pid_start)")" "$(json_str "$(lock_owner_field pgid)")" "$(json_str "$(lock_owner_field ctx)")"
+    printf '"bottles":[%s]}\n' "$b_json"
+  else
+    [ -n "$human" ] && printf '%s' "$human" || echo "No Revit bottles yet. To install one: ./revit install <year>"
+    [ $busy = false ] || echo "Busy: $(lock_owner)"
+  fi
+  exit 0
+fi
 [ -n "$YEAR_ARG" ] || die "Which Revit year? Example: ./revit $CMD 2025"
 if ! load_profile "$YEAR_ARG"; then
   [[ "$YEAR_ARG" =~ ^[0-9]{4}$ ]] || die "\"$YEAR_ARG\" is not a Revit year. Example: ./revit $CMD 2025"

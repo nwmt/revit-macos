@@ -138,6 +138,7 @@ run_child() { # [--log <file>] <command…>: runs it in the background so that T
 }
 
 # ---- bottle checks, shared by ./revit and every script that changes a bottle ----
+crossover_version() { plutil -extract CFBundleShortVersionString raw -o - "$CX/../../Info.plist" 2>/dev/null; }
 bottle_years() { # the Revit years of bottle path $1: its description (new-bottle.sh names it "Revit <year>" before
   # installing anything, so a half-done install has it too) and its Revit folders
   sed -n 's/^"Description" = "Revit \([0-9][0-9][0-9][0-9]\)"$/\1/p' "$1/cxbottle.conf" 2>/dev/null

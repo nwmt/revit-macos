@@ -340,5 +340,21 @@ check "events: the used folder is left alone" eval '[ "$(EV)" = "{\"event\":\"st
 reset; run "" install 2024
 check "no --events: no events file" eval '! ls "$R"/logs/runs/*/events.ndjson >/dev/null 2>&1'
 
+# ---- status ----
+revit_exe() { touch "$BOTTLES/$1/drive_c/Program Files/Autodesk/Revit $2/Revit.exe"; }   # $1 = bottle, $2 = year
+reset; bottle rvt2024-a 2024 2024; revit_exe rvt2024-a 2024; bottle rvt2025-b 2025 ""; bottle exp "" ""; run "" status --json
+expect "status --json" 0 '"bottles":['
+check "status: valid JSON" eval 'printf "%s" "$OUT" | /usr/bin/perl -MJSON::PP -e "local \$/; JSON::PP->new->decode(<STDIN>)"'
+check "status: a Revit bottle" grep -qF '{"name":"rvt2024-a","year":"2024","revit":true,"running":false,"addins":[]}' <<<"$OUT"
+check "status: a half-installed bottle" grep -qF '{"name":"rvt2025-b","year":"2025","revit":false,' <<<"$OUT"
+check "status: a non-Revit bottle is left out" eval '! grep -q "\"exp\"" <<<"$OUT"'
+reset; bottle rvt2024-a 2024 2024; revit_exe rvt2024-a 2024; fake_revit rvt2024-a 2024; run "" status --json
+check "status: running" grep -qF '"name":"rvt2024-a","year":"2024","revit":true,"running":true' <<<"$OUT"
+reset; fake_lock "install.sh 2024 rvt2024-a"; run "" status --json
+check "status: busy with its owner" grep -qF '"busy":{"busy":true,"command":"install.sh 2024 rvt2024-a"' <<<"$OUT"
+reset; run "" status --json; check "status: CrossOver found in the fake" grep -qF '"crossover":{"found":true' <<<"$OUT"
+reset; bottle rvt2024-a 2024 2024; run "" status; expect "status without --json" 0 ""
+check "status in words" grep -qE '^  rvt2024-a +Revit 2024$' <<<"$OUT"
+
 # ---- end ----
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]
