@@ -11,6 +11,11 @@ anything runs in the bottle), osadecompile (what the apps start), CrossOver's fi
 its run record through runlog, the unpacked installer's .source through installer_drift. run_checks() makes the
 checks from the facts alone (tests give it synthetic ones); render() prints them.
 
+The logs group reads the newest logs of the bottle through tools/signatures.py: the newest debug session
+(logs/<bottle>/<time>-debug: wine.cxlog, stdout.log), the newest install, steps or add-ins run (its step logs and MSI
+logs) and Revit's newest journal in the bottle; never a log older than the bottle's last install (its run record). A
+known failure there is a warning with the date of the session it was seen in, never a ✗; counts are in the JSON only.
+
 Output: the problems as ./revit check prints them ("  ✗ title" or "  ! title", then "      fix: what to do"), notes
 ("  · title"), then "  ✓ no problems found (N checks)"; --all adds the checks that passed. --json:
   {"checks": [{"id", "group", "status": "ok|warn|fail|info", "title", "detail", "fix", "doc"}],
@@ -20,6 +25,7 @@ Exit: 1 when a check failed, else 0; 2 for bad arguments. ./revit doctor passes 
 comes from profile_json in scripts/lib/common.sh. Run with python3 -I -B.
 """
 import argparse
+import calendar
 import fcntl
 import glob
 import hashlib
@@ -31,13 +37,15 @@ import shutil
 import socket
 import subprocess
 import sys
+import time
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bottleread  # noqa: E402
 import runlog  # noqa: E402
+import signatures  # noqa: E402
 
-GROUPS = ("host", "crossover", "bottles", "bottle", "install", "fixes", "addins")
+GROUPS = ("host", "crossover", "bottles", "bottle", "install", "fixes", "addins", "logs")
 S32 = "drive_c/windows/system32"
 AL = "drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing"
 WV2 = "drive_c/Program Files (x86)/Microsoft/EdgeWebView/Application"
@@ -67,6 +75,10 @@ DOC = {"start-over": TS + "start-over", "report": TS + "report-a-problem",
        "signin": TS + "after-sign-in-the-browser-shows-opening-product-and-nothing-happens",
        "web": TS + "start-screen-manage-links-or-project-browser-is-white-a-browser-process-uses-a-lot-of-cpu",
        "netfx2020": TS + "revit-2020-crashes-on-start-after-installing-net-framework-472-or-48"}
+LOG_RUN = re.compile(r"^(\d{8}-\d{6})(?:-(\d+))?-([a-z]+)$")   # logs/<bottle>/<time>[-n]-<kind> (run_dir_new)
+LOG_LABEL = {"debug": "Revit session", "install": "install", "steps": "steps run", "addins": "add-ins run"}
+LOG_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,80}\.log$")
+MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 WHERE = {"system32": "in system32", "revit": "in Revit's folder", "licensing": "in the licensing folder",
          "wbem": "in system32\\wbem", "webview2": "in the WebView2 folder", "rvt-pdf": "in C:\\rvt-pdf",
          "spool": "in the printer drivers folder", "enscape": "in Enscape's folder", "chaos": "in the Chaos folder"}
@@ -646,6 +658,94 @@ def shim_info(ctx, shim):
     return {"file": os.path.relpath(built, ctx.shims), "sha256": sha256_of(built), "stale": stale}
 
 
+def install_times(records):
+    """(when the newest install ended, when it began) as epoch seconds, or (None, None). The record is written at its
+    end; its run id begins with the local time ./revit started it (else: three hours before the end)."""
+    last = next((r for r in reversed(records or []) if r.get("kind") == "install"), None)
+    if not last:
+        return None, None
+    try:
+        end = calendar.timegm(time.strptime(str(last.get("time")), "%Y-%m-%dT%H:%M:%SZ"))
+    except (ValueError, OverflowError):
+        end = None
+    m = re.match(r"^(\d{8}-\d{6})", str(last.get("run_id") or ""))
+    try:
+        begin = time.mktime(time.strptime(m.group(1), "%Y%m%d-%H%M%S")) if m else None
+    except (ValueError, OverflowError):
+        begin = None
+    if begin is None and end is not None:
+        begin = end - 3 * 3600
+    return end, begin
+
+
+def run_time(path):
+    """When a run folder began: the local time in its name, else its modification time."""
+    m = LOG_RUN.match(os.path.basename(path))
+    try:
+        return time.mktime(time.strptime(m.group(1), "%Y%m%d-%H%M%S")) if m else os.path.getmtime(path)
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
+def collect_logs(ctx, bottle_dir, records):
+    """The newest logs of the bottle, each scanned once for the signatures of tools/signatures.py: the newest debug
+    session, the newest install, steps or add-ins run, Revit's newest journal. A log older than the last install is
+    not read: it is about the bottle before it was installed again."""
+    end, begin = install_times(records)
+    out = {"sources": [], "skipped": []}
+    base = os.path.join(ctx.data, "logs", ctx.bottle)
+    newest = {}
+    try:
+        names = os.listdir(base)
+    except OSError:
+        names = []
+    for n in names:
+        m, d = LOG_RUN.match(n), os.path.join(base, n)
+        if m and m.group(3) in LOG_LABEL and os.path.isdir(d) and not os.path.islink(d):
+            key = (m.group(1), int(m.group(2) or 1))
+            if m.group(3) not in newest or key > newest[m.group(3)][0]:
+                newest[m.group(3)] = (key, d)
+
+    def regular(p):
+        return os.path.isfile(p) and not os.path.islink(p)
+
+    def scan(label, path, t, shown):
+        res = signatures.scan_file(path, year=ctx.year)
+        if res["where"]:
+            out["sources"].append({"label": label, "file": shown, "time": t, "scan": res})
+    if "debug" in newest:
+        d = newest["debug"][1]
+        t = run_time(d)
+        if end is not None and t is not None and t < end:
+            out["skipped"].append({"label": LOG_LABEL["debug"], "time": t})
+        else:
+            for n in ("wine.cxlog", "stdout.log"):
+                if regular(os.path.join(d, n)):
+                    scan(LOG_LABEL["debug"], os.path.join(d, n), t, show(os.path.join(d, n), ctx))
+    runs = [newest[k] for k in ("install", "steps", "addins") if k in newest]
+    if runs:
+        d = max(runs)[1]
+        kind, t = LOG_RUN.match(os.path.basename(d)).group(3), run_time(d)
+        if begin is not None and t is not None and t < begin:
+            out["skipped"].append({"label": LOG_LABEL[kind], "time": t})
+        else:
+            try:
+                names = sorted(os.listdir(d))
+            except OSError:
+                names = []
+            for n in names:
+                if LOG_NAME.match(n) and regular(os.path.join(d, n)):
+                    scan(LOG_LABEL[kind], os.path.join(d, n), t, show(os.path.join(d, n), ctx))
+    j = bottleread.newest_journal(bottle_dir, ctx.year)
+    if j and regular(j):
+        t = os.path.getmtime(j)
+        if end is not None and t < end:
+            out["skipped"].append({"label": "Revit journal", "time": t})
+        else:
+            scan(LOG_LABEL["debug"], j, t, "Journals/" + os.path.basename(j))
+    return out
+
+
 def collect_bottle(ctx):
     y, p = ctx.year, os.path.join(ctx.bottles, ctx.bottle)
     b = {"link": os.path.islink(p)}
@@ -687,6 +787,7 @@ def collect_bottle(ctx):
         rel = (vals or {}).get("release")
         netfx["release"] = rel[1] if rel and rel[0] == "dword" else None
     b["netfx"] = netfx
+    b["logs"] = collect_logs(ctx, p, b["records"])
     return b
 
 
@@ -1115,6 +1216,72 @@ def addin_checks(f):
     return out
 
 
+def day(t, now=None):
+    """2 Oct, or 2 Oct 2025 in another year."""
+    d, n = time.localtime(t), time.localtime(now)
+    return f"{d.tm_mday} {MONTHS[d.tm_mon - 1]}" + ("" if d.tm_year == n.tm_year else f" {d.tm_year}")
+
+
+def logs_checks(f, b):
+    """A warning for each signature seen in the newest logs, with the date of the newest session it was seen in and
+    what to do; the counts of the info signatures and what was read are in the JSON only."""
+    lg = b.get("logs")
+    if lg is None:
+        return []
+    out, seen, metrics = [], {}, {}
+    for src in lg["sources"]:
+        for sid, h in src["scan"]["hits"].items():
+            seen.setdefault(sid, []).append((src, h))
+        for sid, m in src["scan"]["metrics"].items():
+            tot = metrics.setdefault(sid, {})
+            for k, v in m.items():
+                tot[k] = tot.get(k, 0) + v
+    for sig in signatures.CATALOG:
+        if sig.id not in seen:
+            continue
+        found = seen[sig.id]
+        src = max(found, key=lambda sh: sh[0]["time"] or 0)[0]
+        details = []
+        for _, h in found:
+            details += [x for x in h["details"] if x not in details]
+        what = sig.meaning + (f" ({', '.join(details[:3])})" if details else "")
+        when = f": seen in the {src['label']} of {day(src['time'])}" if src["time"] else ""
+        where = "; ".join(f"{s['file']}: line {', '.join(map(str, h['lines'][:5]))}" +
+                          (f" and {h['count'] - min(5, len(h['lines']))} more" if h["count"] > 5 else "")
+                          for s, h in found)
+        fix = sig.fix.replace(signatures.REBUILD, rebuild(f)) if sig.fix else f"see {TS}{sig.doc}"
+        out.append(Check(f"logs.{sig.id}", "warn", what + when, detail=where, fix=fix,
+                         doc=TS + sig.doc if sig.doc else ""))
+    for sid, m in sorted(metrics.items()):
+        out.append(Check(f"logs.{sid}", "info", signatures.BY_ID[sid].meaning, detail=json.dumps(m, sort_keys=True),
+                         show=False))
+    if lg["sources"]:   # what was read, folder by folder, short enough for a line of report.zip
+        folders = {}
+        for s in lg["sources"]:
+            d, n = os.path.split(s["file"])
+            folders.setdefault(d, []).append((n, s["scan"]))
+        parts = []
+        for d, files in folders.items():
+            if len(files) > 3:
+                parts.append(f"{d}: {len(files)} logs, {sum(sc['lines'] for _, sc in files)} lines")
+                continue
+            parts.append(f"{d}: " + ", ".join(
+                f"{n} ({sc['size']} bytes) {sc['lines']} lines" +
+                (f" from line {sc['first_line']}" if sc["first_line"] > 1 else "") +
+                (", stopped at the line cap" if sc["cut"] else "") for n, sc in files))
+        out.append(Check("logs.read", "info", f"{len(lg['sources'])} log files read", detail="; ".join(parts),
+                         show=False))
+        if not seen:
+            out.append(Check("logs.signatures", "ok", "no known failure in the newest logs"))
+    elif not lg["skipped"]:
+        out.append(Check("logs.read", "info", "no logs of this bottle to read", show=False))
+    if lg["skipped"]:
+        out.append(Check("logs.skipped", "info", "logs older than the last install, not read: " +
+                         ", ".join(f"the {x['label']} of {day(x['time'])}" for x in lg["skipped"] if x["time"]),
+                         show=False))
+    return out
+
+
 def bottle_checks(f):
     b, y, name, out = f["b"], f["year"], f["bottle"], []
     if b.get("link"):
@@ -1168,7 +1335,7 @@ def bottle_checks(f):
     out += install_checks(f, b) + since_install(f, b)
     if b.get("revit_exe"):
         out += fixes_checks(f, b) + addin_checks(f)
-    return out
+    return out + logs_checks(f, b)
 
 
 def run_checks(f):

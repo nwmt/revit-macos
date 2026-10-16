@@ -2,7 +2,7 @@
 """Unit tests for tools/doctor.py. Run: python3 -I -m unittest discover -s tests -p 'test_*.py'
 Facts, bottles, CrossOver and the Mac's commands are made here: no Autodesk or Microsoft file, no real bottle. Only
 test_cli runs doctor.py on this Mac, and checks nothing that depends on it."""
-import fcntl, glob, hashlib, importlib.util, json, os, re, struct, subprocess, sys, tempfile, unittest
+import fcntl, glob, hashlib, importlib.util, json, os, re, struct, subprocess, sys, tempfile, time, unittest
 
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -402,6 +402,172 @@ class Bottle(Sandbox):
         self.assertEqual(cs["addins.pdfprinter"].title, "PDF printer is installed")
         self.facts["host"]["gs"] = False
         self.assertEqual(self.by_id(dr.run_checks(self.facts))["addins.pdfprinter.gs"].status, "warn")
+
+
+CRASH = "wine: Unhandled page fault on read access to 0 at address 1 (thread 0040), starting debugger..."
+HEALTHY = ["1.0:0030:0040:warn:seh:dispatch_exception code=c0000005 flags=0 addr=0000000140001000",
+           "1.1:0030:0040:err:ole:ensure_mta Failed, hr 0x800401f0", "1.2:0030:0040:fixme:win:shm_surface_set_clip"]
+LOADED = ('1.0:0030:0031:trace:loaddll:build_module Loaded L"C:\\\\Program Files\\\\Autodesk\\\\Revit 2025\\\\'
+          'Revit.exe" at 0000000140000000: native')
+ECDSA = '1.3:0030:0040:warn:seh:dispatch_exception "[ncrypt-shim] VerifySignature(32 bytes) -> 0xc000a000\\n"'
+
+
+class Logs(Sandbox):
+    """The logs group: the newest logs of the bottle against tools/signatures.py."""
+    RUN = "20261016-120000"   # the install the run record names; the record says when it began
+
+    def setUp(self):
+        super().setUp()
+        self.records_clear()
+        self.record(result="ok", run_id=self.RUN + "-4242")
+        self.logs = os.path.join(self.data, "logs", self.name)
+        self.journals = os.path.join(self.b, "drive_c/users/crossover/AppData/Local/Autodesk/Revit",
+                                     "Autodesk Revit %d" % self.year, "Journals")
+
+    def lines(self, path, lines):
+        return self.write(path, "\n".join(lines) + "\n")
+
+    def session(self, stamp, lines, stdout=None):
+        d = os.path.join(self.logs, stamp + "-debug")
+        self.lines(os.path.join(d, "wine.cxlog"), lines)
+        self.lines(os.path.join(d, "stdout.log"), stdout or ["fine"])
+        return d
+
+    def run_logs(self, stamp, kind, files):
+        d = os.path.join(self.logs, "%s-%s" % (stamp, kind))
+        for name, lines in files.items():
+            self.lines(os.path.join(d, name), lines)
+        self.write(os.path.join(d, "summary.txt"), "   rvt        exit=0     RVT.msi (8 s)\n")
+        return d
+
+    def journal(self, n, lines, when):
+        p = self.lines(os.path.join(self.journals, "journal.%04d.txt" % n), lines)
+        os.utime(p, (when, when))
+        return p
+
+    def logs_of(self, cs):
+        return {c.id: c for c in cs if c.group == "logs"}
+
+    def test_healthy_logs_are_no_problem(self):
+        self.session("20261017-120000", [LOADED] + HEALTHY * 20)
+        self.run_logs(self.RUN, "install", {"rvt.log": ["AdskLicensingService has been upgraded successfully"],
+                                            "rvt.msi.log": ["Action ended 1:00:00: INSTALL. Return value 1."],
+                                            "AdskLicensing-install.log": [
+                                                "LIC-INST-ERROR-1053. Starting Windows service during new "
+                                                "installation failed: Calling system API failed, (error code 1053)"]})
+        self.journal(1, ["' 0:< License mode: User", "' 0:< DBG_WARN: Unable to create D2D render target"],
+                     time.mktime((2026, 10, 17, 13, 0, 0, 0, 0, -1)))
+        cs = self.checks()
+        self.assertEqual(self.problems(cs), [])
+        lg = self.logs_of(cs)
+        self.assertEqual(lg["logs.signatures"].status, "ok")
+        self.assertEqual(lg["logs.read"].title, "6 log files read")
+        self.assertEqual(re.sub(r" \(\d+ bytes\)", "", lg["logs.read"].detail),
+                         "logs/%s/20261017-120000-debug: wine.cxlog 61 lines, stdout.log 1 lines; "
+                         "logs/%s/%s-install: AdskLicensing-install.log 1 lines, rvt.log 1 lines, rvt.msi.log 1 lines; "
+                         "Journals: journal.0001.txt 2 lines" % (self.name, self.name, self.RUN))
+        self.assertFalse(lg["logs.read"].show)
+        self.assertIn("  ✓ no known failure in the newest logs", dr.render(cs, True))
+
+    def test_a_crash_is_a_warning_with_its_session_and_what_to_do(self):
+        d = self.session("20261017-120000", [LOADED] + HEALTHY + [CRASH] + HEALTHY)
+        cs = self.checks()
+        c = self.logs_of(cs)["logs.wine-crash"]
+        self.assertEqual(c.status, "warn")
+        when = dr.day(dr.run_time(d))
+        self.assertEqual(c.title, "a Windows program in the bottle crashed (Revit.exe): seen in the Revit session of " +
+                         when)
+        self.assertEqual(c.fix, "see docs/troubleshooting.md#report-a-problem")
+        self.assertEqual(c.detail, "logs/%s/20261017-120000-debug/wine.cxlog: line 5" % self.name)
+        out = dr.render(cs)
+        i = out.index("  ! " + c.title)
+        self.assertEqual(out[i + 1], "      fix: see docs/troubleshooting.md#report-a-problem")
+        self.assertFalse([x for x in cs if x.group == "logs" and x.status == "fail"])
+
+    def test_the_same_signature_in_two_logs_is_one_warning(self):
+        self.session("20261017-120000", [CRASH], stdout=[CRASH, CRASH])
+        c = self.logs_of(self.checks())["logs.wine-crash"]
+        self.assertIn("(process unknown)", c.title)
+        self.assertEqual(c.detail.count("line "), 2)
+        self.assertIn("stdout.log: line 1, 2", c.detail)
+
+    def test_logs_older_than_the_last_install_are_not_read(self):
+        self.session("20261015-120000", [CRASH])
+        self.run_logs("20261015-110000", "install", {"rvt.msi.log": ["Action ended 1:00:00: INSTALL. Return value 0."]})
+        self.journal(3, ["' 0:< captureTryCrash 0xc0000005"], time.mktime((2026, 10, 15, 12, 0, 0, 0, 0, -1)))
+        cs = self.checks()
+        lg = self.logs_of(cs)
+        self.assertEqual(self.problems(cs, "logs"), [])
+        self.assertIn("logs.skipped", lg)
+        self.assertEqual(lg["logs.skipped"].title.count("the "), 4)   # "older than the last install", three logs
+        self.assertNotIn("logs.signatures", lg)
+
+    def test_the_newest_run_and_its_failures(self):
+        self.run_logs(self.RUN, "install", {"rvt.msi.log": ["Action ended 1:00:00: INSTALL. Return value 0."]})
+        cs = self.by_id(self.checks())
+        self.assertEqual(cs["logs.msi-failed"].status, "warn")
+        self.assertIn("seen in the install of", cs["logs.msi-failed"].title)
+        self.assertEqual(cs["logs.msi-failed"].fix, "./revit rebuild 2025: it shows what it resets and asks first")
+        self.assertEqual(cs["logs.msi-failed"].doc, "docs/troubleshooting.md#start-over")
+        self.run_logs("20261016-130000", "steps", {"rvt.log": [
+            "the Autodesk licensing service does not answer, so RVT.msi would fail"]})
+        cs = self.by_id(self.checks())
+        self.assertNotIn("logs.msi-failed", cs)   # the install is no longer the newest run
+        self.assertIn("seen in the steps run of", cs["logs.licensing-no-answer"].title)
+        self.assertEqual(cs["logs.licensing-no-answer"].doc,
+                         "docs/troubleshooting.md#install-stops-the-autodesk-licensing-service-does-not-answer")
+
+    def test_utf16_msi_log_and_journal(self):
+        d = self.run_logs(self.RUN, "install", {})
+        self.write(os.path.join(d, "core.msi.log"),
+                   b"\xff\xfe" + "Action ended 1:00:00: X. Return value 3.\r\n".encode("utf-16-le"))
+        self.journal(7, ["' 0:< Assertion failed: line 52"], time.mktime((2026, 10, 18, 9, 0, 0, 0, 0, -1)))
+        cs = self.by_id(self.checks())
+        self.assertEqual(cs["logs.msi-failed"].detail, "logs/%s/%s-install/core.msi.log: line 1" % (self.name, self.RUN))
+        self.assertIn("seen in the Revit session of", cs["logs.journal-assertion"].title)
+        self.assertEqual(cs["logs.journal-assertion"].detail, "Journals/journal.0007.txt: line 1")
+
+    def test_ecdsa_counts_in_the_json_only(self):
+        self.session("20261017-120000", HEALTHY + [ECDSA] * 3 + [ECDSA.replace("0xc000a000", "0x0")])
+        cs = self.checks()
+        c = self.logs_of(cs)["logs.ecdsa-verify"]
+        self.assertEqual((c.status, c.show, json.loads(c.detail)), ("info", False, {"failed": 3, "passed": 1}))
+        self.assertFalse([x for x in dr.render(cs) if "ECDSA" in x])
+        self.assertEqual(self.problems(cs), [])
+
+    def test_no_logs(self):
+        lg = self.logs_of(self.checks())
+        self.assertEqual(sorted(lg), ["logs.read"])
+        self.assertEqual(lg["logs.read"].title, "no logs of this bottle to read")
+
+    def test_logs_are_read_and_not_written(self):
+        self.session("20261017-120000", [CRASH])
+        before = self.snapshot()
+        self.checks()
+        self.assertEqual(before, self.snapshot())
+
+    def test_a_huge_cxlog_stays_fast(self):
+        d = os.path.join(self.logs, "20261017-120000-debug")
+        os.makedirs(d)
+        p = os.path.join(d, "wine.cxlog")
+        line = b"540731.357:04a8:02d8:trace:seh:dispatch_exception  rax=0000000000000000 rbx=00000000001ff6e0\n"
+        block = (line * 9 + HEALTHY[0].encode() + b"\n") * ((1 << 20) // (10 * len(line)) + 1)
+        with open(p, "wb") as f:   # over 1 GB: a sparse start, then about 320 MB of lines that end with a crash
+            f.write(("\n".join([CRASH] + HEALTHY) + "\n").encode())
+            f.seek((1 << 30) - (300 << 20))
+            for _ in range(320):
+                f.write(block)
+            f.write(("1.9:0030:0040:warn:seh:dispatch_exception code=c0000005\n" + CRASH + "\n").encode())
+        t = time.monotonic()
+        cs = self.by_id(self.checks())
+        took = time.monotonic() - t
+        self.assertLess(took, 60, "doctor took %.1f s on a 1 GB wine.cxlog" % took)
+        self.assertEqual(cs["logs.wine-crash"].status, "warn")
+        m = re.match(r"^logs/.*-debug: wine\.cxlog \((\d+) bytes\) (\d+) lines from line (\d+)$", cs["logs.read"].detail)
+        size, lines, first = (int(x) for x in m.groups())
+        self.assertGreater(size, 1 << 30)
+        self.assertLessEqual(lines, dr.signatures.LINES_MAX)   # its end only
+        self.assertGreater(first, 1)
 
 
 class NetFramework(Sandbox):
