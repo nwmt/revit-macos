@@ -14,6 +14,7 @@ revit_years() { # the years with a profile, oldest first
 }
 revit_supported() { [[ "$1" =~ ^[0-9]{4}$ ]] && [ -f "$ROOT/scripts/profiles/$1.sh" ]; }
 REVIT_SUPPORTED=(); for _y in $(revit_years); do REVIT_SUPPORTED+=("$_y"); done; unset _y
+CX_TESTED=26.3.0.39832   # the CrossOver build the status words were earned on (CFBundleVersion, crossover_build)
 
 load_profile() { # $1 = year: sets YEAR and the profile variables (scripts/profiles/<year>.sh); 1 = no such profile
   INSTALLER=""; DOTNET=""; PRODKEY=""; SIGNIN=""; LICENSING_OK=""; STEPS=(); PKGS=""; REVITINI=(); THEME=0
