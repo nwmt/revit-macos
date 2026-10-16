@@ -6,15 +6,18 @@ made from. Resolved once (source.json); get-revit.sh, unpack-revit.sh and instal
   finalize <source.json> <hashes.tsv>                          stage 2: actual sha256, source_id
   compare  <source.json> <dot-source.json> <hashes.tsv>        match | mismatch <why> | nosource
   detect   <folder>                                            for ./revit find-installer
+  build    <source.json> <a.b.c.d|unknown>                     keep the expected Revit build (installer_drift.py) in the list
 
 Kinds: create-installer (2024+: Autodesk's small tool and the files its manifest names), parts (an Autodesk multi-part
 download, every part in one folder), archive (a base archive without the tool). Updates: the manifest's and every
-update/*.exe of both folders, one copy per name. Large files are hashed once per (path, size, mtime in ns)."""
+update/*.exe of both folders, one copy per name. Large files are hashed once per (path, size, mtime in ns).
+The list also carries revit_build_expected: finalize keeps it, so it reaches source.list and the unpacked .source."""
 import glob, hashlib, json, os, re, shutil, subprocess, sys, tempfile
 import xml.etree.ElementTree as ET
 
 PART = re.compile(r"_(\d{3})_(\d{3})\.sfx\.exe$", re.I)
 ARCH = (".7z", ".zip", ".iso")
+BUILD = re.compile(r"^\d+(\.\d+){3}$")
 MAX_XML = 4 << 20   # Autodesk's manifests are 1-20 KB
 
 
@@ -127,7 +130,8 @@ def ordered(files):   # base as given, then updates as sort -V orders their name
 def resolve(year, inp, dl, checksums):
     sums = expected_sums(checksums, year)
     dirs = [inp] if os.path.realpath(inp) == os.path.realpath(dl) else [inp, dl]
-    s = {"year": year, "kind": None, "manifest_id": None, "problem": "", "files": [], "source_id": None, "unknown": []}
+    s = {"year": year, "kind": None, "manifest_id": None, "problem": "", "files": [], "source_id": None, "unknown": [],
+         "revit_build_expected": None}
     cis = sorted(glob.glob(os.path.join(inp, f"Create_Installer_RVT_{year}_*.exe")), key=natural)
     if cis:
         ci = cis[-1]
@@ -326,6 +330,12 @@ def main(a):
             print(compare(a[1], a[2], a[3])); return 0
         if a[:1] == ["detect"] and len(a) == 2:
             print(json.dumps(detect(a[1]))); return 0
+        if a[:1] == ["build"] and len(a) == 3:
+            s = json.load(open(a[1]))
+            if not isinstance(s, dict):
+                raise ValueError(f"{a[1]}: not a source list")
+            s["revit_build_expected"] = a[2] if BUILD.match(a[2]) else None
+            json.dump(s, open(a[1], "w"), indent=1); return 0
     except Conflict as e:
         sys.stderr.write(f"!! {e}\n"); return 4
     except (OSError, ValueError) as e:
