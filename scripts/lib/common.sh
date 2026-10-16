@@ -33,13 +33,22 @@ app_placement() { # $1 = app path → ok (in /Applications or ~/Applications) | 
 }
 bottle_sfx() { [ "$1" = "$(revit_bottle_default "$2")" ] || printf ' %s' "$1"; }   # hints name a non-default bottle
 
-free_gb() { # what Finder and System Settings call "available": includes purgeable space that df does not count
-  local g
-  g=$(osascript -l JavaScript -e 'ObjC.import("Foundation"); var r = Ref();
-    $.NSURL.fileURLWithPath("/").getResourceValueForKeyError(r, $.NSURLVolumeAvailableCapacityForImportantUsageKey, null);
-    Math.floor(ObjC.unwrap(r[0]) / 1e9)' 2>/dev/null)
-  [[ "$g" =~ ^[0-9]+$ ]] || g=$(df -g "$DATA" | awk 'NR==2 {print $4}')
+free_gb() { # $1 = a path (default /): GB free on its volume, what Finder and System Settings call "available"
+  # (purgeable space included, which df does not count). A path that is not there yet counts on the volume of the
+  # nearest folder above it; a link counts where it points
+  local p="${1:-/}" g
+  while [ ! -e "$p" ] && [ "$p" != / ] && [ "$p" != . ]; do p="$(dirname "$p")"; done
+  p="$(cd "$p" 2>/dev/null && pwd -P)" || p=/
+  g=$(osascript -l JavaScript -e 'function run(a) { ObjC.import("Foundation"); var r = Ref();
+    $.NSURL.fileURLWithPath(a[0]).getResourceValueForKeyError(r, $.NSURLVolumeAvailableCapacityForImportantUsageKey, null);
+    return Math.floor(ObjC.unwrap(r[0]) / 1e9) }' "$p" 2>/dev/null)
+  [[ "$g" =~ ^[0-9]+$ ]] || g=$(df -g "$p" 2>/dev/null | awk 'NR==2 {print $4}')
   echo "${g:-0}"
+}
+volume_id() { # $1 = a path: its volume (device number), from the nearest folder above it that is there
+  local p="$1"
+  while [ ! -e "$p" ] && [ "$p" != / ] && [ "$p" != . ]; do p="$(dirname "$p")"; done
+  stat -L -f %d "$p" 2>/dev/null || echo 0
 }
 
 run_dir_new() { # $1 = folder under logs/ (a bottle name, or revit<year>), $2 = kind (install, steps, addins, debug, …).
@@ -56,6 +65,24 @@ json_str() { # $1 = text → a JSON string literal (through the system perl, lik
   # ./revit notes a Ctrl-C and ends the run itself, and a killed encoder would leave an empty value in an event
   ( trap '' INT TERM HUP; exec /usr/bin/perl -e 'my $s = shift; $s =~ s/(["\\])/\\$1/g; $s =~ s/\n/\\n/g; $s =~ s/\r/\\r/g; $s =~ s/\t/\\t/g;
     $s =~ s/([\x00-\x1f])/sprintf("\\u%04x", ord $1)/ge; print "\"$s\""' -- "$1" )
+}
+json_list() { # $@ = texts → a JSON array of strings
+  local out="" x
+  for x in "$@"; do out+="${out:+,}$(json_str "$x")"; done
+  printf '[%s]' "$out"
+}
+profile_json() { # the profile load_profile loaded, as one JSON object (tools/doctor.py reads it): each variable under
+  # its name, arrays as lists, PKGS split at |, YEAR a number, the rest strings
+  local pk=() v out
+  IFS='|' read -r -a pk <<< "$PKGS"
+  out="{\"YEAR\":$((10#$YEAR))"
+  for v in INSTALLER DOTNET PRODKEY SIGNIN LICENSING_OK THEME DYNAMO ADDIN_WPF_SW LOOKUP PYREVIT PYREVIT_ATTACH ENSCAPE; do
+    out+=",\"$v\":$(json_str "${!v}")"
+  done
+  out+=",\"STEPS\":$(json_list ${STEPS[@]+"${STEPS[@]}"}),\"PKGS\":$(json_list ${pk[@]+"${pk[@]}"})"
+  out+=",\"REVITINI\":$(json_list ${REVITINI[@]+"${REVITINI[@]}"}),\"RICHEDIT\":$(json_list ${RICHEDIT[@]+"${RICHEDIT[@]}"})"
+  out+=",\"RVTFIX_ENV\":$(json_list ${RVTFIX_ENV[@]+"${RVTFIX_ENV[@]}"}),\"ADDIN_STEPS\":$(json_list ${ADDIN_STEPS[@]+"${ADDIN_STEPS[@]}"})}"
+  printf '%s\n' "$out"
 }
 emit() { # $1 = event, then key and JSON value pairs (strings through json_str, numbers as they are)
   [ -n "${REVIT_EVENTS_FD:-}" ] && [ -e /dev/fd/7 ] || return 0
