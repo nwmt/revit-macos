@@ -463,8 +463,8 @@ class Logs(Sandbox):
         self.assertEqual(lg["logs.signatures"].status, "ok")
         self.assertEqual(lg["logs.read"].title, "6 log files read")
         self.assertEqual(re.sub(r" \(\d+ bytes\)", "", lg["logs.read"].detail),
-                         "logs/%s/20261017-120000-debug: wine.cxlog 61 lines, stdout.log 1 lines; "
-                         "logs/%s/%s-install: AdskLicensing-install.log 1 lines, rvt.log 1 lines, rvt.msi.log 1 lines; "
+                         "logs/%s/20261017-120000-debug: wine.cxlog 61 lines, stdout.log 1 line; "
+                         "logs/%s/%s-install: AdskLicensing-install.log 1 line, rvt.log 1 line, rvt.msi.log 1 line; "
                          "Journals: journal.0001.txt 2 lines" % (self.name, self.name, self.RUN))
         self.assertFalse(lg["logs.read"].show)
         self.assertIn("  ✓ no known failure in the newest logs", dr.render(cs, True))
@@ -523,7 +523,8 @@ class Logs(Sandbox):
                    b"\xff\xfe" + "Action ended 1:00:00: X. Return value 3.\r\n".encode("utf-16-le"))
         self.journal(7, ["' 0:< Assertion failed: line 52"], time.mktime((2026, 10, 18, 9, 0, 0, 0, 0, -1)))
         cs = self.by_id(self.checks())
-        self.assertEqual(cs["logs.msi-failed"].detail, "logs/%s/%s-install/core.msi.log: line 1" % (self.name, self.RUN))
+        self.assertEqual(cs["logs.msi-failed"].detail,
+                         "logs/%s/%s-install/core.msi.log: line 1" % (self.name, self.RUN))
         self.assertIn("seen in the Revit session of", cs["logs.journal-assertion"].title)
         self.assertEqual(cs["logs.journal-assertion"].detail, "Journals/journal.0007.txt: line 1")
 
@@ -563,7 +564,8 @@ class Logs(Sandbox):
         took = time.monotonic() - t
         self.assertLess(took, 60, "doctor took %.1f s on a 1 GB wine.cxlog" % took)
         self.assertEqual(cs["logs.wine-crash"].status, "warn")
-        m = re.match(r"^logs/.*-debug: wine\.cxlog \((\d+) bytes\) (\d+) lines from line (\d+)$", cs["logs.read"].detail)
+        m = re.match(r"^logs/.*-debug: wine\.cxlog \((\d+) bytes\) (\d+) lines from line (\d+)$",
+                     cs["logs.read"].detail)
         size, lines, first = (int(x) for x in m.groups())
         self.assertGreater(size, 1 << 30)
         self.assertLessEqual(lines, dr.signatures.LINES_MAX)   # its end only

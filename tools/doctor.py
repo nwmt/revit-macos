@@ -1222,6 +1222,10 @@ def day(t, now=None):
     return f"{d.tm_mday} {MONTHS[d.tm_mon - 1]}" + ("" if d.tm_year == n.tm_year else f" {d.tm_year}")
 
 
+def count(n, word):
+    return f"{n} {word}" + ("" if n == 1 else "s")
+
+
 def logs_checks(f, b):
     """A warning for each signature seen in the newest logs, with the date of the newest session it was seen in and
     what to do; the counts of the info signatures and what was read are in the JSON only."""
@@ -1263,14 +1267,14 @@ def logs_checks(f, b):
         parts = []
         for d, files in folders.items():
             if len(files) > 3:
-                parts.append(f"{d}: {len(files)} logs, {sum(sc['lines'] for _, sc in files)} lines")
+                parts.append(f"{d}: {count(len(files), 'log')}, {count(sum(sc['lines'] for _, sc in files), 'line')}")
                 continue
             parts.append(f"{d}: " + ", ".join(
-                f"{n} ({sc['size']} bytes) {sc['lines']} lines" +
+                f"{n} ({sc['size']} bytes) {count(sc['lines'], 'line')}" +
                 (f" from line {sc['first_line']}" if sc["first_line"] > 1 else "") +
                 (", stopped at the line cap" if sc["cut"] else "") for n, sc in files))
-        out.append(Check("logs.read", "info", f"{len(lg['sources'])} log files read", detail="; ".join(parts),
-                         show=False))
+        out.append(Check("logs.read", "info", count(len(lg["sources"]), "log file") + " read",
+                         detail="; ".join(parts), show=False))
         if not seen:
             out.append(Check("logs.signatures", "ok", "no known failure in the newest logs"))
     elif not lg["skipped"]:

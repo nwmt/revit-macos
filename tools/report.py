@@ -10,8 +10,9 @@ build takes files by type and only the parts that help (never a whole log, nothi
 browser), puts placeholders such as <USER> where personal data was, then checks every part again with a gate that does
 not trust the replacing. Of a log (a failed step's or action's, an MSI log, stdout.log, wine.cxlog) it takes only the
 lines that report an error or a crash (its own list and the warn signatures of tools/signatures.py), each checked on
-its own, and the fields of a CrossOver header; of a Revit journal, its allowed lines. A part that fails the gate is left out and report.txt says so; when report.txt itself
-fails, there is no report (exit 1). The parts are made in a private temporary folder; only what passed is moved to DIR.
+its own, and the fields of a CrossOver header; of a Revit journal, its allowed lines. A part that fails the gate is
+left out and report.txt says so; when report.txt itself fails, there is no report (exit 1). The parts are made in a
+private temporary folder; only what passed is moved to DIR.
 --json prints {report_txt, report_zip, left_out[], summary, refused, hits}.
 
 gate checks finished files (a zip member by member; JSON by its string values too): each hit as rule, file, line,

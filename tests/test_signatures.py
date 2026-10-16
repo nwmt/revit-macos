@@ -52,7 +52,8 @@ SAMPLES = {
     "licensing-install-failed": ("the licensing installer returned 5",
                                  "LIC-INST-ERROR-1053. Starting Windows service during new installation failed: "
                                  "Calling system API failed, (error code 1053)"),
-    "msi-failed": ("Action ended 12:00:01: INSTALL. Return value 0.", "Action ended 12:00:01: INSTALL. Return value 1."),
+    "msi-failed": ("Action ended 12:00:01: INSTALL. Return value 0.",
+                   "Action ended 12:00:01: INSTALL. Return value 1."),
 }
 
 
@@ -162,7 +163,8 @@ class Scan(Base):
 
     def test_missing_function_named(self):
         r = sg.scan_file(self.log("stdout.log", [SAMPLES["wine-missing-function"][0]]), year=2026)
-        self.assertEqual(r["hits"]["wine-missing-function"]["details"], ["USER32.dll.SetDialogControlDpiChangeBehavior"])
+        self.assertEqual(r["hits"]["wine-missing-function"]["details"],
+                         ["USER32.dll.SetDialogControlDpiChangeBehavior"])
 
     def test_ecdsa_counted_once_a_check(self):
         fail, dup = SAMPLES["ecdsa-verify"]
@@ -211,7 +213,8 @@ class Scan(Base):
         self.assertGreater(r["start"], 0)
         lines += ["1.0:0030:0040:trace:module:load %s" % ("w" * 3000)] * 60 + [SAMPLES["assertion"][0]]
         r = sg.scan_file(self.log("long.cxlog", lines), lines_max=1000)   # long lines at the end: still its end
-        self.assertEqual((sorted(r["hits"]), r["first_line"], r["lines"], r["cut"]), (["assertion", "wine-crash"], 4062, 1000, None))
+        self.assertEqual((sorted(r["hits"]), r["first_line"], r["lines"], r["cut"]),
+                         (["assertion", "wine-crash"], 4062, 1000, None))
         r = sg.scan_file(p, lines_max=1000, from_start=True)
         self.assertEqual((list(r["hits"]), r["cut"], r["lines"]), (["assertion"], "lines", 1000))
         self.assertEqual(sorted(sg.scan_file(p)["hits"]), ["assertion", "wine-crash"])
