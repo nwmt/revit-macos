@@ -52,6 +52,23 @@ if ls -d "$DST".old.* >/dev/null 2>&1; then
   if lock_fd_ours && lock_flock9; then extracted_recover "$DST"
   else need "an unpack of Revit $YEAR was cut short" "run ./revit install $YEAR$SFX (it puts the unpacked files back in order first)"; fi
 fi
+# the Revit build this install lays down (for the run record, source.list and .source), and what in the installer this
+# project does not know yet. The unpacked folder counts unless it is unpacked again; used as it is (--reuse-extracted, or
+# no installer file left), its own record says which updates it has. Neither ever stops the install
+RUNLOG_BUILD=""
+if { [ -n "$kind" ] || [ -d "$DST" ]; } && command -v python3 >/dev/null; then
+  dsl="$SL"; ddist=""
+  if [ -d "$DST" ] && [ "${REVIT_REEXTRACT:-0}" != 1 ]; then
+    ddist="$(revit_dist "$YEAR")"
+    { [ "${REVIT_REUSE_EXTRACTED:-0}" = 1 ] || [ -z "$kind" ]; } && dsl="$DST/.source"
+  fi
+  RUNLOG_BUILD="$(python3 -I -B "$ROOT/tools/installer_drift.py" expected-build "$YEAR" "$dsl" ${ddist:+"$ddist"} 2>/dev/null)"
+  [ "$RUNLOG_BUILD" != unknown ] || RUNLOG_BUILD=""
+  python3 -I "$ROOT/tools/installer_source.py" build "$SL" "${RUNLOG_BUILD:-unknown}" >/dev/null 2>&1
+  while IFS=$'\t' read -r w_ t_ f_; do [ "$w_" = warn ] && warn "$t_" "$f_"; done \
+    < <(python3 -I -B "$ROOT/tools/installer_drift.py" check "$YEAR" "$dsl" ${ddist:+"$ddist"} --pkgs "$PKGS" 2>/dev/null)
+fi
+export RUNLOG_BUILD
 if [ -n "$rerr" ]; then   # an installer that cannot be read stops only an install that would read it
   if [ ! -d "$DST" ] || [ "${REVIT_REEXTRACT:-0}" = 1 ]; then
     need "cannot read the Revit $YEAR installer: $rerr" "download it again from your Autodesk Account"

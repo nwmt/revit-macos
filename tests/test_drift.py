@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Tests for tools/installer_drift.py (expected Revit build, installer check).
+"""Tests for tools/installer_drift.py (expected Revit build, installer check) and its use in install.sh's preflight.
 Run: python3 -I -m unittest discover -s tests -p 'test_*.py'
 Every manifest is generated here, with attributes in unusual orders and a namespace; a fake 7zz on PATH prints the
 member files the tests put next to each archive. Nothing from Autodesk or Microsoft is needed."""
@@ -331,6 +331,91 @@ class Source(Base):
         self.assertEqual(self.src_tool("build", sl, "unknown").returncode, 0)
         self.assertIsNone(json.loads(read(sl))["revit_build_expected"])
         self.assertEqual(self.src_tool("build", self.put("bad.json", "[]"), "1.2.3.4").returncode, 1)
+
+
+class Preflight(Base):
+    """install.sh in a sandbox (a copy of the repo, a fake HOME, CrossOver and tools; every action a stub)."""
+
+    def setUp(self):
+        super().setUp()
+        self.r = self.p("repo"); os.makedirs(self.r)
+        shutil.copy(os.path.join(REPO, "install.sh"), self.r)
+        shutil.copytree(os.path.join(REPO, "scripts"), os.path.join(self.r, "scripts"))
+        shutil.copytree(os.path.join(REPO, "tools"), os.path.join(self.r, "tools"), ignore=shutil.ignore_patterns("__pycache__"))
+        txt = read(os.path.join(self.r, "install.sh"))   # the Mac hardware checks pass in the sandbox
+        for a, b in (("sysctl -n hw.optional.arm64", "echo 1"), ("sysctl -n sysctl.proc_translated", "echo 0"),
+                     ("/usr/bin/arch -x86_64 /usr/bin/true", "true")):
+            txt = txt.replace(a, b)
+        write(os.path.join(self.r, "install.sh"), txt)
+        for t in ("winetricks", "cabextract"):
+            self.put(f"bin/{t}", "#!/bin/bash\nexit 0\n"); os.chmod(os.path.join(self.bin, t), 0o755)
+        self.put("cx/bin/cxbottle", "#!/bin/bash\nexit 0\n"); os.chmod(self.p("cx/bin/cxbottle"), 0o755)
+        self.put("repo/installers/redist/win7sp1/x64/msls31.dll", "")
+        rec = ('#!/bin/bash\nb="$(/usr/bin/perl -MJSON::PP -0 -ne \'print decode_json($_)->{revit_build_expected} // "null"\' '
+               '"$REVIT_SOURCE_LIST")"\necho "$(basename "$0") RUNLOG_BUILD=$RUNLOG_BUILD list=$b" >> "%s"\n') % self.p("calls")
+        for s in ("get-shims", "get-revit", "get-redist", "unpack-revit", "make-apps"):
+            self.put(f"repo/scripts/{s}.sh", rec)
+        self.put("repo/scripts/new-bottle.sh", rec + 'mkdir -p "$HOME/Library/Application Support/CrossOver/Bottles/$2/drive_c"\n')
+        self.put("repo/scripts/run-steps.sh", rec + 'd="$HOME/Library/Application Support/CrossOver/Bottles/$2/drive_c/Program Files/'
+                 'Autodesk/Revit $1"; mkdir -p "$d"; touch "$d/Revit.exe"\n')
+        for f in os.listdir(os.path.join(self.r, "scripts")):
+            if f.endswith(".sh"):
+                os.chmod(os.path.join(self.r, "scripts", f), 0o755)
+        self.env["REVIT_CX"] = self.p("cx")
+        prof = read(os.path.join(REPO, "scripts", "profiles", "2027.sh"))
+        self.pkgs = [(n, f"x64/P{i}/pkg.P{i}.xml") for i, n in enumerate(prof.split('PKGS="', 1)[1].split('"', 1)[0].split("|"))]
+
+    def install(self, *extra):
+        return subprocess.run(["/bin/bash", os.path.join(self.r, "install.sh"), "2027", "rvt2027-t"],
+                              capture_output=True, text=True, env=dict(self.env, **dict(extra)), cwd="/")
+
+    def create_installer(self, packages):
+        ci = "repo/installers/revit2027/Create_Installer_RVT_2027_3_English_WIN64.exe"; t = ci + ".tree/RVT_2027_en-US"
+        self.put(ci, "x")
+        self.put(ci + ".tree/collection.xml", "<Collection><BrowserImageUrl>https://dds.autodesk.com/x/RVT_2027_B_002_002.7z"
+                 "</BrowserImageUrl></Collection>")
+        self.put(f"{t}/setup.xml", setup_xml("27.0.4.412"))
+        self.put(f"{t}/manifest/app.RVT.xml", app_xml(packages))
+        self.put(f"{t}/setup_ext.xml", '<BundleExtension><Add><Packages><Package sourceDir="SGM" name="U"/></Packages></Add></BundleExtension>')
+        self.put(f"{t}/SGM/setup.xml", '<Package><Identity><BuildNumber>27.3.0.28</BuildNumber></Identity><Payload><File '
+                 'sizePacked="1" checkSum="ab">https://up1.autodesk.com/u/Revit_2027_3_0.exe</File></Payload></Package>')
+
+    def test_the_build_and_the_warnings(self):
+        self.create_installer(self.pkgs)
+        self.put("repo/installers/revit2027/update/Revit_2027_3_0.exe", "x")
+        self.put("repo/installers/revit2027/update/Revit_2027_3_0.exe.setup.xml",
+                 setup_xml("27.3.0.28", [("ASSISTANT", "x64/AI/pkg.AI.xml"), ("NEWPKG", "x64/NEW/pkg.NEW.xml")]))
+        r = self.install()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        out = r.stdout.splitlines()
+        i = next(i for i, l in enumerate(out) if "NEWPKG" in l)
+        self.assertTrue(out[i].startswith("  ! The update Revit_2027_3_0.exe adds packages"), out[i])
+        self.assertNotIn("ASSISTANT", out[i])
+        self.assertTrue(out[i + 1].startswith("      You can continue"), out[i + 1])
+        calls = read(self.p("calls"))
+        self.assertIn("unpack-revit.sh RUNLOG_BUILD=27.3.0.28 list=27.3.0.28", calls)
+        listed = [os.path.join(dp, "source.list") for dp, _, fs in os.walk(self.p("repo/logs")) if "source.list" in fs]
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(json.loads(read(listed[0]))["revit_build_expected"], "27.3.0.28")
+
+    def test_no_installer_adds_nothing(self):
+        r = self.install(("INSTALL_DRYRUN", "1"))
+        self.assertIn("no Revit 2027 installer", r.stdout)
+        self.assertNotIn("7zz", self.calls())
+        for word in ("adds packages", "AdskLicensing", "Create Installer files", "does not have packages"):
+            self.assertNotIn(word, r.stdout)
+
+    def test_an_unpacked_folder_used_as_it_is(self):
+        self.dist("repo/installers/extracted/revit2027", build="27.0.4.412", packages=[(n, p, "ADIX", []) for n, p in self.pkgs],
+                  licensing="17.0.0.16519", applied=["Revit_2027_3_0.exe"])
+        self.put("repo/installers/extracted/revit2027/.source",
+                 read(self.source([("update", "gone/update/Revit_2027_3_0.exe", "27.3.0.28", False)], name="dot.json")))
+        r = self.install(("REVIT_REUSE_EXTRACTED", "1"))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual([l for l in r.stdout.splitlines() if l.startswith("  ! ") and "GB free" not in l and "/etc/hosts" not in l],
+                         ["  ! AdskLicensing 17.0 is not tested yet."])
+        self.assertIn("  ! AdskLicensing 17.0 is not tested yet.\n      You can continue. If the install stops at licensing, report a problem.\n", r.stdout)
+        self.assertIn("unpack-revit.sh RUNLOG_BUILD=27.3.0.28", read(self.p("calls")))
 
 
 if __name__ == "__main__":
