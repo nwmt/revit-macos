@@ -111,5 +111,37 @@ $(cat "$T/calls" "$T/out")"; fi
   if [ "$RC" = 1 ] && grep -qF "Some steps failed" <<<"$OUT" && [ -d "$T/data/logs/rvt2024-t" ]; then ok "install.sh with DATA writes nothing into ROOT"
   else fail "install.sh with DATA writes nothing into ROOT" "rc=$RC
 $OUT"; fi
+  # ---- source decisions ----
+  srcprep() { prep; cp "$REPO/tools/installer_source.py" "$R/tools/"; mkdir -p "$R/installers/revit2024"
+    printf 'A' > "$R/installers/revit2024/RVT_2024_NA_win_db_002_002.zip"; }
+  srcrec() { # $1 = source_id to record in the unpacked folder ("" = the real one of the current files)
+    ( cd "$R" && python3 -I tools/installer_source.py resolve 2024 installers/revit2024 installers/revit2024 /dev/null "$T/s.json" >/dev/null \
+      && python3 -I tools/installer_source.py finalize "$T/s.json" "$T/h.tsv" >/dev/null )
+    [ -z "$1" ] || /usr/bin/perl -MJSON::PP -0 -i -pe '$_ = do { my $s = decode_json($_); $s->{source_id} = "'"$1"'"; encode_json($s) }' "$T/s.json"
+    cp "$T/s.json" "$R/installers/extracted/revit2024/.source"; }
+  srcprep; srcrec ""; inst 2024 rvt2024-t
+  if grep -qF "Some steps failed" <<<"$OUT" && ! grep -qF "unpacked from another installer" <<<"$OUT"; then ok "same source: the install goes on"
+  else fail "same source: the install goes on" "$OUT"; fi
+  srcprep; srcrec old; inst 2024 rvt2024-t
+  if [ "$RC" = 1 ] && grep -qF "was unpacked from another installer" <<<"$OUT" && ! grep -q "new-bottle" "$T/calls"; then ok "another source stops the install"
+  else fail "another source stops the install" "rc=$RC
+$OUT"; fi
+  srcprep; srcrec old; OUT="$(cd / && "${INST_ENV[@]}" REVIT_REUSE_EXTRACTED=1 /bin/bash "$R/install.sh" 2024 rvt2024-t 2>&1)"
+  grep -qF "Some steps failed" <<<"$OUT" && ok "--reuse-extracted goes on" || fail "--reuse-extracted goes on" "$OUT"
+  check_src_kept() { [ -f "$R/installers/extracted/revit2024/.source" ] || return 1; grep -q '"source_id": *"old"' "$R/installers/extracted/revit2024/.source" 2>/dev/null || /usr/bin/perl -MJSON::PP -0 -ne 'exit(decode_json($_)->{source_id} eq "old" ? 0 : 1)' "$R/installers/extracted/revit2024/.source"; }
+  check_src_kept && ok "--reuse-extracted keeps the old record" || fail "--reuse-extracted keeps the old record" ""
+  srcprep; srcrec old; mkdir -p "$BOTTLES/rvt2024-b/drive_c/Program Files/Autodesk/Revit 2024"
+  printf '[Bottle]\n"Description" = "Revit 2024"\n' > "$BOTTLES/rvt2024-b/cxbottle.conf"
+  OUT="$(cd / && "${INST_ENV[@]}" REVIT_REEXTRACT=1 /bin/bash "$R/install.sh" 2024 rvt2024-t 2>&1)"; RC=$?
+  if [ "$RC" = 1 ] && grep -qF "bottle rvt2024-b still uses it" <<<"$OUT" && [ -f "$R/installers/extracted/revit2024/setup.xml" ]; then ok "--reextract refuses while another bottle uses it"
+  else fail "--reextract refuses while another bottle uses it" "rc=$RC
+$OUT"; fi
+  srcprep; srcrec old; mv "$R/installers/extracted/revit2024" "$R/installers/extracted/revit2024.old.77"
+  sed -i '' 's|^echo "unpack-revit|echo "AGAIN=$REVIT_UNPACK_AGAIN unpack-revit|' "$R/scripts/unpack-revit.sh"
+  ( cd / && "${INST_ENV[@]}" ROOT="$R" HOME="$H" /bin/bash -c '. "$ROOT/scripts/lib/common.sh"; lock_take test; REVIT_REEXTRACT=1 /bin/bash "$ROOT/install.sh" 2024 rvt2024-t' ) > "$T/out" 2>&1
+  if [ -d "$R/installers/extracted/revit2024" ] && grep -qF "AGAIN=1 unpack-revit 2024" "$T/calls"; then ok "a cut-short swap is settled before the decision, and --reextract still unpacks again"
+  else fail "a cut-short swap is settled before the decision" "$(cat "$T/out" "$T/calls")"; fi
+  srcprep; rm -f "$R/installers/revit2024/"*; inst 2024 rvt2024-t
+  grep -qF "Some steps failed" <<<"$OUT" && ok "unpacked files without installer files: used as before" || fail "unpacked without installer files" "$OUT"
 
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]

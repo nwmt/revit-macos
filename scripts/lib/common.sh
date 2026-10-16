@@ -114,6 +114,14 @@ other_bottle_of_year() { # another bottle of this year still needs installers/ex
   done
   return 1
 }
+extracted_recover() { # $1 = an unpacked folder: a swap that was cut short (unpack-revit.sh) — only the backup there →
+  # it is the unpacked folder; both there → the new one won. Under the lock only
+  local old
+  for old in "$1".old.*; do
+    [ -d "$old" ] || continue
+    if [ -d "$1" ]; then rm -rf "$old"; else mv "$old" "$1" || die "!! cannot restore $old"; fi
+  done
+}
 stop_check() { [ "$STOP_REQUESTED" = 0 ] || { result_set result stopped; echo "Stopped." >&2; exit 1; }; }
 run_child() { # [--log <file>] <command…>: runs it in the background so that TERM/HUP/INT reach it as TERM (the
   # trap passes them on; a background child ignores INT itself), and waits until it has finished. With --log its output

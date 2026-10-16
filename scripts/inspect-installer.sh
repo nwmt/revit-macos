@@ -7,7 +7,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; . "$ROOT/scripts/lib/common.sh"
 YEAR="${1:-}"; [[ "$YEAR" =~ ^[0-9]{4}$ ]] || usage_die "Usage: scripts/inspect-installer.sh <year>"
 command -v 7zz >/dev/null || die "7zz required: brew install sevenzip"
-SRC="$(revit_installers "$YEAR")"; DST="$(revit_extracted "$YEAR")"
+SRC="$(revit_input "$YEAR")"; DST="$(revit_extracted "$YEAR")"
 OUTD="$(run_dir_new "revit$YEAR" inspect)" || die "Cannot create a log folder in $(tilde "$DATA/logs")."
 OUT="$OUTD/report.txt"
 exec > >(tee "$OUT" 7>&- 9>&-) 2>&1

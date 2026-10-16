@@ -23,23 +23,21 @@ load_profile() { # $1 = year: sets YEAR and the profile variables (scripts/profi
 }
 
 revit_dir_unix() { echo "$1/drive_c/Program Files/Autodesk/Revit $2"; }   # $1 = bottle path, $2 = year
-revit_installers() { echo "$DATA/installers/revit$1"; }                    # downloads (gitignored); may be a link: find -H
 revit_input()     { echo "$DATA/installers/revit$1"; }   # what the install reads: a folder, or a link to the user's
 revit_downloads() { # where downloads go: the input folder, unless it is a link to the user's folder (never written)
   if [ -L "$DATA/installers/revit$1" ]; then echo "$DATA/installers/revit$1-dl"; else echo "$DATA/installers/revit$1"; fi
 }
 revit_extracted()  { echo "$DATA/installers/extracted/revit$1"; }          # unpacked (gitignored)
-revit_dist() { # the installer root (setup.xml): the unpacked folder (2023+) or its one subfolder (multi-part 2020)
-  local d; d="$(revit_extracted "$1")"
-  [ -f "$d/setup.xml" ] || [ -f "$d/Setup.ini" ] || d="$(ls -d "$d"/*/ 2>/dev/null | head -1)"
-  echo "${d%/}"
+revit_dist_of() { # $1 = an unpacked folder → its installer root (setup.xml): the folder (2023+) or its one subfolder (2020)
+  local d="$1"; [ -f "$d/setup.xml" ] || [ -f "$d/Setup.ini" ] || d="$(ls -d "$d"/*/ 2>/dev/null | head -1)"; echo "${d%/}"
 }
-revit_main_installer() { # $1 = year: the installer's main file in installers/revit<year>/, not an update in update/:
-  # part 001 of a multi-part download (2020, the 2024 base), else the largest archive (in 2023+ downloads
-  # *_001_002.exe is a 16 MB bootstrapper and the payload is *_002_002.7z)
-  local src first; src="$(revit_installers "$1")"
-  first="$(find -H "$src" -maxdepth 2 -path "$src/update" -prune -o -type f -iname '*_001_0*.sfx.exe' -print 2>/dev/null | sort | head -1)"
-  if [ -n "$first" ]; then echo "$first"; return 0; fi
-  find -H "$src" -maxdepth 2 -path "$src/update" -prune -o -type f \( -iname '*.exe' -o -iname '*.iso' -o -iname '*.zip' -o -iname '*.7z' \) \
-    -exec stat -f '%z %N' {} + 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-
+revit_dist() { revit_dist_of "$(revit_extracted "$1")"; }
+revit_main_installer() { # $1 = year, $2 = source.json (resolved here when not given): the file to unpack
+  local sl="${2:-}" tmp=""
+  if [ -z "$sl" ]; then
+    tmp="$(mktemp "${TMPDIR:-/tmp}/revit-source.XXXXXX")"; sl="$tmp"
+    python3 -I "$ROOT/tools/installer_source.py" resolve "$1" "$(revit_input "$1")" "$(revit_downloads "$1")" "$ROOT/installers/CHECKSUMS.txt" "$sl" >/dev/null 2>&1
+  fi
+  /usr/bin/perl -MJSON::PP -0 -ne 'my $s = eval { decode_json($_) } or exit 0; print "$_->{path}\n" for grep { $_->{extract} } @{$s->{files}}' "$sl"
+  [ -z "$tmp" ] || rm -f "$tmp"
 }

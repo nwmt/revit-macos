@@ -508,9 +508,6 @@ OUT="$(cd / && "${SANDBOX_ENV[@]}" REVIT_LAUNCH_WAIT=3 /bin/bash "$R/scripts/lau
 expect "launch.sh starts Revit and returns once it runs" 0 "Revit 2024 started (backend default)"
 in_repo 'lock_free && echo free'; expect "launch.sh: the Revit it started does not hold the lock" 0 "free"
 sleep 4
-reset; mkdir -p "$R/installers/revit2025/update"; touch "$R/installers/revit2025/update/Revit_2025_5_0.exe"
-python3 -I -c 'import sys, zipfile; z = zipfile.ZipFile(sys.argv[1], "w"); z.writestr("setup.xml", "<Setup/>"); z.close()' "$R/installers/revit2025/RVT_2025_NA_win_db_002_002.zip"
-in_repo 'revit_main_installer 2025'; expect "the main installer is not an update" 0 "RVT_2025_NA_win_db_002_002.zip"
 
 # ---- events ----
 reset; in_repo 'json_str "a\"b\\c	t
@@ -538,7 +535,7 @@ check "no event reaches the terminal" eval '! grep -q "\"event\"" <<<"$OUT"'
 # ---- data folder ----
 reset; in_repo 'echo "$DATA"'; expect "DATA defaults to ROOT" 0 "$R"
 reset; OUT="$(cd / && "${SANDBOX_ENV[@]}" ROOT="$R" REVIT_DATA="$T/data" /bin/bash -c '. "$ROOT/scripts/lib/common.sh"
-  run_dir_new rvt2024-t steps; revit_installers 2024; revit_extracted 2024' 2>&1)"; RC=$?
+  run_dir_new rvt2024-t steps; revit_input 2024; revit_extracted 2024' 2>&1)"; RC=$?
 expect "run folders live in DATA" 0 "$T/data/logs/rvt2024-t/"
 check "installers live in DATA" grep -qx "$T/data/installers/revit2024" <<<"$OUT"
 check "unpacked files live in DATA" grep -qx "$T/data/installers/extracted/revit2024" <<<"$OUT"
@@ -569,5 +566,89 @@ reset; mkdir -p "$T/shims"; cp -R "$R/build/." "$T/shims/"; printf '#!/bin/bash\
 OUT="$(cd / && "${SANDBOX_ENV[@]}" PATH="$T:$PATH" SHIMS_DIR="$T/shims" REVIT_BUNDLED=1 /bin/bash "$R/scripts/get-shims.sh" 2>&1)"; RC=$?
 expect "bundled: get-shims accepts the bundled release" 0 "prebuilt shims"
 check "bundled: get-shims never calls git" not_called "GIT"
+
+# ---- source: download and unpack ----
+mkzip() { python3 -I -c 'import sys, zipfile; z = zipfile.ZipFile(sys.argv[1], "w")
+for a in sys.argv[2:]: n, c = a.split("=", 1); z.writestr(n, c)
+z.close()' "$@"; }
+srv_curl() { # a curl that serves $T/srv/<basename of the URL>: -I gives Content-Length, -o writes the file
+  mkdir -p "$T/srv"; cat > "$T/curl" <<EOF
+#!/bin/bash
+out=""; head=0; for a in "\$@"; do case "\$a" in -I|-fsSIL) head=1 ;; esac; done
+while [ \$# -gt 0 ]; do case "\$1" in -o) out="\$2"; shift ;; https://*) url="\$1" ;; esac; shift; done
+f="$T/srv/\$(basename "\$url")"; [ -f "\$f" ] || exit 22
+if [ \$head = 1 ]; then printf 'HTTP/1.1 200 OK\r\nContent-Length: %s\r\n\r\n' "\$(stat -f %z "\$f")"; exit 0; fi
+cp "\$f" "\$out"
+EOF
+  chmod +x "$T/curl"; }
+reset; srv_curl; D="$T/my data"; mkdir -p "$D/installers/revit2025" "$T/user"
+mkzip "$T/srv/RVT_2025_B_002_002.7z" "setup.xml=<Setup/>" "x64/a.txt=1"
+mkzip "$T/user/Create_Installer_RVT_2025_5_English_WIN64.exe" "collection.xml=<C><BrowserImageUrl>https://dds.autodesk.com/x/RVT_2025_B_001_002.exe;https://dds.autodesk.com/x/RVT_2025_B_002_002.7z</BrowserImageUrl></C>"
+printf 'MZ-downloader' > "$T/srv/RVT_2025_B_001_002.exe"
+rmdir "$D/installers/revit2025"; ln -s "$T/user" "$D/installers/revit2025"; chmod a-w "$T/user"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" PATH="$T:$PATH" REVIT_DATA="$D" /bin/bash "$R/scripts/get-revit.sh" 2025 2>&1)"; RC=$?
+expect "get-revit downloads into the downloads folder, paths with spaces" 0 "installer ready"
+check "the base is in revit2025-dl" test -f "$D/installers/revit2025-dl/RVT_2025_B_002_002.7z"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" PATH="$T:$PATH" REVIT_DATA="$D" /bin/bash "$R/scripts/unpack-revit.sh" 2025 2>&1)"; RC=$?
+chmod u+w "$T/user"
+expect "unpack takes the payload, not the downloader" 0 "unpacking RVT_2025_B_002_002.7z"
+check "unpack writes .source with a source_id" eval 'test -f "$D/installers/extracted/revit2025/.source" && /usr/bin/perl -MJSON::PP -0 -ne "exit(decode_json(\$_)->{source_id} ? 0 : 1)" "$D/installers/extracted/revit2025/.source"'
+check "the user's installer folder is not written" eval '[ "$(ls -A "$T/user")" = "Create_Installer_RVT_2025_5_English_WIN64.exe" ]'
+first="$(/usr/bin/perl -MJSON::PP -0 -ne 'print decode_json($_)->{source_id}' "$D/installers/extracted/revit2025/.source")"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" PATH="$T:$PATH" REVIT_DATA="$D" /bin/bash "$R/scripts/get-revit.sh" 2025 2>&1)"
+check "a second download run: nothing to fetch" grep -q "already here" <<<"$OUT"
+again="$(cd "$D" && python3 -I "$R/tools/installer_source.py" resolve 2025 installers/revit2025 installers/revit2025-dl /dev/null "$T/s2.json" >/dev/null; python3 -I "$R/tools/installer_source.py" finalize "$T/s2.json" "$T/h2.tsv" >/dev/null; /usr/bin/perl -MJSON::PP -0 -ne 'print decode_json($_)->{source_id}' "$T/s2.json")"
+check "the source_id is stable across runs (unknown base sum)" test "$first" = "$again"
+reset; srv_curl; D="$T/my data"; mkdir -p "$D/installers" "$T/user"
+mkzip "$T/srv/RVT_2025_B_002_002.7z" "setup.xml=<Setup/>" "x64/a.txt=1"; head -c 10 "$T/srv/RVT_2025_B_002_002.7z" > "$T/user/RVT_2025_B_002_002.7z"
+mkzip "$T/user/Create_Installer_RVT_2025_5_English_WIN64.exe" "collection.xml=<C><BrowserImageUrl>https://dds.autodesk.com/x/RVT_2025_B_002_002.7z</BrowserImageUrl></C>"
+ln -s "$T/user" "$D/installers/revit2025"; before="$(ls -l "$T/user")"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" PATH="$T:$PATH" REVIT_DATA="$D" /bin/bash "$R/scripts/get-revit.sh" 2025 2>&1)"; RC=$?
+expect "an incomplete file in the user's folder is refused, not resumed there" 1 "is incomplete"
+check "the user's folder is exactly as it was" test "$(ls -l "$T/user")" = "$before"
+reset; mkdir -p "$R/installers/revit2023" "$R/installers/extracted/revit2023"; echo '<Setup/>' > "$R/installers/extracted/revit2023/setup.xml"
+echo old > "$R/installers/extracted/revit2023/marker"; touch "$R/installers/revit2023/Revit_2023_G1_dlm_001_002.sfx.exe"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" REVIT_UNPACK_AGAIN=1 /bin/bash "$R/scripts/unpack-revit.sh" 2023 2>&1)"; RC=$?
+expect "unpack again with an incomplete installer refuses" 1 "not complete"
+check "unpack again: the old unpacked files are kept" test -f "$R/installers/extracted/revit2023/marker"
+reset; mkdir -p "$R/installers/extracted/revit2023.old.123"; echo '<Setup/>' > "$R/installers/extracted/revit2023.old.123/setup.xml"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" /bin/bash "$R/scripts/unpack-revit.sh" 2023 2>&1)"; RC=$?
+check "a swap cut short after the backup: the backup comes back" test -f "$R/installers/extracted/revit2023/setup.xml"
+reset; mkdir -p "$R/installers/extracted/revit2023" "$R/installers/extracted/revit2023.old.9"; echo '<Setup/>' > "$R/installers/extracted/revit2023/setup.xml"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" /bin/bash "$R/scripts/unpack-revit.sh" 2023 2>&1)"
+check "a swap cut short after the publish: the backup goes" test ! -e "$R/installers/extracted/revit2023.old.9"
+reset; mkdir -p "$R/installers/revit2025/update" "$R/installers/extracted/revit2025"; echo '<Setup/>' > "$R/installers/extracted/revit2025/setup.xml"
+mkzip "$R/installers/revit2025/RVT_2025_NA_win_db_002_002.zip" "setup.xml=<Setup/>"; mkzip "$R/installers/revit2025/update/U.exe" "x64/p/new.txt=1"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" REVIT_REUSE_EXTRACTED=1 /bin/bash "$R/scripts/unpack-revit.sh" 2025 2>&1)"
+check "--reuse-extracted leaves an unrecorded unpacked folder exactly as it is" test ! -e "$R/installers/extracted/revit2025/x64/p/new.txt"
+reset; mkdir -p "$R/installers/revit2025/update" "$R/installers/revit2025-dl/update" "$R/installers/extracted/revit2025"; echo '<Setup/>' > "$R/installers/extracted/revit2025/setup.xml"
+mkzip "$R/installers/revit2025/RVT_2025_NA_win_db_002_002.zip" "setup.xml=<Setup/>"
+mkzip "$R/installers/revit2025/update/U.exe" "x64/p/one.txt=1"; mkzip "$R/installers/revit2025-dl/update/U.exe" "x64/p/two.txt=2"
+mv "$R/installers/revit2025" "$T/user25"; ln -s "$T/user25" "$R/installers/revit2025"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" /bin/bash "$R/scripts/unpack-revit.sh" 2025 2>&1)"; RC=$?
+expect "an unrecorded unpacked folder: two different copies of an update stop it" 1 "two different updates named U.exe"
+check "an unrecorded unpacked folder: no update was laid on" test ! -e "$R/installers/extracted/revit2025/x64/p/one.txt"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" REVIT_REUSE_EXTRACTED=1 /bin/bash "$R/scripts/unpack-revit.sh" 2025 2>&1)"; RC=$?
+expect "--reuse-extracted does not care about broken or conflicting installer files" 0 "ready"
+reset; mkdir -p "$R/installers/revit2025/update" "$R/installers/extracted/revit2025"; echo '<Setup/>' > "$R/installers/extracted/revit2025/setup.xml"
+mkzip "$R/installers/revit2025/update/U.exe" "x64/p/up.txt=1"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" /bin/bash "$R/scripts/unpack-revit.sh" 2025 2>&1)"; RC=$?
+expect "base gone, an update left: it is laid on the unrecorded unpacked folder, as today" 0 "applying update U.exe"
+check "base gone, an update left: its files are there" test -f "$R/installers/extracted/revit2025/x64/p/up.txt"
+reset; srv_curl; sed -i '' 's/^cp /sleep 3; cp /' "$T/curl"; mkdir -p "$R/installers/revit2025"
+mkzip "$T/srv/RVT_2025_B_002_002.7z" "setup.xml=<Setup/>"
+mkzip "$R/installers/revit2025/Create_Installer_RVT_2025_5_English_WIN64.exe" "collection.xml=<C><BrowserImageUrl>https://dds.autodesk.com/x/RVT_2025_B_002_002.7z</BrowserImageUrl></C>"
+OUT="$(cd / && exec 7>"$T/ev" && "${SANDBOX_ENV[@]}" PATH="$T:$PATH" REVIT_EVENTS_FD=7 /bin/bash "$R/scripts/get-revit.sh" 2025 2>&1)"
+check "progress events while downloading" grep -q '"event":"progress"' "$T/ev"
+check "progress: no event reaches the terminal" eval '! grep -q "\"event\"" <<<"$OUT"'
+reset; srv_curl; sed -i '' 's/^cp /sleep 3; cp /' "$T/curl"; mkdir -p "$R/installers/revit2025"
+mkzip "$T/srv/RVT_2025_B_002_002.7z" "setup.xml=<Setup/>"
+mkzip "$R/installers/revit2025/Create_Installer_RVT_2025_5_English_WIN64.exe" "collection.xml=<C><BrowserImageUrl>https://dds.autodesk.com/x/RVT_2025_B_002_002.7z</BrowserImageUrl></C>"
+(cd / && exec 7>"$T/ev" && exec "${SANDBOX_ENV[@]}" PATH="$T:$PATH" REVIT_EVENTS_FD=7 /bin/bash "$R/scripts/get-revit.sh" 2025) >/dev/null 2>&1 &
+gp=$!; sleep 1; kill -9 "$gp"; wait "$gp" 2>/dev/null; sleep 3
+check "no poller outlives the downloader" eval '! pgrep -f "sand box/repo/scripts/get-revit.sh" >/dev/null'
+reset; mkdir -p "$R/installers/revit2025/update"; touch "$R/installers/revit2025/update/Revit_2025_5_0.exe"
+mkzip "$R/installers/revit2025/RVT_2025_NA_win_db_002_002.zip" "setup.xml=<Setup/>"
+in_repo 'revit_main_installer 2025'; expect "the main installer is not an update" 0 "RVT_2025_NA_win_db_002_002.zip"
 
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]

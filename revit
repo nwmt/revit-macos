@@ -189,6 +189,9 @@ docs_note() { # the bottle's Documents is normally a link to the Mac's Documents
   fi
   echo "  Everything else on the bottle's C: drive is deleted."
 }
+export_source_flags() { # --reuse-extracted / --reextract for install.sh and the unpacker
+  [ "$REUSE_X" = 1 ] && export REVIT_REUSE_EXTRACTED=1; [ "$REEXTRACT" = 1 ] && export REVIT_REEXTRACT=1; return 0
+}
 extracted_plan() { # sets X, DROP_X (1 = remove deletes the unpacked files) and KEEP_X (why they stay)
   X="$(revit_extracted "$YEAR")"; DROP_X=0; KEEP_X=""
   [ -d "$X" ] || return 0
@@ -197,7 +200,7 @@ extracted_plan() { # sets X, DROP_X (1 = remove deletes the unpacked files) and 
 
 # ---- run the command ----
 case "$CMD" in
-  install) not_busy; run_ctx_new; sup_traps; lock_take --no-trap "install.sh $YEAR $NAME"; supervise "$ROOT/install.sh" "$YEAR" "$NAME" ;;
+  install) not_busy; run_ctx_new; sup_traps; lock_take --no-trap "install.sh $YEAR $NAME"; export_source_flags; supervise "$ROOT/install.sh" "$YEAR" "$NAME" ;;
   check)   export INSTALL_DRYRUN=1; run_ctx_new; sup_traps; supervise "$ROOT/install.sh" "$YEAR" "$NAME" ;;
   addins)
     [ ${#ADDIN_STEPS[@]} -gt 0 ] || die "The add-in script is not set up for Revit $YEAR yet."
@@ -240,7 +243,7 @@ case "$CMD" in
     confirm
     run_ctx_new; sup_traps; lock_take --no-trap "./revit rebuild $YEAR $NAME"
     bottle_guard must_exist "$YEAR" "$NAME"   # again: the bottle may have changed, or Revit started, while the user read
-    export CX_RECREATE=1; supervise "$ROOT/install.sh" "$YEAR" "$NAME" ;;
+    export CX_RECREATE=1; export_source_flags; supervise "$ROOT/install.sh" "$YEAR" "$NAME" ;;
   link-installer)
     [ -n "$FOLDER" ] && [ -d "$FOLDER" ] || die "Which folder? Example: ./revit link-installer $YEAR ~/Downloads/Revit$YEAR"
     not_busy; lock_take "./revit link-installer $YEAR"

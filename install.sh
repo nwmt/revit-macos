@@ -33,22 +33,58 @@ fi
 for t in 7zz:sevenzip winetricks:winetricks cabextract:cabextract python3:python3; do
   command -v "${t%%:*}" >/dev/null || need "${t%%:*} not found" "brew install ${t#*:}"
 done
-SRC="$(revit_installers "$YEAR")"; DST="$(revit_extracted "$YEAR")"
-# Autodesk Account now gives only "Create Installer": scripts/get-revit.sh downloads the full installer it points to
-GET=""; [ ! -d "$DST" ] && [ -n "$(find -H "$SRC" -maxdepth 1 -type f -iname "Create_Installer_RVT_${YEAR}_*.exe" 2>/dev/null | head -1)" ] && GET=1
-if [ ! -d "$DST" ] && [ -z "$(find -H "$SRC" -maxdepth 2 -type f \( -iname '*.exe' -o -iname '*.7z' -o -iname '*.zip' -o -iname '*.iso' \) 2>/dev/null | head -1)" ]; then
-  need "no Revit $YEAR installer in installers/revit$YEAR/" "download it from your Autodesk Account, see installers/README.md"
+SRC="$(revit_input "$YEAR")"; DST="$(revit_extracted "$YEAR")"; DLD="$(revit_downloads "$YEAR")"
+SL="$(mktemp "${TMPDIR:-/tmp}/revit-source.XXXXXX")"; trap 'rm -f "$SL"' EXIT
+kind=""; complete=0; GET=""; UNPACK_AGAIN=""; rrc=""
+if command -v 7zz >/dev/null && command -v python3 >/dev/null; then   # else the tools check above already said so
+  resolved="$(python3 -I "$ROOT/tools/installer_source.py" resolve "$YEAR" "$SRC" "$DLD" "$ROOT/installers/CHECKSUMS.txt" "$SL" 2>"$SL.err")"; rrc=$?
+  case $rrc in
+    0) kind="$(sed -n 's/^kind=\([^ ]*\).*/\1/p' <<<"$resolved")"; complete="$(sed -n 's/.*complete=//p' <<<"$resolved")" ;;
+    3) ;;   # nothing there
+    *) need "cannot read the Revit $YEAR installer: $(head -1 "$SL.err")" "download it again from your Autodesk Account" ;;
+  esac
+  rm -f "$SL.err"
 fi
-part1=$(find -H "$SRC" -maxdepth 2 -type f -iname '*_001_0*.sfx.exe' 2>/dev/null | head -1)
-if [ ! -d "$DST" ] && [ -z "$GET" ] && [ -n "$part1" ]; then # multi-part download (2020, 2023): every part 001…NNN
-  total=$(basename "$part1" | sed -E 's/.*_001_0*([0-9]+)\.sfx\.exe$/\1/'); stem="${part1%_001_*}"; tot3=$(printf '%03d' "$total")
-  gone=""; for p in $(seq -f '%03g' 1 "$total"); do [ -f "${stem}_${p}_${tot3}.sfx.exe" ] || gone+=" $p"; done
-  [ -z "$gone" ] || need "installer parts missing in installers/revit$YEAR/:$gone (of $tot3)" "download all parts from your Autodesk Account"
+problem="$(/usr/bin/perl -MJSON::PP -0 -ne 'print eval { decode_json($_)->{problem} } // ""' "$SL" 2>/dev/null)"
+# an unpack that was cut short while swapping folders: settle that first, so the decisions below see the real state.
+# It changes files: only under the lock (./revit holds it for install.sh); a dry run only reports it
+if ls -d "$DST".old.* >/dev/null 2>&1; then
+  if lock_fd_ours && lock_flock9; then extracted_recover "$DST"
+  else need "an unpack of Revit $YEAR was cut short" "run ./revit install $YEAR$SFX (it puts the unpacked files back in order first)"; fi
 fi
-if [ ! -d "$DST" ] && [ -z "$GET" ] && [ -z "$part1" ] && [ -z "$(find -H "$SRC" -maxdepth 2 -type f -iname '*.7z' 2>/dev/null | head -1)" ]; then
-  need "no .7z payload in installers/revit$YEAR/ (the small .exe alone is only the downloader)" \
-       "download both files of the Autodesk download, see versions/$YEAR.md"
+if [ -d "$DST" ]; then
+  if [ "${REVIT_REEXTRACT:-0}" = 1 ]; then
+    if o="$(other_bottle_of_year)"; then
+      result_set result in_use
+      need "installers/extracted/revit$YEAR is in use" "bottle $o still uses it; remove that bottle first, or install from the unpacked files with --reuse-extracted"
+    elif [ "$complete" = 1 ] || [ "$kind" = create-installer ]; then
+      UNPACK_AGAIN=1; [ "$kind" = create-installer ] && GET=1
+    else need "the Revit $YEAR installer is not complete" "--reextract needs every installer file in installers/revit$YEAR/"; fi
+  elif [ "${REVIT_REUSE_EXTRACTED:-0}" != 1 ] && [ -f "$DST/.source" ] && [ -n "$kind" ]; then
+    cmp_="$(python3 -I "$ROOT/tools/installer_source.py" compare "$SL" "$DST/.source" "$DATA/installers/.hashes" 2>&1)" \
+      || need "cannot check installers/extracted/revit$YEAR against the installer: $cmp_" "see docs/troubleshooting.md"
+    case "$cmp_" in
+      mismatch*) result_set result source_mismatch
+        need "installers/extracted/revit$YEAR was unpacked from another installer (${cmp_#mismatch })" \
+             "./revit install $YEAR$SFX --reuse-extracted to use it anyway, or --reextract to unpack this installer" ;;
+    esac
+  fi
+else
+  [ "$kind" = create-installer ] && GET=1   # as today: the downloader runs, and says "already here" for what is
+  if [ -z "$kind" ] && [ "${rrc:-1}" = 3 ]; then   # without 7zz/python3 the tools check has said so already
+    need "no Revit $YEAR installer in installers/revit$YEAR/" "download it from your Autodesk Account, see installers/README.md"
+    need "no .7z payload in installers/revit$YEAR/ (the small .exe alone is only the downloader)" \
+         "download both files of the Autodesk download, see versions/$YEAR.md"   # today's preflight says both
+  elif [ "$kind" = parts ] && [ "$complete" != 1 ]; then
+    gone="$(/usr/bin/perl -MJSON::PP -0 -ne 'for (@{decode_json($_)->{files}}) { print " $1" if !-f $_->{path} && $_->{path} =~ /_(\d{3})_\d{3}\.sfx\.exe$/i }' "$SL")"
+    tot3="$(/usr/bin/perl -MJSON::PP -0 -ne 'my ($f) = @{decode_json($_)->{files}}; print $1 if $f->{path} =~ /_\d{3}_(\d{3})\.sfx\.exe$/i' "$SL")"
+    need "installer parts missing in installers/revit$YEAR/:$gone (of $tot3)" "download all parts from your Autodesk Account"
+  elif [ "$problem" = payload ] || [ "$kind" = updates-only ]; then   # today: an update/*.exe alone gets this too
+    need "no .7z payload in installers/revit$YEAR/ (the small .exe alone is only the downloader)" \
+         "download both files of the Autodesk download, see versions/$YEAR.md"
+  fi
 fi
+export REVIT_SOURCE_LIST="$SL" REVIT_UNPACK_AGAIN="$UNPACK_AGAIN" REVIT_FOR_BOTTLE="$BOTTLE"
 [ -f "$DATA/installers/redist/win7sp1/x64/msls31.dll" ] || need "installers/redist/win7sp1/x64/msls31.dll missing" \
   "copy C:\\Windows\\System32\\msls31.dll from a licensed Windows 7/10 x64 PC, see installers/README.md"
 if [ -d "$B" ] && [ "${CX_RECREATE:-0}" != 1 ]; then
@@ -88,6 +124,7 @@ bottle_guard allow_missing "$YEAR" "$BOTTLE"
 [ ! -d "$B" ] || [ "${CX_RECREATE:-0}" = 1 ] || die "Bottle $BOTTLE already exists. To rebuild it: ./revit rebuild $YEAR$SFX"
 RUN_DIR="$(run_dir_new "$BOTTLE" install)" || die "Cannot create a log folder in $(tilde "$DATA/logs")."
 export RUN_DIR
+cp "$SL" "$RUN_DIR/source.list"; export REVIT_SOURCE_LIST="$RUN_DIR/source.list"
 result_set log_dir "$RUN_DIR"; export INSTALL_PARENT=1   # the runner leaves the final result to this script
 echo; echo "Logs: $(tilde "$RUN_DIR")"
 t0=$SECONDS; i=1
