@@ -212,7 +212,7 @@ hold() { # $1 = a file to hold open, $2 = a word for its command line, $3 = fold
   PIDS="$PIDS $!"; sleep 0.3
 }
 SB_ENV=(env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" REVIT_CX_TMP="$T/cxtmp" PATH="$T/bin:$PATH" SMOKE_TIMEOUT=20
-  SMOKE_START_WAIT=3 SMOKE_STALL=2 SMOKE_WORKER_WAIT=1 SMOKE_POLL=0.1 SMOKE_PREP_TIMEOUT=5)
+  SMOKE_START_WAIT=4 SMOKE_STALL=3 SMOKE_WORKER_WAIT=1 SMOKE_POLL=0.1 SMOKE_PREP_TIMEOUT=5)   # watchdogs that fire: XENV
 fresh() { : > "$CALLS"; rm -f "$T/first-conf" "$T/first-marker" "$T/first-ls" "$T/first-half" "$T/revit-started"; }
 ran() { RUN="$(ls -td "$R/logs/"*/*-test 2>/dev/null | head -1)"; RES="$RUN/result.json"; }
 XENV=()   # VAR=value pairs for the next smoke only
@@ -336,7 +336,7 @@ reset; rm "$BOTTLES/rvt2027-a/drive_c/ProgramData/Autodesk/RVT 2027/Templates/En
 smoke 2027 rvt2027-a --scenarios core,reopen
 expect "no project template: core fails, reopen is skipped" 1 "core    FAILED     no project template of Revit 2027 in the bottle"
 check "no project template: Revit never started" not_called "Revit.exe]"
-reset; echo dialog > "$T/mode"; smoke 2027 rvt2027-a --scenarios start
+reset; echo dialog > "$T/mode"; XENV=(SMOKE_STALL=2); smoke 2027 rvt2027-a --scenarios start
 expect "a dialog: exit 1 with its id" 1 "Revit stopped at a dialog (TaskDialog_Synthetic_Question)"
 check "dialog: Revit ended with taskkill in the copy" called "wine [--bottle] [rvt2027-a.test] [taskkill] [/f] [/im] [Revit.exe]"
 check "dialog: then wineserver -k of the copy" called "wineserver -k WINEPREFIX=$BOTTLES/rvt2027-a.test"
