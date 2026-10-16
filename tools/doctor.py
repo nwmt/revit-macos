@@ -1002,10 +1002,10 @@ def file_check(f, b, step, sp):
     if not fi.get("exists"):
         return Check(cid, "fail", f"{name} {loc} is missing; without it {symptom}", detail=f"step {step}",
                      fix=rebuild(f), doc=DOC["start-over"])
+    if fi.get("marker") == BUILTIN.decode():   # Wine's own stub: the fix never got there, or was replaced
+        return Check(cid, "fail", f"{name} {loc} is Wine's own, not the fix; without the fix {symptom}",
+                     detail=f"step {step}", fix=rebuild(f), doc=DOC["start-over"])
     if kind == "present":
-        if fi.get("marker") == BUILTIN.decode():
-            return Check(cid, "fail", f"{name} {loc} is Wine's own, not the fix; without the fix {symptom}",
-                         detail=f"step {step}", fix=rebuild(f), doc=DOC["start-over"])
         return Check(cid, "ok", f"{name} {loc} is in place")
     if kind == "shim":
         si = b["shims"].get(sp[1]) or {}
@@ -1021,9 +1021,6 @@ def file_check(f, b, step, sp):
                      detail=f"shim {sp[1]}: {fi.get('sha256')} in the bottle, {si['sha256']} here",
                      fix=rebuild(f), doc=DOC["start-over"])
     want = (f["cx"].get("pemark") or {}).get(sp[1])   # pemark
-    if fi.get("marker") == BUILTIN.decode():
-        return Check(cid, "fail", f"{name} {loc} is Wine's own, not the fix; without the fix {symptom}",
-                     detail=f"step {step}", fix=rebuild(f), doc=DOC["start-over"])
     if not want:
         return Check(cid, "info", f"{name} {loc}: not compared, CrossOver's own file could not be read", show=False)
     if fi.get("sha256") == want:
@@ -1088,16 +1085,20 @@ def fixes_checks(f, b):
     ran = ran_steps(b)
     if ran is not None:
         steps = [s for s in steps if s in ran] + sorted(s for s in ran if s in FIXES and s not in steps)
-    out, seen = [], set()
+    # one check per file, where the first step names it, with the strongest spec any step gives (richedit puts
+    # msls31.dll in place, tlbpin replaces it with our shim: the shim's comparison is the one that tells)
+    best, order = {}, []
     for step, sp in specs(f["profile"], f["year"], steps):
-        key = spec_place(sp)[1] if len(sp) > 1 else sp[0]   # one check per file, under the first step that names it
-        if key in seen:
-            continue
-        seen.add(key)
-        if sp[0] in ("webview2", "dotnet", "netfx"):
-            out.append(runtime_check(f, b, step, sp[0]))
-        else:
-            out.append(file_check(f, b, step, sp))
+        key = spec_place(sp)[1] if len(sp) > 1 else sp[0]
+        if key not in best:
+            order.append(key)
+        if key not in best or (sp[0] in ("shim", "pemark") and best[key][1][0] not in ("shim", "pemark")):
+            best[key] = (step, sp)
+    out = []
+    for key in order:
+        step, sp = best[key]
+        out.append(runtime_check(f, b, step, sp[0]) if sp[0] in ("webview2", "dotnet", "netfx") else
+                   file_check(f, b, step, sp))
     return out
 
 

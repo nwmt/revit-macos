@@ -197,8 +197,9 @@ class Bottle(Sandbox):
         ids = self.by_id(cs)
         for i in ("bottle.exists", "bottle.year", "bottle.registry", "bottle.revit", "bottle.documents",
                   "bottle.app.revit", "bottle.app.signin", "bottle.activity", "install.last", "install.steps",
-                  "install.build", "crossover.since-install", "fixes.d3d9dxvk.system32.d3d9.dll", "fixes.d3d9dxvk.revit.d3d9.dll",
-                  "fixes.warpshim.system32.version_orig.dll", "fixes.webview2", "fixes.dotnet", "addins.none"):
+                  "install.build", "crossover.since-install", "fixes.d3d9dxvk.system32.d3d9.dll",
+                  "fixes.d3d9dxvk.revit.d3d9.dll", "fixes.warpshim.system32.version_orig.dll", "fixes.webview2",
+                  "fixes.dotnet", "addins.none"):
             self.assertEqual(ids[i].status, "ok", i)
         self.assertNotIn("fixes.netfx", ids)   # a .NET year
         self.assertEqual(dr.render(cs)[-1], "  ✓ no problems found (%d checks)" % len(cs))
@@ -241,6 +242,15 @@ class Bottle(Sandbox):
         self.write(os.path.join(self.b, dr.S32, "riched20.dll"), builtin("wine stub"))
         self.assertEqual(self.problems(self.checks()), [("fixes.d3d9dxvk.system32.d3d9.dll", "fail"),
                                                         ("fixes.richedit.system32.riched20.dll", "fail")])
+
+    def test_a_file_two_steps_name_gets_the_stronger_check(self):
+        ids = self.by_id(self.checks())   # richedit puts msls31.dll in place first, tlbpin replaces it with the shim
+        self.assertIn("fixes.tlbpin.system32.msls31.dll", ids)
+        self.assertNotIn("fixes.richedit.system32.msls31.dll", ids)
+        self.write(os.path.join(self.b, dr.S32, "msls31.dll"), "ms msls31.dll")   # richedit ran, tlbpin did not
+        self.assertEqual(self.problems(self.checks()), [("fixes.tlbpin.system32.msls31.dll", "warn")])
+        self.write(os.path.join(self.b, dr.S32, "msls31.dll"), builtin("wine stub"))
+        self.assertEqual(self.problems(self.checks()), [("fixes.tlbpin.system32.msls31.dll", "fail")])
 
     def test_files_that_must_not_be_there(self):
         rv = os.path.join(self.b, dr.rd(self.year))
