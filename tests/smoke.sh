@@ -332,6 +332,10 @@ expect "crash: exit 1" 1 "Revit crashed (unrecoverable error)"
 expect "crash: the next scenario is skipped" 1 "reopen  skipped    core did not pass"
 check "crash: the copy is gone" gone rvt2027-a.test
 json "crash: result.json says failed" '$d->{result}' failed
+reset; rm "$BOTTLES/rvt2027-a/drive_c/ProgramData/Autodesk/RVT 2027/Templates/English/Default-Multi-Discipline_Metric.rte"
+smoke 2027 rvt2027-a --scenarios core,reopen
+expect "no project template: core fails, reopen is skipped" 1 "core    FAILED     no project template of Revit 2027 in the bottle"
+check "no project template: Revit never started" not_called "Revit.exe]"
 reset; echo dialog > "$T/mode"; smoke 2027 rvt2027-a --scenarios start
 expect "a dialog: exit 1 with its id" 1 "Revit stopped at a dialog (TaskDialog_Synthetic_Question)"
 check "dialog: Revit ended with taskkill in the copy" called "wine [--bottle] [rvt2027-a.test] [taskkill] [/f] [/im] [Revit.exe]"

@@ -73,7 +73,7 @@ bounded() { # $1 = seconds, rest = a command: in the background with stdin from 
   done
   wait "$p"
 }
-bg_wait() { # <command…>: like bounded without a limit and not stopped by a signal (deleting a copy, ending its programs)
+bg_wait() { # <command…>: like bounded without a limit and not stopped by a signal (deleting a copy)
   local p; "$@" </dev/null 7>&- 9>&- & p=$!
   while kill -0 "$p" 2>/dev/null; do wait "$p"; done
   wait "$p"
@@ -118,7 +118,7 @@ clone_remove() { # $1 = name of a copy of ours: ends what runs in it, then delet
   if [ -e "$p" ] || [ -L "$p" ]; then
     clone_guard "$p" || { WHY="it is not a copy made by ./revit test"; return 1; }
     state="$(marker_get "$p" state)"
-    [ "$state" = creating ] || bg_wait env WINEPREFIX="$p" "$CX/bin/wineserver" -k >/dev/null 2>&1
+    [ "$state" = creating ] || bounded 30 env WINEPREFIX="$p" "$CX/bin/wineserver" -k >/dev/null 2>&1
     wait_stopped "$p" 30 || { WHY="programs still run in it"; return 1; }
     if [ "$state" != creating ] && [ -f "$p/system.reg" ]; then
       bg_wait "$CX/bin/cxbottle" --bottle "$name" --delete --force >/dev/null 2>&1
@@ -158,7 +158,7 @@ clone_procs() { # $1 = pgrep pattern: those processes with a file open in the co
 }
 kill_revit() { # Revit in the copy: taskkill first, then wineserver -k ends everything there (the licensing services too)
   bounded 20 "$CX/bin/wine" --bottle "$CLONE" taskkill /f /im Revit.exe >>"$OUTLOG" 2>&1
-  bg_wait env WINEPREFIX="$C" "$CX/bin/wineserver" -k >/dev/null 2>&1
+  bounded 30 env WINEPREFIX="$C" "$CX/bin/wineserver" -k >/dev/null 2>&1
 }
 launcher_stop() { # the wine that started Revit, if it is still there: TERM, 2 s, then KILL (never a wait that hangs)
   local i
@@ -179,7 +179,7 @@ finish() { # on every exit after lock_take (whose Ctrl-C handling stays): the la
   launcher_stop
   if [ "$OURS" = 1 ]; then
     if [ "$KEEP" = 1 ] && [ "$(marker_get "$C" state)" = ready ] && clone_guard "$C"; then
-      bg_wait env WINEPREFIX="$C" "$CX/bin/wineserver" -k >/dev/null 2>&1
+      bounded 30 env WINEPREFIX="$C" "$CX/bin/wineserver" -k >/dev/null 2>&1
       marker_write kept; meta kept 1; meta copy_removed 0
       echo "Kept the copy $CLONE (--keep): ./revit test never deletes a kept copy. To delete it:"
       echo "  \"$CX/bin/cxbottle\" --bottle \"$CLONE\" --delete --force"
