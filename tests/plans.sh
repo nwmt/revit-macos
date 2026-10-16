@@ -97,5 +97,13 @@ EOF
     ok "TERM: install.sh stops after the running action"
   else fail "TERM: install.sh stops after the running action" "rc=$RC
 $(cat "$T/calls" "$T/out")"; fi
+  prep; mkdir -p "$T/data/installers/extracted/revit2024" "$T/data/installers/redist/win7sp1/x64"
+  echo '<Setup/>' > "$T/data/installers/extracted/revit2024/setup.xml"; touch "$T/data/installers/redist/win7sp1/x64/msls31.dll"
+  rm -rf "$R/installers"; chmod -R a-w "$R"
+  OUT="$(cd / && "${INST_ENV[@]}" REVIT_DATA="$T/data" /bin/bash "$R/install.sh" 2024 rvt2024-t 2>&1)"; RC=$?
+  chmod -R u+w "$R"
+  if [ "$RC" = 1 ] && grep -qF "Some steps failed" <<<"$OUT" && [ -d "$T/data/logs/rvt2024-t" ]; then ok "install.sh with DATA writes nothing into ROOT"
+  else fail "install.sh with DATA writes nothing into ROOT" "rc=$RC
+$OUT"; fi
 
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]

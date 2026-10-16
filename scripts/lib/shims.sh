@@ -11,6 +11,12 @@ SHIMS=(d3dwp ncryptshim pdfprinter rvtfix svcshim tlbpin vkshim wbemshim wv2fix)
 SHIMS_SOURCES=(tools/shims scripts/build-shims.sh)
 
 ensure_shim() { # $1 = shim: build it from source, or take the prebuilt release file (scripts/build-shims.sh decides).
-  # 0 when its file is in build/<shim>/ afterwards
+  # 0 when its file is in $(shim_dir)/<shim>/ afterwards. In the app (REVIT_BUNDLED=1) the release is all there is
+  if [ "${REVIT_BUNDLED:-0}" = 1 ]; then   # each shim has a .dll or an .exe: either counts
+    local f
+    [ "$(cat "$(shim_dir)/.prebuilt" 2>/dev/null)" = "$SHIMS_VERSION" ] || { echo "the shims in $(shim_dir) are not v$SHIMS_VERSION"; return 1; }
+    for f in "$(shim_dir)/$1"/*.dll "$(shim_dir)/$1"/*.exe; do [ -f "$f" ] && return 0; done
+    echo "no $1 in $(shim_dir)"; return 1
+  fi
   "$ROOT/scripts/build-shims.sh" "$1" || return 1
 }

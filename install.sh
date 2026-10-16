@@ -49,7 +49,7 @@ if [ ! -d "$DST" ] && [ -z "$GET" ] && [ -z "$part1" ] && [ -z "$(find -H "$SRC"
   need "no .7z payload in installers/revit$YEAR/ (the small .exe alone is only the downloader)" \
        "download both files of the Autodesk download, see versions/$YEAR.md"
 fi
-[ -f "$ROOT/installers/redist/win7sp1/x64/msls31.dll" ] || need "installers/redist/win7sp1/x64/msls31.dll missing" \
+[ -f "$DATA/installers/redist/win7sp1/x64/msls31.dll" ] || need "installers/redist/win7sp1/x64/msls31.dll missing" \
   "copy C:\\Windows\\System32\\msls31.dll from a licensed Windows 7/10 x64 PC, see installers/README.md"
 if [ -d "$B" ] && [ "${CX_RECREATE:-0}" != 1 ]; then
   need "bottle $BOTTLE already exists" "pick another name (./revit install $YEAR rvt$YEAR-b) or rebuild it: ./revit rebuild $YEAR$SFX"
@@ -86,7 +86,7 @@ echo "Steps: ${STEPS[*]}"
 lock_take "install.sh $YEAR $BOTTLE"
 bottle_guard allow_missing "$YEAR" "$BOTTLE"
 [ ! -d "$B" ] || [ "${CX_RECREATE:-0}" = 1 ] || die "Bottle $BOTTLE already exists. To rebuild it: ./revit rebuild $YEAR$SFX"
-RUN_DIR="$(run_dir_new "$BOTTLE" install)" || die "Cannot create a log folder in $(tilde "$ROOT/logs")."
+RUN_DIR="$(run_dir_new "$BOTTLE" install)" || die "Cannot create a log folder in $(tilde "$DATA/logs")."
 export RUN_DIR
 echo; echo "Logs: $(tilde "$RUN_DIR")"
 t0=$SECONDS; i=1

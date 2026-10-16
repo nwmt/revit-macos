@@ -2,6 +2,8 @@
 # Source after setting ROOT:  ROOT="$(cd "$(dirname "$0")/.." && pwd)"; . "$ROOT/scripts/lib/common.sh"
 # Defines functions and variables only. REVIT_CX (tests only) points at a fake CrossOver.
 . "$ROOT/scripts/lib/versions.sh"
+DATA="${REVIT_DATA:-$ROOT}"   # what the scripts write (installers, unpacked files, logs); the app sets it, a clone does not
+shim_dir() { echo "${SHIMS_DIR:-$ROOT/build}"; }   # our shims: build/ of a clone, or the app's prebuilt copy
 CX="${REVIT_CX:-/Applications/CrossOver.app/Contents/SharedSupport/CrossOver}"
 BOTTLES="$HOME/Library/Application Support/CrossOver/Bottles"
 LOCK_DIR="${REVIT_LOCK_DIR:-$HOME/Library/Application Support/revit-macos}"   # one for every clone and the app:
@@ -19,15 +21,15 @@ free_gb() { # what Finder and System Settings call "available": includes purgeab
   g=$(osascript -l JavaScript -e 'ObjC.import("Foundation"); var r = Ref();
     $.NSURL.fileURLWithPath("/").getResourceValueForKeyError(r, $.NSURLVolumeAvailableCapacityForImportantUsageKey, null);
     Math.floor(ObjC.unwrap(r[0]) / 1e9)' 2>/dev/null)
-  [[ "$g" =~ ^[0-9]+$ ]] || g=$(df -g "$ROOT" | awk 'NR==2 {print $4}')
+  [[ "$g" =~ ^[0-9]+$ ]] || g=$(df -g "$DATA" | awk 'NR==2 {print $4}')
   echo "${g:-0}"
 }
 
 run_dir_new() { # $1 = folder under logs/ (a bottle name, or revit<year>), $2 = kind (install, steps, addins, debug, …).
   # Prints logs/<$1>/<time>-<$2>, created now; a second run in the same second gets -2, -3, …
   local base d n=1
-  mkdir -p "$ROOT/logs/$1" || return 1
-  base="$ROOT/logs/$1/$(date +%Y%m%d-%H%M%S)-$2"; d="$base"
+  mkdir -p "$DATA/logs/$1" || return 1
+  base="$DATA/logs/$1/$(date +%Y%m%d-%H%M%S)-$2"; d="$base"
   until mkdir "$d" 2>/dev/null; do n=$((n + 1)); d="$base-$n"; [ $n -lt 100 ] || return 1; done
   echo "$d"
 }
@@ -91,7 +93,7 @@ run_child() { # [--log <file>] <command…>: runs it in the background so that T
   if [ "${1:-}" = --log ]; then log="$2"; shift 2; fi
   if [ -n "$log" ]; then
     fifo="$(mktemp -u "${TMPDIR:-/tmp}/revit-macos.XXXXXX")" && mkfifo "$fifo" || return 1
-    tee -a "$log" < "$fifo" 9>&- & tpid=$!
+    tee -a "$log" < "$fifo" 7>&- 9>&- & tpid=$!
     "$@" > "$fifo" 2>&1 & CHILD=$!
   else
     "$@" & CHILD=$!

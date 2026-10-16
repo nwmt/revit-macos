@@ -5,7 +5,7 @@ step_ncryptshim() { # Wine's ncrypt cannot import a private ECDSA P-256 key (ECC
   # PersistenceDB\DataIntegrity.cpp:52 and "unrecoverable error" at startup. Our ncrypt.dll (tools/shims/ncryptshim), for
   # Revit.exe only
   ensure_shim ncryptshim || return 1
-  cp "$ROOT/build/ncryptshim/ncrypt.dll" "$RD/ncrypt.dll" || return 1
+  cp "$(shim_dir)/ncryptshim/ncrypt.dll" "$RD/ncrypt.dll" || return 1
   app_override Revit.exe ncrypt || return 1
   detail "Revit $YEAR\\ncrypt.dll + AppDefaults\\Revit.exe ncrypt=native,builtin"
 }
@@ -17,7 +17,7 @@ step_rvtfix() { # Wine fixes inside the Revit process (tools/shims/rvtfix, loade
   local f
   for f in OGSDeviceDX11.dll DesktopMFC.dll; do [ ! -f "$RD/$f.orig" ] || mv -f "$RD/$f.orig" "$RD/$f" || return 1; done
   ensure_shim ncryptshim && ensure_shim rvtfix || return 1
-  cp "$ROOT/build/ncryptshim/ncrypt.dll" "$ROOT/build/rvtfix/rvtfix.dll" "$RD/" || return 1
+  cp "$(shim_dir)/ncryptshim/ncrypt.dll" "$(shim_dir)/rvtfix/rvtfix.dll" "$RD/" || return 1
   [ ${#RVTFIX_ENV[@]} -eq 0 ] || bottle_env "${RVTFIX_ENV[@]}" || return 1
   detail "rvtfix.dll + ncrypt.dll (loads rvtfix) → Revit $YEAR${RVTFIX_ENV[0]:+; ${RVTFIX_ENV[*]}}"
 }
@@ -27,7 +27,7 @@ step_warpshim() { # the material browser needs a D3D11 WARP device, which D3DMet
   # makes OGSDeviceDX11.dll load it. Material previews come from AdPreviewGenerator.exe, a process of its own ("OGS
   # ERROR: no virtual device", then a crash): our version.dll loads rvtfix.dll from Revit's folder there too
   ensure_shim d3dwp || return 1
-  cp "$ROOT/build/d3dwp/d3dwp.dll" "$RD/d3dwp.dll" || return 1
+  cp "$(shim_dir)/d3dwp/d3dwp.dll" "$RD/d3dwp.dll" || return 1
   wv2fix_install AdPreviewGenerator.exe || return 1
   detail "d3dwp.dll → Revit $YEAR (rvtfix points OGSDeviceDX11.dll at it); AppDefaults AdPreviewGenerator.exe version=native,builtin"
 }
@@ -35,7 +35,7 @@ step_warpshim() { # the material browser needs a D3D11 WARP device, which D3DMet
 step_wbemshim() { # WMI: several async queries on one IWbemServices (tools/shims/wbemshim); Revit's System Inventory crashes
   # without it. Changes the CLSID_WbemLocator registration: all 64-bit processes in the bottle get it
   ensure_shim wbemshim || return 1
-  cp "$ROOT/build/wbemshim/wbemshim.dll" "$B/drive_c/windows/system32/wbem/wbemshim.dll" || return 1
+  cp "$(shim_dir)/wbemshim/wbemshim.dll" "$B/drive_c/windows/system32/wbem/wbemshim.dll" || return 1
   w reg add 'HKLM\Software\Classes\CLSID\{4590F811-1D3A-11D0-891F-00AA004B2E24}\InprocServer32' /ve \
     /d 'C:\windows\system32\wbem\wbemshim.dll' /f || return 1
   detail "CLSID_WbemLocator (x64) → system32\\wbem\\wbemshim.dll"
@@ -45,7 +45,7 @@ step_richedit() { # Microsoft's x64 RichEdit (Windows 7 SP1) for Revit.exe: TOM 
   # in views crashes Revit. msftedit and riched20 delay-load msls31 and usp10; x64 msls31 comes from a licensed
   # Windows 7/10 x64 PC (installers/README.md). msftedit goes into system32 only: Revit looks in its own folder first,
   # but the system32 copy is already loaded by then, and a second copy fails to register its window classes
-  local rx="$ROOT/installers/redist/win7sp1/x64" dll dir
+  local rx="$DATA/installers/redist/win7sp1/x64" dll dir
   [ -f "$rx/riched20.dll" ] || "$ROOT/scripts/get-win7-richedit.sh" || return 1
   [ -f "$rx/msls31.dll" ] || { echo "no $rx/msls31.dll (x64, from a licensed Windows 7/10 x64 PC)"; return 1; }
   rm -f "$RD/msftedit.dll"
@@ -59,10 +59,10 @@ step_richedit() { # Microsoft's x64 RichEdit (Windows 7 SP1) for Revit.exe: TOM 
 step_tlbpin() { # LoadRegTypeLib(LIBID_tom) and cursor position caches for Revit.exe (tools/shims/tlbpin, built as msls31.dll,
   # forwards to Microsoft's msls31_ms.dll): otherwise the TOM typelib is parsed again for every text and views are
   # created 2–3× slower. Run after richedit
-  local rx="$ROOT/installers/redist/win7sp1/x64" d
+  local rx="$DATA/installers/redist/win7sp1/x64" d
   ensure_shim tlbpin || return 1
   for d in "$B/drive_c/windows/system32" "$RD"; do cp "$rx/msls31.dll" "$d/msls31_ms.dll" || return 1; done
-  put_native_dll msls31 "$ROOT/build/tlbpin/msls31.dll" "$RD" || return 1
+  put_native_dll msls31 "$(shim_dir)/tlbpin/msls31.dll" "$RD" || return 1
   app_override Revit.exe msls31_ms || return 1
   detail "msls31.dll (shim: TOM and cursor caches) → msls31_ms.dll"
 }
@@ -83,7 +83,7 @@ wv2fix_install() { # tools/shims/wv2fix as version.dll in system32, native for t
   # version_orig.dll: Wine's builtin version.dll without the marker (otherwise the loader swaps it), our DLL forwards to it
   python3 -I "$ROOT/tools/pe_mark.py" "$CX/lib/wine/x86_64-windows/version.dll" "$orig" "Wine orig    DLL" || return 1
   cp "$orig" "$s32/version_orig.dll.new" && mv -f "$s32/version_orig.dll.new" "$s32/version_orig.dll" || return 1
-  put_native_dll version "$ROOT/build/wv2fix/version.dll" "" "$@" || return 1
+  put_native_dll version "$(shim_dir)/wv2fix/version.dll" "" "$@" || return 1
   rm -f "$B/drive_c/Program Files (x86)/Microsoft/EdgeWebView/Application/"[0-9]*/version*.dll   # an older variant
 }
 
@@ -94,20 +94,28 @@ step_wv2fix() { # the WebView2 browser inside Revit crashes ("holding USER lock"
   detail "version.dll (+ version_orig.dll) → system32; AppDefaults msedgewebview2.exe version=native,builtin"
 }
 
+pdf_port_script() { # the printer port runs this path for every print job; it is stored in the bottle, so it must not
+  # point into the app (moving the app would break printing): with a data folder of its own, a copy lives there
+  if [ "$DATA" = "$ROOT" ]; then echo "$ROOT/scripts/ps2pdf-port.sh"; return 0; fi
+  mkdir -p "$DATA/libexec" && cp "$ROOT/scripts/ps2pdf-port.sh" "$DATA/libexec/ps2pdf-port.sh.new" \
+    && chmod +x "$DATA/libexec/ps2pdf-port.sh.new" && mv -f "$DATA/libexec/ps2pdf-port.sh.new" "$DATA/libexec/ps2pdf-port.sh" \
+    && echo "$DATA/libexec/ps2pdf-port.sh"
+}
+
 step_pdfprinter() { # "Revit PDF": Wine's PostScript driver + tools/shims/pdfprinter/revitpdf.ppd (A4…A0, ARCH), port
   # REVITPDF: → |scripts/ps2pdf-port.sh (Ghostscript → ~/Documents/Revit-PDF). The Mac has no CUPS queues, and without
   # a printer Revit does not open Print or Page Setup
-  local note=""
+  local note="" port
   ensure_shim pdfprinter || return 1
   mkdir -p "$B/drive_c/rvt-pdf" "$B/drive_c/windows/system32/spool/drivers/x64/3" || return 1
-  cp "$ROOT/build/pdfprinter/add_printer.exe" "$ROOT/tools/shims/pdfprinter/revitpdf.ppd" "$B/drive_c/rvt-pdf/" || return 1
+  cp "$(shim_dir)/pdfprinter/add_printer.exe" "$ROOT/tools/shims/pdfprinter/revitpdf.ppd" "$B/drive_c/rvt-pdf/" || return 1
   # Wine's AddPrinterDriverEx copies only wineps.drv, and wineps looks for the PPD in the driver folder
   cp "$ROOT/tools/shims/pdfprinter/revitpdf.ppd" "$B/drive_c/windows/system32/spool/drivers/x64/3/revitpdf.ppd" || return 1
   w reg add 'HKLM\Software\Microsoft\Windows NT\CurrentVersion\Ports' /v 'REVITPDF:' /t REG_SZ /d '' /f || return 1
-  w reg add 'HKCU\Software\Wine\Printing\Spooler' /v 'REVITPDF:' /t REG_SZ \
-    /d "|$(sh_path "$ROOT/scripts/ps2pdf-port.sh")" /f || return 1
+  port="$(pdf_port_script)" || return 1
+  w reg add 'HKCU\Software\Wine\Printing\Spooler' /v 'REVITPDF:' /t REG_SZ /d "|$(sh_path "$port")" /f || return 1
   w regsvr32 /s wineps.drv   # its code says nothing under Wine; add_printer fails below if the driver is missing
   w 'C:\rvt-pdf\add_printer.exe' 'Revit PDF' 'C:\rvt-pdf\revitpdf.ppd' 'REVITPDF:' || return 1
   command -v gs >/dev/null || [ -x /opt/homebrew/bin/gs ] || note=" (no Ghostscript: .ps instead of .pdf; brew install ghostscript)"
-  detail "Revit PDF → REVITPDF: → scripts/ps2pdf-port.sh$note"
+  detail "Revit PDF → REVITPDF: → $(tilde "$port")$note"
 }

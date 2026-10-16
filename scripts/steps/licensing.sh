@@ -38,7 +38,7 @@ step_svcshim() { # the licensing service (Go, kardianos/service) does not answer
     img+=" \"$AL_WIN\\$ver\\AdskLicensingService\\AdskLicensingService.exe\""
   fi
   ensure_shim svcshim || return 1
-  cp "$ROOT/build/svcshim/svcshim.exe" "$(al_dir)/svcshim.exe" || return 1
+  cp "$(shim_dir)/svcshim/svcshim.exe" "$(al_dir)/svcshim.exe" || return 1
   mkdir -p "$B/drive_c/ProgramData/Autodesk/AdskLicensingService/Log" || return 1
   # `sc config binPath=` does not change the path under Wine → ImagePath in the registry
   w reg add 'HKLM\System\CurrentControlSet\Services\AdskLicensingService' /v ImagePath /t REG_EXPAND_SZ \

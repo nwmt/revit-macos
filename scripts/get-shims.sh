@@ -26,6 +26,11 @@ release_complete() { # $1 = folder: a .dll or .exe in <folder>/<shim>/ for every
   done
 }
 
+if [ "${REVIT_BUNDLED:-0}" = 1 ]; then # the app ships the pinned release: no git, no download, no compiler
+  [ "$(cat "$(shim_dir)/.prebuilt" 2>/dev/null)" = "$SHIMS_VERSION" ] && release_complete "$(shim_dir)" \
+    || { echo "!! the app's shims in $(shim_dir) are not release v$SHIMS_VERSION" >&2; exit 1; }
+  echo "prebuilt shims v$SHIMS_VERSION in $(tilde "$(shim_dir)")"; exit 0
+fi
 [ "${SHIMS_FROM_SOURCE:-0}" = 1 ] && from_source "SHIMS_FROM_SOURCE=1"
 # a clone whose shim sources differ from the release tag (local edits, newer main) must not get the old DLLs
 if git -C "$ROOT" rev-parse -q --verify "refs/tags/v$SHIMS_VERSION" >/dev/null 2>&1; then

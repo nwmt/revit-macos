@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
 # CrossOver wine for winetricks: the bottle comes from CX_BOTTLE; REVIT_CX (tests only) points at a fake CrossOver.
-# fd 9 (the lock) closed: winetricks' Wine processes must not hold it.
+# fd 9 (the lock) and fd 7 (events) closed: winetricks' Wine processes must not hold them.
 exec "${REVIT_CX:-/Applications/CrossOver.app/Contents/SharedSupport/CrossOver}/bin/wine" \
-  --bottle "${CX_BOTTLE:?CX_BOTTLE is not set}" "$@" 9>&-
+  --bottle "${CX_BOTTLE:?CX_BOTTLE is not set}" "$@" 7>&- 9>&-

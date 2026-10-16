@@ -19,11 +19,11 @@ LOG="$RUN_DIR/bottle.log"
 if [ -d "$B" ]; then
   [ "${CX_RECREATE:-0}" = 1 ] || die "Bottle $NAME already exists. To delete and rebuild it: ./revit rebuild $YEAR$(bottle_sfx "$NAME" "$YEAR")"
   echo ">> deleting the old bottle $NAME"
-  "$CX/bin/cxbottle" --bottle "$NAME" --delete --force >>"$LOG" 2>&1 </dev/null 9>&-
+  "$CX/bin/cxbottle" --bottle "$NAME" --delete --force >>"$LOG" 2>&1 </dev/null 7>&- 9>&-
   [ ! -d "$B" ] || die "Could not delete bottle $NAME (log: $(tilde "$LOG")). Quit CrossOver and try again."
 fi
 echo ">> creating $NAME ($TEMPLATE), log: $(tilde "$LOG")"
-"$CX/bin/cxbottle" --bottle "$NAME" --create --template "$TEMPLATE" --description "Revit $YEAR" >>"$LOG" 2>&1 </dev/null 9>&- \
+"$CX/bin/cxbottle" --bottle "$NAME" --create --template "$TEMPLATE" --description "Revit $YEAR" >>"$LOG" 2>&1 </dev/null 7>&- 9>&- \
   || die "CrossOver could not create bottle $NAME (log: $(tilde "$LOG"))."
 w wineboot -u >>"$LOG" 2>&1   # its code says nothing; the next command shows whether the bottle runs programs
 w cmd /c ver 2>>"$LOG" | tr -d '\r' || die "The new bottle $NAME does not run Windows programs (log: $(tilde "$LOG"))."

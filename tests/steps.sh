@@ -44,10 +44,10 @@ reset() { # a fresh sandbox: the repo's scripts and tools, fake prebuilt shims, 
   builtin_dll "$CXF/lib/dxvk/x86_64-windows/d3d9.dll"; builtin_dll "$CXF/lib/wine/x86_64-windows/version.dll"
   cat > "$CXF/bin/wine" <<EOF
 #!/bin/bash
-# fake wine: records its arguments (and FD9 when the lock's fd reached it), then the first matching rule of
+# fake wine: records its arguments (and FD9/FD7 when the lock's or the events fd reached it), then the first matching rule of
 # $RULES ("<text in the arguments><TAB><exit code><TAB><shell code>") decides; default exit 0
 args="\$*"
-{ printf 'wine'; for a in "\$@"; do printf ' [%s]' "\$a"; done; [ -e /dev/fd/9 ] && printf ' FD9'; echo; } >> "$CALLS"
+{ printf 'wine'; for a in "\$@"; do printf ' [%s]' "\$a"; done; [ -e /dev/fd/9 ] && printf ' FD9'; [ -e /dev/fd/7 ] && printf ' FD7'; echo; } >> "$CALLS"
 while IFS=\$'\t' read -r pat rc code; do
   [ -n "\$pat" ] || continue
   case "\$args" in *"\$pat"*) [ -z "\$code" ] || eval "\$code"; exit "\$rc" ;; esac
@@ -155,6 +155,8 @@ in_bottle() { # $1 = bash code with wine.sh loaded for bottle rvt2024-t and a ru
 reset; mkbottle rvt2024-t 2024 2024; in_bottle 'lock_take test; w some-program arg; echo rc=$?'
 check "w runs wine with the bottle and waits" called "wine [--bottle] [rvt2024-t] [--wait-children] [some-program] [arg]"
 check "wine never gets the lock's fd" not_called "FD9"
+reset; mkbottle rvt2024-t 2024 2024; exec 7>"$T/ev7"; in_bottle 'w x'; exec 7>&-
+check "wine never gets the events fd" not_called "FD7"
 reset; mkbottle rvt2024-t 2024 2024; in_bottle 'accept_codes 194 0 194 102 && echo yes; accept_codes 67 0 194; echo no=$?'
 expect "accept_codes: 194 accepted, 67 refused with 1" 0 "yes"; check "accept_codes returns 1, not the code" grep -q "no=1" <<<"$OUT"
 reset; mkbottle rvt2024-t 2024 2024; echo new > "$T/new.dll"
@@ -497,5 +499,40 @@ sleep 4
 reset; mkdir -p "$R/installers/revit2025/update"; touch "$R/installers/revit2025/update/Revit_2025_5_0.exe"
 python3 -I -c 'import sys, zipfile; z = zipfile.ZipFile(sys.argv[1], "w"); z.writestr("setup.xml", "<Setup/>"); z.close()' "$R/installers/revit2025/RVT_2025_NA_win_db_002_002.zip"
 in_repo 'revit_main_installer 2025'; expect "the main installer is not an update" 0 "RVT_2025_NA_win_db_002_002.zip"
+
+# ---- data folder ----
+reset; in_repo 'echo "$DATA"'; expect "DATA defaults to ROOT" 0 "$R"
+reset; OUT="$(cd / && "${SANDBOX_ENV[@]}" ROOT="$R" REVIT_DATA="$T/data" /bin/bash -c '. "$ROOT/scripts/lib/common.sh"
+  run_dir_new rvt2024-t steps; revit_installers 2024; revit_extracted 2024' 2>&1)"; RC=$?
+expect "run folders live in DATA" 0 "$T/data/logs/rvt2024-t/"
+check "installers live in DATA" grep -qx "$T/data/installers/revit2024" <<<"$OUT"
+check "unpacked files live in DATA" grep -qx "$T/data/installers/extracted/revit2024" <<<"$OUT"
+reset; mkbottle rvt2024-t 2024 2024; mkdir -p "$T/data"; chmod -R a-w "$R"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" REVIT_DATA="$T/data" /bin/bash "$R/scripts/run-steps.sh" 2024 rvt2024-t wpfsw 2>&1)"; RC=$?
+chmod -R u+w "$R"
+expect "DATA≠ROOT: ROOT stays untouched" 0 "wpfsw"
+check "DATA≠ROOT: the run folder is in DATA" test -d "$T/data/logs/rvt2024-t"
+check "DATA≠ROOT: nothing new in ROOT" test ! -e "$R/logs"
+reset; mkbottle rvt2024-t 2024 2024; mkdir -p "$T/data"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" REVIT_DATA="$T/data" /bin/bash "$R/scripts/run-steps.sh" 2024 rvt2024-t pdfprinter 2>&1)"; RC=$?
+expect "pdfprinter with DATA runs" 0 "pdfprinter"
+check "pdfprinter copies its helper into DATA" test -x "$T/data/libexec/ps2pdf-port.sh"
+check "pdfprinter registers the DATA copy" called "|'$T/data/libexec/ps2pdf-port.sh'"
+reset; mkbottle rvt2024-t 2024 2024; run_steps 2024 rvt2024-t pdfprinter
+check "pdfprinter without DATA registers the repo script" called "|'$R/scripts/ps2pdf-port.sh'"
+reset; mkdir -p "$T/shims"; cp -R "$R/build/." "$T/shims/"; rm -rf "$R/build"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" ROOT="$R" SHIMS_DIR="$T/shims" REVIT_BUNDLED=1 /bin/bash -c '. "$ROOT/scripts/lib/common.sh"; . "$ROOT/scripts/lib/shims.sh"
+  ensure_shim rvtfix && echo have; shim_dir' 2>&1)"; RC=$?
+expect "bundled: ensure_shim takes SHIMS_DIR" 0 "have"
+check "bundled: shim_dir is SHIMS_DIR" grep -qx "$T/shims" <<<"$OUT"
+check "bundled: no build folder appeared" test ! -e "$R/build"
+reset; mkdir -p "$T/shims"; cp -R "$R/build/." "$T/shims/"; rm -f "$T/shims/rvtfix/rvtfix.dll"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" ROOT="$R" SHIMS_DIR="$T/shims" REVIT_BUNDLED=1 /bin/bash -c '. "$ROOT/scripts/lib/common.sh"; . "$ROOT/scripts/lib/shims.sh"
+  ensure_shim rvtfix; echo rc=$?' 2>&1)"
+check "bundled: a missing shim is an error, not a build" grep -q "rc=1" <<<"$OUT"
+reset; mkdir -p "$T/shims"; cp -R "$R/build/." "$T/shims/"; printf '#!/bin/bash\necho GIT >> "%s"\nexit 1\n' "$CALLS" > "$T/git"; chmod +x "$T/git"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" PATH="$T:$PATH" SHIMS_DIR="$T/shims" REVIT_BUNDLED=1 /bin/bash "$R/scripts/get-shims.sh" 2>&1)"; RC=$?
+expect "bundled: get-shims accepts the bundled release" 0 "prebuilt shims"
+check "bundled: get-shims never calls git" not_called "GIT"
 
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]

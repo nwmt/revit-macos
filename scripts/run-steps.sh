@@ -34,7 +34,7 @@ for s in "${LIST[@]}"; do
   esac
 done
 if [ -z "${RUN_DIR:-}" ] || [ ! -d "$RUN_DIR" ]; then
-  RUN_DIR="$(run_dir_new "$NAME" "${RUN_KIND:-steps}")" || die "Cannot create a log folder in $(tilde "$ROOT/logs")."
+  RUN_DIR="$(run_dir_new "$NAME" "${RUN_KIND:-steps}")" || die "Cannot create a log folder in $(tilde "$DATA/logs")."
 fi
 export RUN_DIR
 # Wine's working folder is the script's: relative MSI paths (INSTALLDIR without Setup.exe) would land there

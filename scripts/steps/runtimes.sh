@@ -51,14 +51,16 @@ step_vc() { # Visual C++ runtimes from the installer, oldest first. The branch f
 }
 
 step_fonts() { # core fonts and MSXML 6 through winetricks
+  # the app keeps winetricks' downloads with its other caches ("clear cache" in the app reaches them)
+  [ "${REVIT_BUNDLED:-0}" = 1 ] && export W_CACHE="$DATA/cache/winetricks"
   WINE="$ROOT/scripts/lib/cxwine" WINESERVER="$CX/bin/wineserver" CX_BOTTLE="$NAME" WINEPREFIX="$B" \
-    winetricks -q --unattended corefonts msxml6 9>&- || return 1
+    winetricks -q --unattended corefonts msxml6 7>&- 9>&- || return 1
   detail "winetricks corefonts msxml6"
 }
 
 step_netfx() { # .NET Framework from Revit's installer on top of a real 4.0 (the winetricks dotnet4x recipe): 4.7 for
   # DOTNET=netfx47 (Revit 2020 crashes on 4.7.2 and 4.8 under Wine), 4.8 for netfx48
-  local net40="$ROOT/installers/redist/dotNetFx40_Full_x86_x64.exe" netx ver min rc rel
+  local net40="$DATA/installers/redist/dotNetFx40_Full_x86_x64.exe" netx ver min rc rel
   case "$DOTNET" in
     netfx47) ver=4.7; min=460798; netx="$DIST/3rdParty/NET/47/wcu/dotNetFramework/dotNetFx47_Full_x86_x64.exe" ;;
     netfx48) ver=4.8; min=528040; netx="$DIST/3rdParty/dotNetFramework/48/dotNetFx48_Full_x86_x64.exe" ;;
@@ -125,7 +127,7 @@ step_webview2() { # Edge WebView2 for the sign-in window and web panels ("Web br
   # without it). The installer ships runtime 103 (2022), too old for Revit's SDK (1.0.2478.35, runtime ~124+): Revit
   # gets E_NOINTERFACE, the start screen and Manage Links stay blank. A fresh Evergreen Standalone from
   # installers/redist/webview2 (scripts/get-redist.sh) if there is one, else the installer's
-  local wv="$ROOT/installers/redist/webview2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+  local wv="$DATA/installers/redist/webview2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
   [ -f "$wv" ] || wv="$DIST/3rdParty/x64/WebView2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
   install_exe webview2 "$wv" /silent /install; accept_codes $? 0 || return 1
   detail "$(ls "$B/drive_c/Program Files (x86)/Microsoft/EdgeWebView/Application/" 2>/dev/null | grep -E '^[0-9.]+$' | tr '\n' ' ')"

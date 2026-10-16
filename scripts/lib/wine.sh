@@ -1,12 +1,12 @@
 # Running Windows programs in a bottle and changing it. Source after common.sh, then call wine_init <bottle>.
-# Every Wine process runs with stdin from /dev/null and fd 9 (the lock) closed: wineserver, which Wine starts on
-# its own, outlives the script by hours and would hold the lock. say/detail/skip/msi write into $RUN_DIR.
+# Every Wine process runs with stdin from /dev/null, fd 9 (the lock) and fd 7 (events) closed: wineserver, which Wine
+# starts on its own, outlives the script by hours and would hold the lock. say/detail/skip/msi write into $RUN_DIR.
 
 wine_init() { NAME="$1"; B="$(bottle_path "$1")"; }
-w()              { "$CX/bin/wine" --bottle "$NAME" --wait-children "$@" </dev/null 9>&-; }
-w_nowait()       { "$CX/bin/wine" --bottle "$NAME" "$@" </dev/null 9>&-; }   # services and GUI programs. Backgrounded,
-# close fd 9 on the call as well (`w_nowait … 9>&- &`): the subshell that runs the function keeps it otherwise
-wineserver_kill() { WINEPREFIX="$B" "$CX/bin/wineserver" -k </dev/null 9>&-; }
+w()              { "$CX/bin/wine" --bottle "$NAME" --wait-children "$@" </dev/null 7>&- 9>&-; }
+w_nowait()       { "$CX/bin/wine" --bottle "$NAME" "$@" </dev/null 7>&- 9>&-; }   # services and GUI programs. Backgrounded,
+# close fd 9 on the call as well (`w_nowait … 7>&- 9>&- &`): the subshell that runs the function keeps it otherwise
+wineserver_kill() { WINEPREFIX="$B" "$CX/bin/wineserver" -k </dev/null 7>&- 9>&-; }
 win() { echo "Z:$(echo "$1" | tr '/' '\\')"; }   # Windows path for a Mac file
 
 # summary.txt lines (the runner writes one per step; a step with parts adds its own), and the step's result text
@@ -68,7 +68,7 @@ start_service() { # $1 = service. SCM rereads its config only after a wineserver
   # so it starts without --wait-children, in the background. 0 once it reports RUNNING (at most 40 s)
   local st="" i
   wineserver_kill
-  w_nowait sc start "$1" </dev/null 9>&- &   # on the outer call too: the subshell that runs a backgrounded function
+  w_nowait sc start "$1" </dev/null 7>&- 9>&- &   # on the outer call too: the subshell that runs a backgrounded function
                                              # would keep fd 9 while it waits for Wine
   for i in $(seq 1 20); do
     st="$(w_nowait sc query "$1" 2>/dev/null | tr -d '\r' | awk '/STATE/{print $4}')"

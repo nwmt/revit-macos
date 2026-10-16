@@ -8,9 +8,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"; . "$ROOT/scripts/lib/common.sh"
 YEAR="${1:-}"; [[ "$YEAR" =~ ^[0-9]{4}$ ]] || usage_die "Usage: scripts/inspect-installer.sh <year>"
 command -v 7zz >/dev/null || die "7zz required: brew install sevenzip"
 SRC="$(revit_installers "$YEAR")"; DST="$(revit_extracted "$YEAR")"
-OUTD="$(run_dir_new "revit$YEAR" inspect)" || die "Cannot create a log folder in $(tilde "$ROOT/logs")."
+OUTD="$(run_dir_new "revit$YEAR" inspect)" || die "Cannot create a log folder in $(tilde "$DATA/logs")."
 OUT="$OUTD/report.txt"
-exec > >(tee "$OUT") 2>&1
+exec > >(tee "$OUT" 7>&- 9>&-) 2>&1
 
 if load_profile "$YEAR"; then echo "== Revit $YEAR: profile scripts/profiles/$YEAR.sh, .NET $DOTNET"
 else echo "== Revit $YEAR: no profile yet"; fi

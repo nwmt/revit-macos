@@ -13,12 +13,12 @@ BE="${3:-default}"; FILE="${4:-}"
 lock_take "launch.sh $YEAR $2"
 bottle_guard must_exist "$YEAR" "$2"
 wine_init "$2"
-RUN_DIR="$(run_dir_new "$NAME" debug)" || die "Cannot create a log folder in $(tilde "$ROOT/logs")."
+RUN_DIR="$(run_dir_new "$NAME" debug)" || die "Cannot create a log folder in $(tilde "$DATA/logs")."
 cd "$B/drive_c" || die "Cannot enter $(tilde "$B/drive_c")."
 [ "$BE" = default ] || export CX_GRAPHICS_BACKEND="$BE"
 # fd 9 closed on the backgrounded call itself: the subshell that runs the function would keep the lock until Revit quits
 CX_LOG="$RUN_DIR/wine.cxlog" CX_DEBUGMSG="${CX_DEBUGMSG:-err,+seh}" \
-  w_nowait "C:\\Program Files\\Autodesk\\Revit $YEAR\\Revit.exe" ${FILE:+"$FILE"} >"$RUN_DIR/stdout.log" 2>&1 </dev/null 9>&- &
+  w_nowait "C:\\Program Files\\Autodesk\\Revit $YEAR\\Revit.exe" ${FILE:+"$FILE"} >"$RUN_DIR/stdout.log" 2>&1 </dev/null 7>&- 9>&- &
 echo "$!" > "$RUN_DIR/pid"
 wait_s="${REVIT_LAUNCH_WAIT:-60}"   # tests only: a shorter wait
 for i in $(seq 1 "$wait_s"); do revit_running "$B" "$YEAR" && break; sleep 1; done

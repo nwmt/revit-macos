@@ -11,7 +11,7 @@ YEAR="${1:?specify a year, e.g. 2024}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; . "$ROOT/scripts/lib/common.sh"
 load_profile "$YEAR" || usage_die "Revit $YEAR is not supported yet. Supported: ${REVIT_SUPPORTED[*]}."
 lock_take "get-redist.sh $YEAR"
-D="$ROOT/installers/redist"
+D="$DATA/installers/redist"
 
 get() { # $1 = url, $2 = file, $3 = sha256 or "" ; download into .part (resumable), rename only after the check
   local url="$1" f="$2" sha="$3"

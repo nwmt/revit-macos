@@ -9,8 +9,8 @@ load_profile "$1" || usage_die "Revit $1 is not supported yet. Supported: ${REVI
 command -v 7zz >/dev/null || die "7zz required: brew install sevenzip"
 lock_take "unpack-revit.sh $YEAR"
 SRC="$(revit_installers "$YEAR")"; DST="$(revit_extracted "$YEAR")"
-LOGD="$(run_dir_new "revit$YEAR" unpack)" || die "Cannot create a log folder in $(tilde "$ROOT/logs")."
-exec > >(tee "$LOGD/unpack.log") 2>&1
+LOGD="$(run_dir_new "revit$YEAR" unpack)" || die "Cannot create a log folder in $(tilde "$DATA/logs")."
+exec > >(tee "$LOGD/unpack.log" 7>&- 9>&-) 2>&1
 if [ -d "$DST" ]; then
   echo "== already unpacked: installers/extracted/revit$YEAR"
 else

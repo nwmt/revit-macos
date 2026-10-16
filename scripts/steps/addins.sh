@@ -11,7 +11,7 @@ net_release() { w reg query 'HKLM\Software\Microsoft\NET Framework Setup\NDP\v4\
   | tr -d '\r' | awk '/Release/{print $3}' | xargs printf '%d\n' 2>/dev/null; }
 
 step_revitlookup() {
-  local f="$ROOT/installers/addins/$LOOKUP" rc
+  local f="$DATA/installers/addins/$LOOKUP" rc
   [ -n "$LOOKUP" ] || { skip "RevitLookup is not set up for Revit $YEAR"; return 0; }
   [ -f "$f" ] || { echo "no installers/addins/$LOOKUP (installers/README.md, Add-ins)"; return 1; }
   cp "$f" "$B/drive_c/RevitLookup.msi" || return 1
@@ -23,7 +23,7 @@ step_revitlookup() {
 
 step_pyrevit() { # pyRevit 4.8.12 for 2020 (its IPY277 engine runs on .NET 4.7; 6.5.5 needs 4.7.1+), 7.0 for 2023–2026.
   # The 4.8 installer runs `attach master 277 --installed` but does not find Revit 2020: PYREVIT_ATTACH attaches it
-  local f="$ROOT/installers/addins/$PYREVIT" rc pyr='C:\users\crossover\AppData\Roaming\pyRevit-Master\bin\pyrevit.exe'
+  local f="$DATA/installers/addins/$PYREVIT" rc pyr='C:\users\crossover\AppData\Roaming\pyRevit-Master\bin\pyrevit.exe'
   [ -n "$PYREVIT" ] || { skip "pyRevit is not set up for Revit $YEAR"; return 0; }
   [ -f "$f" ] || { echo "no installers/addins/$PYREVIT (installers/README.md, Add-ins)"; return 1; }
   run_exe pyRevit-setup "$f" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- '/LOG=C:\pyrevit-setup.log'; rc=$?
@@ -82,8 +82,8 @@ step_check() { # the state, for a report: .NET Framework Release and the add-in 
   detail ".NET Framework Release=$rel; $n add-in manifest(s)"
 }
 
-step_net48()  { net_full net48 "$ROOT/installers/redist/dotnet48/ndp48-x86-x64-allos-enu.exe"; }
-step_net472() { net_full net472 "$ROOT/installers/redist/dotnet472/ndp472-KB4054530-x86-x64-AllOS-ENU.exe"; }
+step_net48()  { net_full net48 "$DATA/installers/redist/dotnet48/ndp48-x86-x64-allos-enu.exe"; }
+step_net472() { net_full net472 "$DATA/installers/redist/dotnet472/ndp472-KB4054530-x86-x64-AllOS-ENU.exe"; }
 net_full() { # .NET Framework 4.7.2 or 4.8 over 2020's 4.7. Not default: Revit 2020 crashes in clr.dll on them (80131506)
   local before rc
   [ -f "$2" ] || { echo "no $2"; return 1; }
@@ -107,7 +107,7 @@ step_enscape() { # Enscape with its fixes, for the version in the profile (ENSCA
 
 enscape3() { # Enscape 3.4.4 (Revit 2019–2023). Without UI its MSI needs ACCEPTEULA=1 (LaunchCondition; otherwise a
   # silent 1603): it accepts the Enscape EULA — run this step only if you accept it
-  local i="$ROOT/installers" rc vt
+  local i="$DATA/installers" rc vt
   [ -f "$i/addins/enscape/Enscape-3.4.4-94564.msi" ] || { echo "no installers/addins/enscape/Enscape-3.4.4-94564.msi"; return 1; }
   [ -f "$i/redist/nuget/system.valuetuple.4.5.0.nupkg" ] || { echo "no installers/redist/nuget/system.valuetuple.4.5.0.nupkg"; return 1; }
   cp "$i/addins/enscape/Enscape-3.4.4-94564.msi" "$B/drive_c/Enscape.msi" || return 1
@@ -123,7 +123,7 @@ enscape3() { # Enscape 3.4.4 (Revit 2019–2023). Without UI its MSI needs ACCEP
   # Vulkan fixes (tools/shims/vkshim): Enscape's GPU check, its query pools and the focus of its view. Into system32: DXVK
   # (d3d9dxvk) loads vulkan-1.dll from there at Revit's start, before Enscape does
   ensure_shim vkshim || return 1
-  put_native_dll vulkan-1 "$ROOT/build/vkshim/vulkan-1.dll" "" Revit.exe || return 1
+  put_native_dll vulkan-1 "$(shim_dir)/vkshim/vulkan-1.dll" "" Revit.exe || return 1
   # CrossOver builds MoltenVK with Metal argument buffers off (Enscape's shaders do not compile: black geometry) and
   # with asynchronous queue submits (Enscape hangs when its window is resized): back to MoltenVK's own defaults
   bottle_env MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=1 MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS=1 || return 1
@@ -133,7 +133,7 @@ enscape3() { # Enscape 3.4.4 (Revit 2019–2023). Without UI its MSI needs ACCEP
 enscape4() { # Enscape 4.18 LTS for Revit 2027; the renderer is its own process, Enscape.RendererHost.exe.
   # Chaos Installer without UI: -auto installs the default set (Enscape, Chaos Unified Login, Cosmos, …) and accepts the
   # Enscape EULA — run this step only if you accept it
-  local i="$ROOT/installers" s32="$B/drive_c/windows/system32" rc tmp svc n d c
+  local i="$DATA/installers" s32="$B/drive_c/windows/system32" rc tmp svc n d c
   local a='HKCU\Software\Wine\AppDefaults\Enscape.RendererHost.exe\DllOverrides'
   command -v 7zz >/dev/null || { echo "7zz required: brew install sevenzip"; return 1; }
   [ -f "$i/addins/enscape/Enscape-4.18.2.1657-lts.exe" ] || { echo "no installers/addins/enscape/Enscape-4.18.2.1657-lts.exe"; return 1; }
@@ -153,7 +153,7 @@ enscape4() { # Enscape 4.18 LTS for Revit 2027; the renderer is its own process,
   rm -rf "$tmp"; [ $rc = 0 ] || { echo "wminet_utils.dll from .NET 4.8 failed"; return 1; }
   # Vulkan fixes (tools/shims/vkshim): Enscape turns down the Mac GPU (logicOp); its view takes keys and the mouse only when active
   ensure_shim vkshim || return 1
-  put_native_dll vulkan-1 "$ROOT/build/vkshim/vulkan-1.dll" "" Enscape.RendererHost.exe || return 1
+  put_native_dll vulkan-1 "$(shim_dir)/vkshim/vulkan-1.dll" "" Enscape.RendererHost.exe || return 1
   # no Direct3D 11 for Enscape's own windows (Avalonia): through D3DMetal, closing a menu deadlocks with the renderer in
   # CrossOver's Mac driver; through any D3D the window's Metal layer hides the Asset Library browser. Without d3d11
   # Avalonia draws in software
@@ -162,13 +162,13 @@ enscape4() { # Enscape 4.18 LTS for Revit 2027; the renderer is its own process,
   # the process. Our version.dll (tools/shims/wv2fix) loads rvtfix.dll that sits next to the exe
   wv2fix_install msedgewebview2.exe || return 1
   ensure_shim rvtfix || return 1
-  cp "$ROOT/build/rvtfix/rvtfix.dll" "$B/drive_c/Program Files/Enscape/RendererHost/rvtfix.dll" || return 1
+  cp "$(shim_dir)/rvtfix/rvtfix.dll" "$B/drive_c/Program Files/Enscape/RendererHost/rvtfix.dll" || return 1
   app_override Enscape.RendererHost.exe version || return 1
   bottle_env MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=1 MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS=1 || return 1
   # Chaos Unified Login (sign-in) and Cosmos (Asset Library) start from the Windows StartUp folder, which Wine does not
   # run: auto-start services through tools/shims/svcshim instead; Wine starts those with the bottle
   ensure_shim svcshim || return 1
-  cp "$ROOT/build/svcshim/svcshim.exe" "$B/drive_c/Program Files/Chaos/svcshim.exe" || return 1
+  cp "$(shim_dir)/svcshim/svcshim.exe" "$B/drive_c/Program Files/Chaos/svcshim.exe" || return 1
   for svc in 'ChaosUnifiedLogin|Chaos Unified Login|"C:\Program Files\Chaos\UnifiedLogin\ulasupervisor.exe"' \
              'ChaosCosmos|Chaos Cosmos Browser|"C:\Program Files\Chaos\Cosmos\cbservice.exe" supervisor 0'; do
     IFS='|' read -r n d c <<<"$svc"; local k='HKLM\System\CurrentControlSet\Services\'"$n"
