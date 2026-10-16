@@ -14,6 +14,7 @@ RICHEDIT=(msftedit riched20 usp10 msls31)
 RVTFIX_ENV=()
 DYNAMO=2.13
 ADDIN_STEPS=(revitlookup pyrevit trust wpfsw check)
+ADDIN_WPF_SW=1                     # add-in windows need software WPF (step wpfsw)
 LOOKUP=revitlookup/RevitLookup-2023.5.4-SingleUser.msi     # GitHub release 2027.0.4
 PYREVIT=pyrevit7/pyRevit_7.0.0.26278_signed.exe
 PYREVIT_ATTACH=""

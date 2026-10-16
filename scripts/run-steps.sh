@@ -11,6 +11,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/scripts/lib/common.sh"; . "$ROOT/scripts/lib/wine.sh"; . "$ROOT/scripts/lib/shims.sh"
 for _f in "$ROOT"/scripts/steps/*.sh; do . "$_f"; done; unset _f
+. "$ROOT/scripts/lib/addins.sh"
 top_result() { # $1 = result: the run's result when this runner is ./revit's child (under install.sh, install.sh sets it)
   [ -n "${INSTALL_PARENT:-}" ] && return 0
   result_set failed_steps "$(tr '\n' ' ' < "$RUN_DIR/failed.txt" 2>/dev/null | sed 's/ $//')"; result_set result "$1"

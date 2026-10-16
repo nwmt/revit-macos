@@ -51,7 +51,7 @@ Usage: ./revit <command> <year> [bottle]
 
   install   install Revit
   check     check what the install needs, change nothing
-  addins    add RevitLookup and pyRevit
+  addins    add RevitLookup and pyRevit (--only <add-ins>; ./revit addins list <year>)
   stop      quit a Revit that hangs
   logs      list the newest logs
   debug     start Revit and record a log
@@ -120,7 +120,14 @@ case "$CMD" in
   ""|help|-h|--help) usage; exit 0 ;;
   *) echo "Unknown command: $CMD" >&2; echo >&2; usage >&2; exit 1 ;;
 esac
-status_addins() { :; }   # Task 9
+. "$ROOT/scripts/lib/addins.sh"
+status_addins() { # $1 = bottle path, $2 = year: the ids of the add-ins installed there, as JSON strings
+  local id out="" B="$1" YEAR="$2"
+  for id in ${ADDIN_IDS[@]+"${ADDIN_IDS[@]}"}; do
+    addin_load "$id" && addin_is_installed && out+="${out:+,}$(json_str "$id")"
+  done
+  printf '%s' "$out"
+}
 if [ "$CMD" = status ]; then
   RESULT_HINT=failed
   b_json=""; human=""
@@ -155,6 +162,34 @@ if [ "$CMD" = find-installer ]; then
     if (!$d->{year}) { print "No Revit installer found here.\n"; exit 0 }
     print "Revit $d->{year}, $d->{kind}: ", ($d->{complete} ? "complete" : $d->{downloadable} ? "the rest is downloaded at install"
       : $d->{problem} eq "payload" ? "the .7z payload is missing" : "missing @{$d->{missing}}"), "\n"' <<<"$out"
+  exit 0
+fi
+if [ "$CMD" = addins ] && [ "$YEAR_ARG" = import ]; then
+  . "$ROOT/scripts/lib/addins.sh"; id="${POS[2]:-}"; file="${POS[3]:-}"
+  addin_load "$id" || die "Unknown add-in: $id. Add-ins: ${ADDIN_IDS[*]}"
+  [ -f "$file" ] || die "No such file: $file"
+  dest=""; for y in "${REVIT_SUPPORTED[@]}"; do
+    while IFS=$'\t' read -r s f _ _; do [ "$s" = own ] && [ "$(basename "$f")" = "$(basename "$file")" ] && dest="$f"; done < <(addin_files "$y")
+  done
+  if [ -z "$dest" ]; then
+    names=""; for y in "${REVIT_SUPPORTED[@]}"; do names+="$(addin_files "$y" | awk -F'\t' '$1=="own"{print " " $2}' | xargs -n1 basename 2>/dev/null | tr '\n' ' ')"; done
+    die "$ADDIN_NAME: this file is not one the add-in setup knows. Expected one of:$(echo " $names" | tr -s ' ')"
+  fi
+  not_busy; lock_take "./revit addins import $id"
+  mkdir -p "$DATA/installers/addins/$(dirname "$dest")" && cp "$file" "$DATA/installers/addins/$dest.new" \
+    && mv -f "$DATA/installers/addins/$dest.new" "$DATA/installers/addins/$dest" || die "Could not copy $file"
+  echo "$ADDIN_NAME: $(basename "$file") is ready."; exit 0
+fi
+if [ "$CMD" = addins ] && [ "$YEAR_ARG" = list ]; then
+  . "$ROOT/scripts/lib/addins.sh"; load_profile "${POS[2]:-}" || die "Which Revit year? Example: ./revit addins list 2025"
+  NAME="$(revit_bottle_default "$YEAR")"; B="$(bottle_path "$NAME")"; out=""
+  for id in "${ADDIN_IDS[@]}"; do
+    addin_load "$id"; av=false; addin_available && av=true; ins=false; [ -d "$B" ] && addin_is_installed && ins=true
+    te=false; in_list "$YEAR" ${ADDIN_TESTED[@]+"${ADDIN_TESTED[@]}"} && te=true
+    src="$(addin_files "$YEAR" | head -1 | cut -f1)"; tok=true; [ -z "$ADDIN_TOOL" ] || command -v "$ADDIN_TOOL" >/dev/null || [ -x "/opt/homebrew/bin/$ADDIN_TOOL" ] || tok=false
+    out+="${out:+,}{\"id\":$(json_str "$id"),\"name\":$(json_str "$ADDIN_NAME"),\"about\":$(json_str "$ADDIN_ABOUT"),\"available\":$av,\"installed\":$ins,\"tested\":$te,\"source\":$(json_str "$src"),\"eula\":$(json_str "$ADDIN_EULA"),\"tool\":$(json_str "$ADDIN_TOOL"),\"tool_ok\":$tok}"
+  done
+  if [ "$JSON" = 1 ]; then echo "[$out]"; else for id in "${ADDIN_IDS[@]}"; do addin_load "$id"; addin_available && echo "  $id  $ADDIN_NAME — $ADDIN_ABOUT"; done; fi
   exit 0
 fi
 [ -n "$YEAR_ARG" ] || die "Which Revit year? Example: ./revit $CMD 2025"
@@ -203,6 +238,21 @@ case "$CMD" in
   install) not_busy; run_ctx_new; sup_traps; lock_take --no-trap "install.sh $YEAR $NAME"; export_source_flags; supervise "$ROOT/install.sh" "$YEAR" "$NAME" ;;
   check)   export INSTALL_DRYRUN=1; run_ctx_new; sup_traps; supervise "$ROOT/install.sh" "$YEAR" "$NAME" ;;
   addins)
+    if [ -n "$ONLY" ]; then
+      . "$ROOT/scripts/lib/addins.sh"; ids=()
+      for id in $(echo "$ONLY" | tr ',' ' '); do
+        addin_load "$id" || die "Unknown add-in: $id. Add-ins: ${ADDIN_IDS[*]}"
+        addin_available || die "$ADDIN_NAME is not available for Revit $YEAR."
+        [ -z "$ADDIN_TOOL" ] || command -v "$ADDIN_TOOL" >/dev/null || [ -x "/opt/homebrew/bin/$ADDIN_TOOL" ] \
+          || die "$ADDIN_NAME needs $ADDIN_TOOL on this Mac: brew install ghostscript"
+        ids+=("$id")
+      done
+      list=($(addin_plan "${ids[@]}"))
+      [ -z "$EULA" ] || export REVIT_ACCEPT_EULA="$EULA"
+      bottle_guard must_exist "$YEAR" "$NAME"; not_busy; run_ctx_new; sup_traps
+      lock_take --no-trap "./revit addins $YEAR $NAME"; bottle_guard must_exist "$YEAR" "$NAME"
+      export RUN_KIND=addins; supervise "$ROOT/scripts/run-steps.sh" "$YEAR" "$NAME" "${list[@]}"
+    fi
     [ ${#ADDIN_STEPS[@]} -gt 0 ] || die "The add-in script is not set up for Revit $YEAR yet."
     bottle_guard must_exist "$YEAR" "$NAME"; not_busy
     run_ctx_new; sup_traps; lock_take --no-trap "./revit addins $YEAR $NAME"; bottle_guard must_exist "$YEAR" "$NAME"

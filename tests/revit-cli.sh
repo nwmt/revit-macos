@@ -28,7 +28,7 @@ stub() { # a script that only records how it was called
   mkdir -p "$(dirname "$1")"
   cat > "$1" <<EOF
 #!/bin/bash
-echo "\$(basename "\$0") \$* | REVIT_YEAR=\${REVIT_YEAR:-} INSTALL_DRYRUN=\${INSTALL_DRYRUN:-} CX_RECREATE=\${CX_RECREATE:-} WINEPREFIX=\${WINEPREFIX:-} RUN_KIND=\${RUN_KIND:-}" >> "$CALLS"
+echo "\$(basename "\$0") \$* | REVIT_YEAR=\${REVIT_YEAR:-} INSTALL_DRYRUN=\${INSTALL_DRYRUN:-} CX_RECREATE=\${CX_RECREATE:-} WINEPREFIX=\${WINEPREFIX:-} RUN_KIND=\${RUN_KIND:-} EULA=\${REVIT_ACCEPT_EULA:-}" >> "$CALLS"
 EOF
   chmod +x "$1"
 }
@@ -61,6 +61,7 @@ reset() { # a fresh sandbox for each test
     || { echo "sandbox setup failed"; exit 1; }
   cp "$REPO/revit" "$R/"; cp -R "$REPO/tools" "$R/"; cp "$REPO/scripts/lib/common.sh" "$REPO/scripts/lib/versions.sh" "$R/scripts/lib/"
   mkdir -p "$R/scripts/profiles"; cp "$REPO"/scripts/profiles/*.sh "$R/scripts/profiles/"
+  cp "$REPO/scripts/lib/addins.sh" "$R/scripts/lib/" 2>/dev/null; cp -R "$REPO/scripts/addins" "$REPO/scripts/steps" "$R/scripts/" 2>/dev/null
   stub "$R/install.sh"; stub "$R/scripts/run-steps.sh"; stub "$R/scripts/launch.sh"
   cat > "$CXF/bin/wineserver" <<EOF
 #!/bin/bash
@@ -366,6 +367,25 @@ reset; mkdir -p "$T/mine"; touch "$T/mine/a.exe"; rm -rf "$R/installers/revit202
 expect "link-installer links the folder" 0 "Revit 2024 installer:"
 check "the link is there" test -L "$R/installers/revit2024"
 reset; run "" link-installer 2024 "$T"; expect "link-installer refuses a folder with files" 1 "already holds files"
+
+# ---- addins: list, only, import ----
+reset; run "" addins list 2025 --json; expect "addins list --json" 0 '"id":"pyrevit"'
+check "addins list: valid JSON" eval 'printf "%s" "$OUT" | /usr/bin/perl -MJSON::PP -e "local \$/; JSON::PP->new->decode(<STDIN>)"'
+reset; bottle rvt2024-a 2024 2024; run "" addins 2024 --only pyrevit
+check "--only runs the add-in and its after-steps" called "run-steps.sh 2024 rvt2024-a pyrevit trust wpfsw check |"
+reset; bottle rvt2027-a 2027 2027; run "" addins 2027; expect "2027 without --only still says not set up" 1 "The add-in script is not set up for Revit 2027 yet."
+reset; bottle rvt2027-a 2027 2027; run "" addins 2027 --only enscape --accept-eula enscape
+check "--accept-eula reaches the runner" called "run-steps.sh 2027 rvt2027-a enscape trust check |"
+check "--accept-eula: the runner gets the consent" called "EULA=enscape"
+reset; bottle rvt2024-a 2024 2024; run "" addins 2024 --only nonsense; expect "--only with an unknown add-in" 1 "Unknown add-in: nonsense"
+reset; bottle rvt2024-a 2024 2024; run "" addins 2024 --only enscape; expect "--only with an add-in not for this year" 1 "Enscape is not available for Revit 2024"
+reset; touch "$T/Enscape-4.18.2.1657-lts.exe"; run "" addins import enscape "$T/Enscape-4.18.2.1657-lts.exe"
+expect "import copies an own file" 0 "Enscape"; check "import: the file is in installers/addins" test -f "$R/installers/addins/enscape/Enscape-4.18.2.1657-lts.exe"
+reset; touch "$T/other.exe"; run "" addins import enscape "$T/other.exe"; expect "import refuses a file the catalog does not know" 1 "Enscape-4.18.2.1657-lts.exe"
+reset; bottle rvt2024-a 2024 2024; revit_exe rvt2024-a 2024; mkdir -p "$BOTTLES/rvt2024-a/drive_c/users/crossover/AppData/Roaming/pyRevit-Master"; run "" status --json
+check "status lists installed add-ins" grep -qF '"addins":["pyrevit"]' <<<"$OUT"
+mkdir -p "$BOTTLES/rvt2024-a/drive_c/ProgramData/Autodesk/Revit/Addins/2024"; touch "$BOTTLES/rvt2024-a/drive_c/ProgramData/Autodesk/Revit/Addins/2024/RevitLookup.addin"; run "" status --json
+check "status sees RevitLookup by its manifest" grep -qF '"revitlookup"' <<<"$OUT"
 
 # ---- end ----
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]

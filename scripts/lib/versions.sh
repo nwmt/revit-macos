@@ -17,7 +17,7 @@ REVIT_SUPPORTED=(); for _y in $(revit_years); do REVIT_SUPPORTED+=("$_y"); done;
 
 load_profile() { # $1 = year: sets YEAR and the profile variables (scripts/profiles/<year>.sh); 1 = no such profile
   INSTALLER=""; DOTNET=""; PRODKEY=""; SIGNIN=""; LICENSING_OK=""; STEPS=(); PKGS=""; REVITINI=(); THEME=0
-  RICHEDIT=(); RVTFIX_ENV=(); DYNAMO=""; ADDIN_STEPS=(); LOOKUP=""; PYREVIT=""; PYREVIT_ATTACH=""; ENSCAPE=""
+  RICHEDIT=(); RVTFIX_ENV=(); DYNAMO=""; ADDIN_STEPS=(); ADDIN_WPF_SW=0; LOOKUP=""; PYREVIT=""; PYREVIT_ATTACH=""; ENSCAPE=""
   revit_supported "$1" || return 1
   . "$ROOT/scripts/profiles/$1.sh"; YEAR="$1"
 }

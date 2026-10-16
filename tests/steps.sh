@@ -476,13 +476,40 @@ reset; mkbottle rvt2024-t 2024 2024; rule "reg query HKCU\\Software\\Microsoft\\
 run_steps 2024 rvt2024-t wpfhw; expect "wpfhw: a failed registry query fails the step" 1 "wpfhw"
 reset; mkbottle rvt2024-t 2024 2024; rule "reg delete HKCU\\Software\\Microsoft\\Avalon.Graphics" 1
 run_steps 2024 rvt2024-t wpfhw; expect "wpfhw: a failed delete fails the step" 1 "wpfhw"
-reset; mkbottle rvt2024-t 2024 2024; run_steps 2024 rvt2024-t revitlookup
+reset; mkbottle rvt2024-t 2024 2024; printf '#!/bin/bash\nexit 22\n' > "$T/curl"; chmod +x "$T/curl"   # never the real GitHub
+STEP_ENV=(PATH="$T:$PATH"); run_steps 2024 rvt2024-t revitlookup
 expect "revitlookup without its installer says where it goes" 1 "revitlookup"
 check "revitlookup: the log names the missing file" grep -q "RevitLookup-2024.3.4-SingleUser.msi" "$RUN/revitlookup.log"
 reset; mkbottle rvt2027-t 2027 2027; run_steps 2027 rvt2027-t revitlookup
 expect "revitlookup: not set up for 2027 is a skip" 0 ""; check "revitlookup: in the summary" grep -qE '^   revitlookup +exit=skip ' "$RUN/summary.txt"
 reset; mkbottle rvt2024-t 2024 2024; run_steps 2024 rvt2024-t enscape
 expect "enscape: not set up for 2024" 1 "enscape"
+
+# ---- add-in catalog ----
+reset; in_repo '. "$ROOT/scripts/lib/addins.sh"; echo "${ADDIN_IDS[*]}"'; expect "the catalog lists its add-ins" 0 "enscape pdfprinter pyrevit revitlookup"
+reset; in_repo '. "$ROOT/scripts/lib/addins.sh"; for id in "${ADDIN_IDS[@]}"; do addin_load "$id" || echo "bad $id"
+    [ -n "$ADDIN_NAME" ] && [ -n "$ADDIN_STEP" ] || echo "fields $id"; declare -F "addin_files" >/dev/null || echo "files $id"
+    for y in "${REVIT_SUPPORTED[@]}"; do addin_files "$y" | while IFS=$'"'"'\t'"'"' read -r s f u h; do
+      case "$s" in tool) ;; auto) [[ "$h" =~ ^[0-9a-f]{64}$ ]] && [[ "$u" =~ ^https://github.com/ ]] || echo "auto $id $y" ;; own) ;; *) echo "src $id $y" ;; esac; done; done; done; echo checked'
+expect "every catalog file is complete, every auto file has a URL and a sha256" 0 "checked"
+check "catalog: no problems" test "$OUT" = checked
+reset; in_repo '. "$ROOT/scripts/lib/addins.sh"; load_profile 2020; addin_plan revitlookup; echo; load_profile 2025; addin_plan pdfprinter; echo; addin_plan revitlookup pyrevit'
+check "2020: RevitLookup without wpfsw" grep -qx "revitlookup trust check" <<<"$OUT"
+check "pdfprinter alone: no wpfsw, no trust" grep -qx "pdfprinter check" <<<"$OUT"
+check "2025: RevitLookup and pyRevit, trust then wpfsw once" grep -qx "revitlookup pyrevit trust wpfsw check" <<<"$OUT"
+reset; mkbottle rvt2020-t 2020 2020; mkdir -p "$R/installers/addins/enscape" "$R/installers/redist/nuget"
+touch "$R/installers/addins/enscape/Enscape-3.4.4-94564.msi" "$R/installers/redist/nuget/system.valuetuple.4.5.0.nupkg"
+run_steps 2020 rvt2020-t enscape; expect "enscape without EULA consent refuses" 1 "enscape"
+check "enscape: the log says how to accept" grep -q "REVIT_ACCEPT_EULA=enscape" "$RUN/enscape.log"
+check "enscape: no installer ran" not_called "Enscape.msi"
+reset; mkbottle rvt2024-t 2024 2024; printf '#!/bin/bash\necho "curl $*" >> "%s"; exit 22\n' "$CALLS" > "$T/curl"; chmod +x "$T/curl"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" PATH="$T:$PATH" /bin/bash "$R/scripts/run-steps.sh" 2024 rvt2024-t revitlookup 2>&1)"; RC=$?
+expect "revitlookup without its file tries to download it" 1 "revitlookup"
+check "revitlookup: the download is from GitHub" called "curl -fL"
+reset; in_repo '. "$ROOT/scripts/lib/addins.sh"; for y in "${REVIT_SUPPORTED[@]}"; do load_profile "$y"
+    addin_load revitlookup; [ -z "$LOOKUP" ] || addin_files "$y" | cut -f2 | grep -qx "$LOOKUP" || echo "lookup $y"
+    addin_load pyrevit; [ -z "$PYREVIT" ] || addin_files "$y" | cut -f2 | grep -qx "$PYREVIT" || echo "pyrevit $y"; done; echo checked'
+expect "the catalog names the files the profiles name" 0 "checked"; check "catalog = profiles" test "$OUT" = checked
 
 # ---- scripts around the install ----
 reset; cat > "$CXF/bin/cxbottle" <<EOF

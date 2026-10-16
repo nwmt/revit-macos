@@ -2,18 +2,13 @@
 # installer). ./revit addins runs the year's ADDIN_STEPS; others: scripts/run-steps.sh <year> <bottle> <step…>.
 # Installers are in installers/addins/ (installers/README.md). Sourced by scripts/run-steps.sh.
 
-addin_dirs() { # the user's Addins folder, then the two all-users ones (the second since 2027)
-  echo "$B/drive_c/users/crossover/AppData/Roaming/Autodesk/Revit/Addins/$YEAR"
-  echo "$B/drive_c/ProgramData/Autodesk/Revit/Addins/$YEAR"
-  echo "$B/drive_c/Program Files/Autodesk/Revit/Addins/$YEAR"
-}
 net_release() { w reg query 'HKLM\Software\Microsoft\NET Framework Setup\NDP\v4\Full' /v Release 2>/dev/null \
   | tr -d '\r' | awk '/Release/{print $3}' | xargs printf '%d\n' 2>/dev/null; }
 
 step_revitlookup() {
   local f="$DATA/installers/addins/$LOOKUP" rc
   [ -n "$LOOKUP" ] || { skip "RevitLookup is not set up for Revit $YEAR"; return 0; }
-  [ -f "$f" ] || { echo "no installers/addins/$LOOKUP (installers/README.md, Add-ins)"; return 1; }
+  [ -f "$f" ] || { addin_load revitlookup && addin_fetch revitlookup; } || { echo "no installers/addins/$LOOKUP (installers/README.md, Add-ins)"; return 1; }
   cp "$f" "$B/drive_c/RevitLookup.msi" || return 1
   w msiexec /i 'C:\RevitLookup.msi' /qn /l*v 'C:\revitlookup.msi.log'; rc=$?
   rm -f "$B/drive_c/RevitLookup.msi"; mv "$B/drive_c/revitlookup.msi.log" "$RUN_DIR/" 2>/dev/null
@@ -25,7 +20,7 @@ step_pyrevit() { # pyRevit 4.8.12 for 2020 (its IPY277 engine runs on .NET 4.7; 
   # The 4.8 installer runs `attach master 277 --installed` but does not find Revit 2020: PYREVIT_ATTACH attaches it
   local f="$DATA/installers/addins/$PYREVIT" rc pyr='C:\users\crossover\AppData\Roaming\pyRevit-Master\bin\pyrevit.exe'
   [ -n "$PYREVIT" ] || { skip "pyRevit is not set up for Revit $YEAR"; return 0; }
-  [ -f "$f" ] || { echo "no installers/addins/$PYREVIT (installers/README.md, Add-ins)"; return 1; }
+  [ -f "$f" ] || { addin_load pyrevit && addin_fetch pyrevit; } || { echo "no installers/addins/$PYREVIT (installers/README.md, Add-ins)"; return 1; }
   run_exe pyRevit-setup "$f" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- '/LOG=C:\pyrevit-setup.log'; rc=$?
   mv "$B/drive_c/pyrevit-setup.log" "$RUN_DIR/" 2>/dev/null
   accept_codes "$rc" 0 || { echo "the pyRevit installer returned $rc"; return 1; }
@@ -108,6 +103,7 @@ step_enscape() { # Enscape with its fixes, for the version in the profile (ENSCA
 enscape3() { # Enscape 3.4.4 (Revit 2019–2023). Without UI its MSI needs ACCEPTEULA=1 (LaunchCondition; otherwise a
   # silent 1603): it accepts the Enscape EULA — run this step only if you accept it
   local i="$DATA/installers" rc vt
+  eula_ok enscape || { echo "The Enscape installer accepts the Enscape EULA. To accept it: REVIT_ACCEPT_EULA=enscape (./revit addins <year> --only enscape --accept-eula enscape)"; return 1; }
   [ -f "$i/addins/enscape/Enscape-3.4.4-94564.msi" ] || { echo "no installers/addins/enscape/Enscape-3.4.4-94564.msi"; return 1; }
   [ -f "$i/redist/nuget/system.valuetuple.4.5.0.nupkg" ] || { echo "no installers/redist/nuget/system.valuetuple.4.5.0.nupkg"; return 1; }
   cp "$i/addins/enscape/Enscape-3.4.4-94564.msi" "$B/drive_c/Enscape.msi" || return 1
@@ -135,6 +131,7 @@ enscape4() { # Enscape 4.18 LTS for Revit 2027; the renderer is its own process,
   # Enscape EULA — run this step only if you accept it
   local i="$DATA/installers" s32="$B/drive_c/windows/system32" rc tmp svc n d c
   local a='HKCU\Software\Wine\AppDefaults\Enscape.RendererHost.exe\DllOverrides'
+  eula_ok enscape || { echo "The Enscape installer accepts the Enscape EULA. To accept it: REVIT_ACCEPT_EULA=enscape (./revit addins <year> --only enscape --accept-eula enscape)"; return 1; }
   command -v 7zz >/dev/null || { echo "7zz required: brew install sevenzip"; return 1; }
   [ -f "$i/addins/enscape/Enscape-4.18.2.1657-lts.exe" ] || { echo "no installers/addins/enscape/Enscape-4.18.2.1657-lts.exe"; return 1; }
   run_exe Enscape-setup "$i/addins/enscape/Enscape-4.18.2.1657-lts.exe" -gui=0 -auto; rc=$?
