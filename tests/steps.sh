@@ -86,6 +86,20 @@ reset; in_repo '. "$ROOT/scripts/lib/wine.sh"; for f in "$ROOT"/scripts/steps/*.
     for s in ${STEPS[@]+"${STEPS[@]}"} ${ADDIN_STEPS[@]+"${ADDIN_STEPS[@]}"}; do declare -F "step_$s" >/dev/null || echo "missing: $y $s"; done
   done; echo checked'
 expect "every step of every profile has a function" 0 "checked"; check "no profile names a missing step" test -z "$(grep missing <<<"$OUT")"
+# ./revit doctor has an entry for every step function (its checks, or why it has none), and none for a step that is gone
+reset; in_repo '. "$ROOT/scripts/lib/wine.sh"; for f in "$ROOT"/scripts/steps/*.sh; do . "$f"; done
+  declare -F | sed -n "s/^declare -f step_//p" | LC_ALL=C sort | tr "\n" " "; echo
+  python3 -I -B -c "import sys; sys.path.insert(0, sys.argv[1]); import doctor; print(chr(32).join(sorted(doctor.FIXES)) + chr(32))" "$ROOT/tools"'
+check "doctor's table covers every step function, and only those" eval '[ "$(sed -n 1p <<<"$OUT")" = "$(sed -n 2p <<<"$OUT")" ] && [ -n "$(sed -n 1p <<<"$OUT")" ]'
+reset; in_repo 'load_profile 2020; profile_json; load_profile 2027; profile_json'
+check "profile_json: one JSON object per profile, with its lists" eval '/usr/bin/perl -MJSON::PP -ne '"'"'my $j = decode_json($_);
+  exit 1 unless ref $j->{STEPS} eq "ARRAY" && ref $j->{PKGS} eq "ARRAY" && ref $j->{RICHEDIT} eq "ARRAY"; print "$j->{YEAR} ",
+  scalar @{$j->{STEPS}}, " $j->{STEPS}[0] ", scalar @{$j->{PKGS}}, " $j->{DOTNET} [$j->{ENSCAPE}] $j->{RVTFIX_ENV}[0]\n"'"'"' <<<"$OUT" |
+  tr "\n" "|" | grep -qxF "2020 21 netfx 0 netfx47 [3] RVTFIX_CEF_ARGS=|2027 20 vc 29 net10 [4] |"'
+reset; mkdir -p "$T/real"; ln -s "$T/real" "$T/link"; ln -s "$T/nowhere" "$T/dangling"
+in_repo 'for p in "$HOME/not/there/yet" "'"$T"'/link/sub" "'"$T"'/dangling"; do free_gb "$p"; volume_id "$p"; done'
+check "free_gb and volume_id: a number for a path that is not there, a link, a link to nothing" \
+  eval '[ "$(grep -cE "^[0-9]+$" <<<"$OUT")" = 6 ] && [ "$(sed -n 2p <<<"$OUT")" = "$(stat -f %d "$T")" ]'
 reset; in_repo 'load_profile 2020 && echo "${#STEPS[@]} ${STEPS[0]} ${STEPS[20]}"'; expect "the 2020 profile has its 21 steps" 0 "21 netfx samples"
 reset; in_repo 'for y in "${REVIT_SUPPORTED[@]}"; do load_profile "$y"; in_list pdfprinter "${STEPS[@]}" && echo "$y"; done; echo checked'
 expect "no year installs the PDF printer by default" 0 "checked"; check "pdfprinter in no STEPS" test "$OUT" = checked
@@ -533,14 +547,56 @@ for d in riched20 usp10 msls31; do echo "ms $d" > "$R/installers/redist/win7sp1/
 printf '#!/bin/bash\nexit 0\n' > "$T/bin/winetricks"; chmod +x "$T/bin/winetricks"
 lic_rule 1 2020; release_rule 0x70805; sc_running
 rule "rvt.cmd" 0 "mkdir -p '$RV20/Samples'; touch '$RV20/Revit.exe' '$RV20/Samples/rac_basic_sample_project.rvt' '$RV20/Samples/rac_basic_sample_family.rfa'"
+rule "dotNetFx47.exe" 0 "mkdir -p '$BOTTLES/rvt2020-t/drive_c/windows/Microsoft.NET/Framework64/v4.0.30319'; touch '$BOTTLES/rvt2020-t/drive_c/windows/Microsoft.NET/Framework64/v4.0.30319/clr.dll'"
 STEP_ENV=(PATH="$T/bin:$PATH"); run_steps 2020 rvt2020-t
 expect "the whole 2020 profile runs" 0 "samples"; miss=""
-check "a run without failed steps prints no file error" eval '! grep -q "No such file" <<<"$OUT"' 
+check "a run without failed steps prints no file error" eval '! grep -q "No such file" <<<"$OUT"'
 for s in netfx vc fonts licensing svcshim adsso rcl rvt ret materials register ncryptshim ssoenv wbemshim richedit dynamo \
   d3d9dxvk warpshim rvtfix tlbpin samples; do grep -qE "^   $s +exit=0 " "$RUN/summary.txt" || miss+=" $s"; done
 check "2020: every step done (missing:$miss)" test -z "$miss"
 check "2020: no failed.txt" test ! -e "$RUN/failed.txt"
 check "2020: rvtfix keeps CefSharp's flag off" grep -q '"RVTFIX_CEF_ARGS" = ""' "$BOTTLES/rvt2020-t/cxbottle.conf"
+# ./revit doctor after it: every check of the fixes is ok (the fake wine writes no registry: those checks come later)
+doctor_fixes() { # $1 = year, $2 = bottle: "<id> <status>" of each check of the fixes group that is not ok, then fixes=<count>
+  cp "$REPO/revit" "$R/revit"
+  (cd / && "${SANDBOX_ENV[@]}" /bin/bash "$R/revit" doctor "$1" "$2" --json 2>/dev/null) | /usr/bin/perl -MJSON::PP -e '
+    my $j = eval { decode_json(join "", <STDIN>) } or do { print "no JSON\n"; exit }; my $n = 0;
+    for (@{$j->{checks}}) { next unless $_->{group} eq "fixes"; $n++; print "$_->{id} $_->{status}\n" if $_->{status} ne "ok" }
+    print "fixes=$n\n"'
+}
+OUT="$(doctor_fixes 2020 rvt2020-t)"
+check "doctor 2020: every fix it checks is in place" grep -qxE "fixes=(1[0-9]|[2-9][0-9])" <<<"$OUT"
+check "doctor 2020: none of them fails" test "$(wc -l <<<"$OUT" | tr -d ' ')" = 1
+
+# the whole 2026 profile, then doctor: all of its fixes ok; one artifact removed or changed: exactly its check fails
+reset; mkbottle rvt2026-t 2026 ""; mkdist 2026; D="$R/installers/extracted/revit2026"; C26="$BOTTLES/rvt2026-t/drive_c"
+RV26="$C26/Program Files/Autodesk/Revit 2026"; WV26="$C26/Program Files (x86)/Microsoft/EdgeWebView/Application/141.0.3537.71"
+mkdir -p "$D/3rdParty/x64/VCRedist/2022" "$D/3rdParty/x86/VCRedist/2022" "$D/3rdParty/x64/dotNet/80" "$D/3rdParty/x64/WebView2" \
+  "$D/x64/ONE" "$R/installers/redist/win7sp1/x64" "$T/bin"
+touch "$D/3rdParty/x64/VCRedist/2022/VC_redist.x64.exe" "$D/3rdParty/x86/VCRedist/2022/VC_redist.x86.exe" "$D/x64/ONE/one.msi" \
+  "$D/3rdParty/x64/dotNet/80/windowsdesktop-runtime-8.0.1-win-x64.exe" "$D/3rdParty/x64/WebView2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+printf '<Packages><Package name="ONE" path="x64/ONE/pkg.ONE.xml"/></Packages>' > "$D/manifest/app.RVT.xml"
+echo '<Package><InstallFile type="MSI" file="x64/ONE/one.msi"/></Package>' > "$D/x64/ONE/pkg.ONE.xml"
+for d in riched20 usp10 msls31 msftedit; do echo "ms $d" > "$R/installers/redist/win7sp1/x64/$d.dll"; done
+printf '#!/bin/bash\nexit 0\n' > "$T/bin/winetricks"; chmod +x "$T/bin/winetricks"
+lic_rule 84 2026; sc_running
+rule "netdesk80" 0 "mkdir -p '$C26/Program Files/dotnet/shared/Microsoft.WindowsDesktop.App/8.0.1'"
+rule "idmgr.exe" 0 "mkdir -p '$C26/Program Files/Autodesk/AdskIdentityManager/1.2.3'"
+rule "rvt.cmd" 0 "mkdir -p '$RV26'; touch '$RV26/Revit.exe'"
+rule "webview2.exe" 0 "mkdir -p '$WV26'; touch '$WV26/msedgewebview2.exe'"
+STEP_ENV=(PATH="$T/bin:$PATH" ODIS_PKGS=ONE); run_steps 2026 rvt2026-t
+expect "the whole 2026 profile runs" 0 "wv2fix"; check "2026: no failed.txt" test ! -e "$RUN/failed.txt"
+OUT="$(doctor_fixes 2026 rvt2026-t)"
+check "doctor 2026: every fix it checks is in place" grep -qxE "fixes=(1[5-9]|[2-9][0-9])" <<<"$OUT"
+check "doctor 2026: nothing else" test "$(wc -l <<<"$OUT" | tr -d ' ')" = 1
+rm "$RV26/d3dwp.dll"; OUT="$(doctor_fixes 2026 rvt2026-t)"
+check "doctor: a removed fix file fails its own check only" test "$(sed '$d' <<<"$OUT")" = "fixes.warpshim.revit.d3dwp.dll fail"
+cp "$R/build/d3dwp/d3dwp.dll" "$RV26/"; printf 'x' >> "$C26/windows/system32/version_orig.dll"; OUT="$(doctor_fixes 2026 rvt2026-t)"
+check "doctor: a changed copy of a CrossOver file warns on its own check only" \
+  test "$(sed '$d' <<<"$OUT")" = "fixes.warpshim.system32.version_orig.dll warn"
+python3 -I "$R/tools/pe_mark.py" "$CXF/lib/wine/x86_64-windows/version.dll" "$C26/windows/system32/version_orig.dll" "Wine orig    DLL"
+rm -rf "$WV26"; OUT="$(doctor_fixes 2026 rvt2026-t)"
+check "doctor: a missing WebView2 runtime fails its own check only" test "$(sed '$d' <<<"$OUT")" = "fixes.webview2 fail"
 
 # ---- steps: add-ins ----
 reset; mkbottle rvt2024-t 2024 2024; run_steps 2024 rvt2024-t wpfsw trust check
