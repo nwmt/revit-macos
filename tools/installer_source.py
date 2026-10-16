@@ -11,9 +11,42 @@ Kinds: create-installer (2024+: Autodesk's small tool and the files its manifest
 download, every part in one folder), archive (a base archive without the tool). Updates: the manifest's and every
 update/*.exe of both folders, one copy per name. Large files are hashed once per (path, size, mtime in ns)."""
 import glob, hashlib, json, os, re, shutil, subprocess, sys, tempfile
+import xml.etree.ElementTree as ET
 
 PART = re.compile(r"_(\d{3})_(\d{3})\.sfx\.exe$", re.I)
 ARCH = (".7z", ".zip", ".iso")
+MAX_XML = 4 << 20   # Autodesk's manifests are 1-20 KB
+
+
+def xml_root(data):
+    """The root element of an Autodesk manifest, from bytes or a file path; tag names without their namespace. A
+    DOCTYPE (entities) is refused; a file that does not parse is a ValueError."""
+    if isinstance(data, str):
+        with open(data, "rb") as f:
+            data = f.read(MAX_XML + 1)
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        head = data.decode("utf-16", "replace")
+    else:
+        head = data.decode("utf-16-le" if data[:2] == b"<\0" else "utf-8", "replace")
+    if len(data) > MAX_XML or "<!DOCTYPE" in head or "<!ENTITY" in head:
+        raise ValueError("not an installer manifest")
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError as e:
+        raise ValueError(f"not an installer manifest ({e})")
+    for e in root.iter():
+        if isinstance(e.tag, str) and "}" in e.tag:
+            e.tag = e.tag.rsplit("}", 1)[1]
+    return root
+
+
+def build_number(root):
+    """The BuildNumber of a manifest's own Identity (an update also lists the builds it applies to), else the first."""
+    e = root.find("Identity/BuildNumber")
+    if e is None:
+        e = next(root.iter("BuildNumber"), None)
+    t = (e.text or "").strip() if e is not None else ""
+    return t or None
 
 
 def natural(name):   # the order of sort -V for these names
@@ -36,7 +69,8 @@ def expected_sums(checksums, year):
 
 
 def manifest(ci):
-    """(base URLs, updates as (url, size, sha256, build)) of a Create Installer, read with 7zz."""
+    """(base URLs, updates as (url, size, sha256, build)) of a Create Installer, read with 7zz. The XML is parsed:
+    Autodesk's manifests put attributes in any order."""
     tmp = tempfile.mkdtemp()
     try:
         subprocess.run(["7zz", "x", "-y", "-o" + tmp, ci, "collection.xml", "bootstrap.json", "*/setup_ext.xml", "*/*/setup.xml"],
@@ -44,18 +78,20 @@ def manifest(ci):
         col = os.path.join(tmp, "collection.xml")
         if not os.path.exists(col):
             raise SystemExit(f"{os.path.basename(ci)}: no collection.xml inside — not an Autodesk Create Installer?")
-        m = re.search(r"<BrowserImageUrl>([^<]*)", open(col, encoding="utf-8").read())
-        base = [u for u in (m.group(1).split(";") if m else []) if u.strip()]
+        urls = next((e.text or "" for e in xml_root(col).iter("BrowserImageUrl")), "")
+        base = [u for u in urls.split(";") if u.strip()]
         if not base:
             raise SystemExit(f"{os.path.basename(ci)}: lists no full installer (BrowserImageUrl) — please report this")
         ups = []
         for ext in glob.glob(os.path.join(tmp, "*", "setup_ext.xml")):
-            for d in re.findall(r'<Package\s[^>]*sourceDir="([^"]+)"', open(ext, encoding="utf-8").read()):
-                s = open(os.path.join(os.path.dirname(ext), d, "setup.xml"), encoding="utf-8").read()
-                b = re.search(r"<BuildNumber[^>]*>([^<]+)", s)
-                pay = re.search(r"<Payload.*?</Payload>", s, re.S)
-                for c, n, u in re.findall(r'<File checkSum="(\w+)" sizePacked="(\d+)"[^>]*>([^<]+)</File>', pay.group(0) if pay else ""):
-                    ups.append((u, int(n), c.lower(), b.group(1) if b else "?"))
+            for d in [p.get("sourceDir") for p in xml_root(ext).iter("Package") if p.get("sourceDir")]:
+                s = xml_root(os.path.join(os.path.dirname(ext), d, "setup.xml"))
+                b = build_number(s) or "?"
+                pay = next(s.iter("Payload"), None)
+                for f in pay.iter("File") if pay is not None else ():
+                    c, n, u = f.get("checkSum", ""), f.get("sizePacked", ""), (f.text or "").strip()
+                    if re.fullmatch(r"\w+", c) and n.isdigit() and u:
+                        ups.append((u, int(n), c.lower(), b))
         return base, ups
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
