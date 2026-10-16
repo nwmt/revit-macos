@@ -3,8 +3,17 @@
 ## Test reports
 
 The most useful contribution is a test report: which Revit version, which Mac, which CrossOver version, what worked
-and what did not. Open an issue with the **Test report** template. `./revit logs <year>` shows where the logs are;
-[Report a problem](docs/troubleshooting.md#report-a-problem) says which file to attach.
+and what did not. Open an issue with the **Test report** template and attach what `./revit report <year>` makes
+([Report a problem](docs/troubleshooting.md#report-a-problem)).
+
+`./revit test <year>` adds a check that runs by itself. It starts Revit in a temporary copy of your bottle on this Mac,
+using the sign-in you made there, and deletes the copy afterwards; Autodesk files and licensing are not changed. In the
+copy it plays short journals: start and quit, a new project from a template saved with Save As, then that file
+opened again and saved under a new name. It reports each one as passed or failed, with times. It does not check
+sign-in, add-ins, web panels, exports or how Revit looks. Before it runs: sign in once by starting Revit from
+`~/Applications`, quit Revit, and leave the Mac alone while Revit opens and closes. Then run `./revit report <year>`:
+the report includes the test result. Revit starts as usual, so Autodesk's sign-in check and usage reporting run as
+they do when you start it yourself.
 
 ## Pull requests
 
@@ -21,7 +30,7 @@ and what did not. Open an issue with the **Test report** template. `./revit logs
 7. Mark a feature as working only after a real run. Untested is "not tested",
    a guess is a guess.
 8. Status words: see the scale in the [README](README.md#which-versions-work).
-9. `tests/revit-cli.sh`, `tests/plans.sh`, `tests/steps.sh`, `tests/shims.sh` and
+9. `tests/revit-cli.sh`, `tests/plans.sh`, `tests/steps.sh`, `tests/shims.sh`, `tests/smoke.sh` and
    `python3 -I -m unittest discover -s tests -p 'test_*.py'` must pass. After a
    deliberate change to a year's plan or steps, `UPDATE=1 tests/plans.sh` rewrites
    `tests/plans/`; review that diff.
@@ -43,6 +52,8 @@ Each fact lives in one place. Other pages link to it instead of repeating it.
 | Microsoft components in the bottle and where each comes from | `docs/how-it-works.md` |
 | Speed numbers | `docs/benchmarks.md`; one sentence in the README |
 | Status scale | README |
+| What `./revit test` checks | CONTRIBUTING (Test reports) |
+| The run record in a bottle | `docs/how-it-works.md` |
 
 A version page has these sections, in this order: the status line, `## Works`, `## Known issues`, `## Not tested`,
 `## Notes` (only if needed).
@@ -61,6 +72,21 @@ Wording:
 - The status words Works, Mostly works and Not tested appear only in a version's status line and the README table.
 - Tone: "you", present tense, facts. No "simply", "just", "seamless", no superlatives.
 - At most one alert (`> [!NOTE]` and the like) per page. No badges, banners or hand-made table of contents.
+- Every warning a command prints (`!` lines of `./revit check` and `./revit doctor`) has a second line that says what
+  to do.
+
+## Supporting a new Revit year
+
+1. `python3 -I -B tools/installer_drift.py packages installers/extracted/revit<year>` lists the installer's packages
+   against the nearest year's `PKGS`.
+2. Add `scripts/profiles/<year>.sh` (copy the nearest year) and the year's cases in `tests/steps.sh` and the add-in
+   catalogs in `scripts/addins/`; `UPDATE=1 tests/plans.sh` writes `tests/plans/<year>.txt`.
+3. Install it, sign in once, then `./revit doctor <year>`, `./revit test <year>` and `./revit report <year>`.
+4. Add the README row and `versions/<year>.md` only with what a real run showed.
+
+The journals of `./revit test` in `scripts/smoke/` are written by hand: `Jrn.*` command lines and our own comments,
+never a journal Revit recorded and never text from another project's journals. `python3 -I -B tools/smoke.py lint`
+checks them.
 
 ## Releases
 

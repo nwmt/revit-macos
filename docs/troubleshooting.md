@@ -5,6 +5,13 @@ Find what you see. Each entry says which Revit versions it applies to. `<year>` 
 
 ## First
 
+### Check the setup
+
+All versions
+
+**Solution:** `./revit doctor <year>`. It checks this Mac, CrossOver and the bottle, changes nothing and lists each
+problem with what to do. `./revit doctor` without a year checks only the Mac and CrossOver.
+
 ### Start over
 
 All versions
@@ -22,14 +29,17 @@ All versions
 
 All versions
 
-1. Run `./revit logs <year>`. It lists the newest logs, newest first.
-2. If `./revit install` failed: copy what Terminal shows from `Step failed` to the end. If it names a `Last log`,
-   attach that file.
-3. If Revit fails when it starts or while you work: run `./revit debug <year>`, make the problem happen, and quit
-   Revit. Attach `stdout.log` and the last 200 lines of `wine.cxlog` from the newest `…-debug` folder in
-   `logs/<bottle>/`.
-4. Remove your name, email and your Mac's name from the files.
-5. [Open a test report](https://github.com/nwmt/revit-macos/issues/new?template=test-report.yml).
+1. If Revit fails when it starts or while you work: run `./revit debug <year>`, make the problem happen, and quit
+   Revit. A failed `./revit install` already left its logs.
+2. Run `./revit report <year>`. It writes `report.txt` and `report.zip` and prints where they are.
+3. Read both before you post them.
+4. [Open a test report](https://github.com/nwmt/revit-macos/issues/new?template=test-report.yml): paste `report.txt`,
+   attach `report.zip`.
+
+To remove personal data, `./revit report` reads your Mac user name, computer name and serial number, and the Autodesk
+user name and ID that Revit keeps in the bottle (Revit.ini, journals). It keeps them in memory only and puts
+placeholders such as `<USER>` in their place. It never opens sign-in, licensing or browser data, and uploads nothing.
+It removes what it recognizes. A file it cannot clean is left out, and `report.txt` says so.
 
 A Revit bug that also happens on Windows goes to Autodesk. A CrossOver problem that also happens in other apps goes
 to CodeWeavers.
@@ -40,8 +50,18 @@ to CodeWeavers.
 
 All versions
 
-**Solution:** `./revit rebuild <year>`. If it stops there again, [report a problem](#report-a-problem) and attach the
-`svccheck.log` it names.
+**Solution:** `./revit rebuild <year>`. If it stops there again, [report a problem](#report-a-problem).
+
+## Start
+
+### Revit does not start from ~/Applications, nothing happens
+
+All versions
+
+Often after a macOS upgrade: Rosetta 2 is gone, and the Revit app fails without a message.
+
+**Solution:** `./revit doctor <year>` names the cause. If it says Rosetta 2 is missing:
+`softwareupdate --install-rosetta --agree-to-license`.
 
 ## Sign-in
 

@@ -35,6 +35,6 @@ body:
   - type: textarea
     id: log
     attributes:
-      label: Log (optional)
-      description: From ./revit logs. Remove your name, email and Mac name.
+      label: Report (optional)
+      description: Paste report.txt from ./revit report <year>, and attach report.zip below the form.
       render: shell
