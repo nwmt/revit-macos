@@ -1270,7 +1270,7 @@ def _scan(path, start=0, first=1, lits=ERROR_LITS):
         n, carry = first, b""
         while left > 0 or carry:
             block = f.read(min(SCAN_BLOCK, left)) if left > 0 else b""
-            left -= len(block)
+            left = left - len(block) if block else 0   # a file cut short while read: what was read is all
             buf = carry + block
             cut = buf.rfind(b"\n") + 1 if left > 0 and block else len(buf)
             if cut == 0 and len(buf) < 4 * SCAN_BLOCK:

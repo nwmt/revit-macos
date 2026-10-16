@@ -595,6 +595,23 @@ class Extracts(unittest.TestCase):
         self.assertEqual(out[0], "line 18: !! failure at 17")
         self.assertTrue(out[2].startswith("line 3001: xxx") and len(out[2]) <= rp.LINE_MAX)
 
+    def test_error_file_cut_short_while_read(self):
+        real = os.fstat
+
+        class Grown:   # the size when opened is larger than what is there to read: the file was cut short
+            def __init__(self, st):
+                self.st_size = st.st_size + 5000
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "x.log")
+            with open(p, "w") as f:
+                f.write("one\n!! two\nthree\n")   # ends with a line end: nothing carried over
+            rp.os.fstat = lambda fd: Grown(real(fd))
+            try:
+                out = rp.error_file(p)
+            finally:
+                rp.os.fstat = real
+        self.assertEqual(out, ["line 2: !! two"])
+
     def cx_header(self, when):
         return ["***** %s" % when,
                 "Starting: '/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine' '--bottle' 'client-x' "
