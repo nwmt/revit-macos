@@ -9,8 +9,8 @@
 build takes files by type and only the parts that help (never a whole log, nothing from sign-in, licensing or a
 browser), puts placeholders such as <USER> where personal data was, then checks every part again with a gate that does
 not trust the replacing. Of a log (a failed step's or action's, an MSI log, stdout.log, wine.cxlog) it takes only the
-lines that report an error or a crash, each checked on its own, and the fields of a CrossOver header; of a Revit
-journal, its allowed lines. A part that fails the gate is left out and report.txt says so; when report.txt itself
+lines that report an error or a crash (its own list and the warn signatures of tools/signatures.py), each checked on
+its own, and the fields of a CrossOver header; of a Revit journal, its allowed lines. A part that fails the gate is left out and report.txt says so; when report.txt itself
 fails, there is no report (exit 1). The parts are made in a private temporary folder; only what passed is moved to DIR.
 --json prints {report_txt, report_zip, left_out[], summary, refused, hits}.
 
@@ -45,6 +45,7 @@ import zipfile
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bottleread  # noqa: E402
+import signatures  # noqa: E402
 
 REPORT_MAX = 20 * 1024          # report.txt: well inside a GitHub issue body (~65,000 characters)
 ZIP_MAX = 5 * 1024 * 1024
@@ -1073,21 +1074,15 @@ def journal_extract(lines, keep=None):
 
 
 # The lines of a log that may go into a report: those that report an error or a crash. (a literal every match holds:
-# the fast search through a big log; the pattern that decides, on the whole line, or None for the literal itself)
+# the fast search through a big log; the pattern that decides, on the whole line, or None for the literal itself).
+# Our own and the installer's failure lines, then the warn signatures of tools/signatures.py: one list with the catalog
 ERROR_LINE = (
-    ("Return value 3", r"Return value 3\b"),              # MSI: an action failed
     ("Error ", r"\bError \d{4}\b"),                       # MSI and Windows Installer error codes
     ("returned actual error code", None),                 # MSI: a custom action failed
     ("!!", r"^\s*!!"),                                    # our scripts' own failure lines
     ("exit=", r"^\s+\S+\s+exit=(?!0(?!\S)|skip(?!\S))\S"),   # a summary line of a step that did not end with 0
-    ("wine: Unhandled ", r"wine: Unhandled (?:page fault|exception)"),
-    ("err:eventlog:ReportEventW", None),                  # a .NET fatal error or unhandled exception
-    ("unrecoverable error", None),
-    ("captureTryCrash", None),
-    ("Exception occurred", None),
-    ("Assertion failed", None),
-)
-ERROR_RX = re.compile("|".join(p or re.escape(lit) for lit, p in ERROR_LINE))
+) + signatures.error_lines()   # MSI Return value 3, wine: Unhandled, ReportEventW, unrecoverable error, ...
+ERROR_RX = re.compile("|".join(collections.OrderedDict.fromkeys(p or re.escape(lit) for lit, p in ERROR_LINE)))
 ERROR_LITS = tuple(lit.encode() for lit, _ in ERROR_LINE)
 
 
@@ -1580,7 +1575,7 @@ def _collect(root, data, bdir, year, bottle, run, doctor_json, now):
                           src="bottle: Revit.ini", keep="head")
             j = bottleread.newest_journal(bdir, year)
             if j and _regular(j):
-                ex = journal_extract(bottleread.read_lines(j))
+                ex = journal_extract(bottleread.read_lines(j), keep=signatures.journal_rx())
                 for s in ex[:80]:
                     m = re.match(r"^' (Build|Release):\s*(.+)$", s)
                     if m:

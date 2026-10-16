@@ -269,9 +269,10 @@ def newest_journal(bottle, year):
     return max(paths, key=lambda p: (os.path.getmtime(p), p)) if paths else None
 
 
-def read_lines(path, max_bytes=None, max_line=4000):
+def read_lines(path, max_bytes=None, max_line=4000, start=0):
     """Lines of a text file that may be huge, binary in places or still growing: decoded with errors='replace', read
-    up to the size the file had when opened (or max_bytes), each line cut to max_line characters."""
+    up to the size the file had when opened (or max_bytes), each line cut to max_line characters. start: a byte offset
+    to begin at; the line it falls in is skipped, so the first line given is the next whole one."""
     try:
         f = open(path, "rb")
     except OSError:
@@ -281,6 +282,16 @@ def read_lines(path, max_bytes=None, max_line=4000):
         if max_bytes is not None:
             size = min(size, max_bytes)
         left = size
+        if start > 0:
+            f.seek(start - 1)   # from the byte before: when it ends a line, nothing of the next one is lost
+            left = size - start + 1
+            while left > 0:
+                raw = f.readline(min(left, 1 << 16))
+                if not raw:
+                    break
+                left -= len(raw)
+                if raw.endswith(b"\n"):
+                    break
         while left > 0:
             raw = f.readline(min(left, 1 << 16))
             if not raw:

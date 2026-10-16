@@ -52,6 +52,7 @@ import uuid
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from bottleread import ini_get, journals_dir, newest_journal, read_conf, read_ini, read_lines  # noqa: E402
+from signatures import journal_strong  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATES = os.path.join(ROOT, "scripts", "smoke")
@@ -67,7 +68,7 @@ PROVENANCE = "' Written by hand for ./revit test; no recorded or third-party jou
 PLACEHOLDERS = ("VERSION", "FORMAT", "TEMPLATE", "TEMPLATE_NAME")
 OLE = bytes.fromhex("d0cf11e0a1b11ae1")   # a compound file: what a .rvt starts with
 
-STRONG = ("unrecoverable error", "Exception occurred", "captureTryCrash", "Assertion failed")
+STRONG = journal_strong()   # [(name, regex)]: the journal lines of tools/signatures.py that mean Revit crashed
 WINE_CRASH = re.compile(r"wine: Unhandled (?:page fault|exception)")
 # sign-in, licensing, EULA, trial: in a dialog id (TaskDialog_..., Dialog_...) and in a dialog's text
 PERSON_ID = re.compile(r"sign_?(?:in|out)|log_?(?:in|out|on)|licen[cs]|eula|trial|adsso|identity|entitle|subscription",
@@ -274,9 +275,8 @@ def scan(path):
             prev = j["last"] = t
             if j["idle"] is None and "appPriv idle" in line:
                 j["idle"] = t
-        low = line.lower()
-        for s in STRONG:
-            if s.lower() in low and s not in j["strong"]:
+        for s, rx in STRONG:
+            if s not in j["strong"] and rx.search(line):
                 j["strong"].append(s)
         m = PLAYBACK.search(line)
         if m:

@@ -168,6 +168,16 @@ class Journals(Tmp):
         self.assertEqual(lines[3], "last")
         self.assertEqual(len(lines), 4)
 
+    def test_read_lines_from_an_offset(self):
+        data = b"first\nsecond line\nthird\n"
+        p = self.write("o.txt", data)
+        self.assertEqual(list(br.read_lines(p, start=3)), ["second line", "third"])   # inside a line: the next one
+        self.assertEqual(list(br.read_lines(p, start=6)), ["second line", "third"])   # at a line's start: that one
+        self.assertEqual(list(br.read_lines(p, start=7)), ["third"])
+        self.assertEqual(list(br.read_lines(p, start=len(data))), [])
+        self.assertEqual(list(br.read_lines(p, start=len(data) + 10)), [])
+        self.assertEqual(list(br.read_lines(p, start=6, max_bytes=12)), ["second"])
+
 
 if __name__ == "__main__":
     unittest.main()
