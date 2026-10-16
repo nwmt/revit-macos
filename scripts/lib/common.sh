@@ -4,7 +4,8 @@
 . "$ROOT/scripts/lib/versions.sh"
 CX="${REVIT_CX:-/Applications/CrossOver.app/Contents/SharedSupport/CrossOver}"
 BOTTLES="$HOME/Library/Application Support/CrossOver/Bottles"
-LOCK_FILE="$ROOT/logs/.lock"
+LOCK_DIR="${REVIT_LOCK_DIR:-$HOME/Library/Application Support/revit-macos}"   # one for every clone and the app:
+LOCK_FILE="$LOCK_DIR/lock"                                                    # they share the bottles
 STOP_REQUESTED=0; CHILD=""
 
 die()       { echo "$*" >&2; exit 1; }
@@ -31,27 +32,50 @@ run_dir_new() { # $1 = folder under logs/ (a bottle name, or revit<year>), $2 = 
   echo "$d"
 }
 
-# ---- the lock: one for everything that changes state (bottles, installers/, build/, toolchain/) ----
+result_set() { # $1 = key, $2 = value: the run's result for ./revit (and the app); nothing without a run context
+  [ -n "${REVIT_RUN_CTX:-}" ] && [ -d "$REVIT_RUN_CTX" ] || return 0
+  local f="$REVIT_RUN_CTX/result"
+  { grep -v "^$1=" "$f" 2>/dev/null; printf '%s=%s\n' "$1" "$2"; } > "$f.new" && mv -f "$f.new" "$f"
+}
+result_default() { # $1 = result, set only when nothing more precise was set (in_use, source_mismatch, busy)
+  [ -n "${REVIT_RUN_CTX:-}" ] && ! grep -q '^result=' "$REVIT_RUN_CTX/result" 2>/dev/null && result_set result "$1"; return 0
+}
+
+# ---- the lock: one for everything that changes state, shared by every clone and the app (bottles are shared) ----
 # flock on fd 9 (macOS has no flock(1), so through the system perl). It holds while any process keeps fd 9 open: the
 # script, its child scripts, curl, 7zz. The kernel drops it when the last one closes, so there is no stale lock to
 # remove. Wine runs with fd 9 closed (scripts/lib/wine.sh): wineserver outlives the script by hours.
-lock_fd_ours() { # fd 9 is open on this clone's logs/.lock: a script up the chain took the lock
+lock_fd_ours() { # fd 9 is open on the shared lock file: a script up the chain took the lock
   [ -e /dev/fd/9 ] || return 1
   /usr/bin/perl -e 'open(my $f, ">&=", 9) or exit 2; my @a = stat($f); my @b = stat($ARGV[0]) or exit 3;
     exit(($a[0] == $b[0] && $a[1] == $b[1]) ? 0 : 1)' "$LOCK_FILE" 2>/dev/null
 }
 lock_flock9() { /usr/bin/perl -MFcntl=:flock -e 'open(my $f, ">&=", 9) or exit 2; flock($f, LOCK_EX | LOCK_NB) or exit 1' 2>/dev/null; }
-lock_owner() { cat "$LOCK_FILE.owner" 2>/dev/null || echo "another task"; }
-lock_take() { # $* = what this script does (shown to whoever finds the lock busy)
-  mkdir -p "$ROOT/logs" || die "Cannot write to $(tilde "$ROOT/logs")."
+lock_owner_field() { sed -n "s/^$1=//p" "$LOCK_FILE.owner" 2>/dev/null | head -1; }   # $1 = key
+lock_owner() { # the owner's command text; an owner file of an older clone is one line of text
+  local c; c="$(lock_owner_field command)"
+  [ -n "$c" ] || c="$(head -1 "$LOCK_FILE.owner" 2>/dev/null)"
+  echo "${c:-another task}"
+}
+lock_owner_write() { # $1 = command text. Through a temporary file and mv: a reader sees the old file or the new one
+  local tmp="$LOCK_FILE.owner.$$"
+  { printf 'command=%s\nrun_id=%s\npid=%s\n' "$1" "${REVIT_RUN_ID:-}" "$$"
+    printf 'pid_start=%s\n' "$(ps -o lstart= -p $$ 2>/dev/null | sed 's/^ *//')"
+    printf 'pgid=%s\nctx=%s\n' "$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')" "${REVIT_RUN_CTX:-}"; } > "$tmp" \
+    && mv -f "$tmp" "$LOCK_FILE.owner"
+}
+lock_take() { # [--no-trap] $* = what this script does (shown to whoever finds the lock busy). --no-trap: ./revit
+  # supervising a child sets its own handlers
+  local traps=1; [ "${1:-}" = --no-trap ] && { traps=0; shift; }
+  mkdir -p "$LOCK_DIR" || die "Cannot write to $(tilde "$LOCK_DIR")."
   if ! { lock_fd_ours && lock_flock9; }; then   # not inherited: take it
     exec 9>>"$LOCK_FILE" || die "Cannot open $(tilde "$LOCK_FILE")."
-    lock_flock9 || die "Another task is running: $(lock_owner). Wait until it finishes, then try again."
-    printf '%s\n' "$*" > "$LOCK_FILE.owner"
+    lock_flock9 || { result_set result busy; die "Another task is running: $(lock_owner). Wait until it finishes, then try again."; }
+    lock_owner_write "$*"
   fi
   # TERM/HUP/INT (Ctrl-C): let the running Wine program finish (bash runs the trap after the foreground command), pass
   # TERM on to a child script started with run_child (a background child ignores INT), stop at the next stop_check
-  trap 'STOP_REQUESTED=1; [ -z "$CHILD" ] || kill -TERM "$CHILD" 2>/dev/null' TERM HUP INT
+  [ $traps = 0 ] || trap 'STOP_REQUESTED=1; [ -z "$CHILD" ] || kill -TERM "$CHILD" 2>/dev/null' TERM HUP INT
 }
 lock_free() { # 0 when nobody else holds the lock (for ./revit's checks before it takes the lock itself)
   lock_fd_ours && lock_flock9 && return 0

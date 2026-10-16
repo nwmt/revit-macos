@@ -3,6 +3,12 @@
 # (REVIT_CX) and stub install scripts. Runs them under /bin/bash 3.2, as on a user's Mac. Nothing real is touched.
 # Usage: tests/revit-cli.sh
 set -uo pipefail
+# every control variable of the engine: none of the caller's may reach the sandbox (a REVIT_DATA or REVIT_SOURCE_LIST
+# could point at real folders); tests set what they need after this
+CLEAN_ENV=(-u REVIT_DATA -u REVIT_LOCK_DIR -u SHIMS_DIR -u REVIT_BUNDLED -u REVIT_EVENTS_FD -u REVIT_RUN_ID -u REVIT_RUN_CTX
+  -u REVIT_ACCEPT_EULA -u REVIT_SOURCE_LIST -u REVIT_REUSE_EXTRACTED -u REVIT_REEXTRACT -u REVIT_UNPACK_AGAIN
+  -u REVIT_FOR_BOTTLE -u INSTALL_PARENT -u W_CACHE -u SHIMS_FROM_SOURCE -u RUN_DIR -u RUN_KIND -u CX_RECREATE
+  -u INSTALL_DRYRUN -u REVIT_LANG -u ODIS_PKGS -u REVIT_THEME -u REVIT_YEAR)
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)" && [ -d "$TMP" ] || { echo "mktemp failed" >&2; exit 1; }   # an empty TOP would be the current folder
 TOP="$(cd "$TMP" && pwd -P)" || exit 1   # /var → /private/var: lsof reports real paths
@@ -72,25 +78,25 @@ fake_revit() { # $1 = bottle, $2 = year: a process that looks like Revit.exe and
   PIDS="$PIDS $!"; sleep 1
 }
 fake_lock() { # $1 = owner text: a process that holds the repo's lock as a running script would
-  mkdir -p "$R/logs"
+  mkdir -p "$H/Library/Application Support/revit-macos"
   perl -MFcntl=:flock -e 'open(my $f, ">>", $ARGV[0]) or die; flock($f, LOCK_EX) or die;
-    open(my $o, ">", "$ARGV[0].owner") or die; print $o "$ARGV[1]\n"; close $o; sleep 60' "$R/logs/.lock" "$1" &
+    open(my $o, ">", "$ARGV[0].owner") or die; print $o "$ARGV[1]\n"; close $o; sleep 60' "$H/Library/Application Support/revit-macos/lock" "$1" &
   PIDS="$PIDS $!"; sleep 1
 }
 run() { # $1 = what to type at the prompt; rest = ./revit arguments. Sets OUT and RC.
   local input="$1"; shift; : > "$CALLS"
-  OUT="$(cd / && printf '%s\n' "$input" | env -u REVIT_YEAR -u INSTALL_DRYRUN -u CX_RECREATE \
+  OUT="$(cd / && printf '%s\n' "$input" | env "${CLEAN_ENV[@]}" \
     HOME="$H" REVIT_CX="$CXF" /bin/bash "$R/revit" "$@" 2>&1)"; RC=$?
 }
 run_install() { # real install.sh in the sandbox; $1 = extra env (VAR=value or ""), rest = arguments
   local extra="$1"; shift; cp "$REPO/install.sh" "$R/install.sh"
-  OUT="$(cd / && env -u INSTALL_DRYRUN -u CX_RECREATE HOME="$H" REVIT_CX="$CXF" $extra /bin/bash "$R/install.sh" "$@" 2>&1)"; RC=$?
+  OUT="$(cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" $extra /bin/bash "$R/install.sh" "$@" 2>&1)"; RC=$?
 }
 run_racing() { # like run, but runs shell code $1 while ./revit waits at its prompt, then types $2
   local act="$1" input="$2" i; shift 2; : > "$CALLS"; : > "$T/out"
   { for i in $(seq 1 100); do grep -q "to continue" "$T/out" 2>/dev/null && break; sleep 0.1; done
     eval "$act"; printf '%s\n' "$input"; } \
-    | (cd / && env -u REVIT_YEAR -u INSTALL_DRYRUN -u CX_RECREATE HOME="$H" REVIT_CX="$CXF" /bin/bash "$R/revit" "$@" > "$T/out" 2>&1)
+    | (cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" /bin/bash "$R/revit" "$@" > "$T/out" 2>&1)
   RC=$?; OUT="$(cat "$T/out")"
 }
 expect() { # $1 = test name, $2 = exit code, $3 = text the output contains ("" = anything)

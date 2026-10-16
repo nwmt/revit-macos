@@ -4,6 +4,12 @@
 # get-toolchain.sh that only records the call.
 # Runs under /bin/bash 3.2. Nothing real is touched, nothing is downloaded. Usage: tests/shims.sh
 set -uo pipefail
+# every control variable of the engine: none of the caller's may reach the sandbox (a REVIT_DATA or REVIT_SOURCE_LIST
+# could point at real folders); tests set what they need after this
+CLEAN_ENV=(-u REVIT_DATA -u REVIT_LOCK_DIR -u SHIMS_DIR -u REVIT_BUNDLED -u REVIT_EVENTS_FD -u REVIT_RUN_ID -u REVIT_RUN_CTX
+  -u REVIT_ACCEPT_EULA -u REVIT_SOURCE_LIST -u REVIT_REUSE_EXTRACTED -u REVIT_REEXTRACT -u REVIT_UNPACK_AGAIN
+  -u REVIT_FOR_BOTTLE -u INSTALL_PARENT -u W_CACHE -u SHIMS_FROM_SOURCE -u RUN_DIR -u RUN_KIND -u CX_RECREATE
+  -u INSTALL_DRYRUN -u REVIT_LANG -u ODIS_PKGS -u REVIT_THEME -u REVIT_YEAR)
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)" && [ -d "$TMP" ] || { echo "mktemp failed" >&2; exit 1; }
 TOP="$(cd "$TMP" && pwd -P)" || exit 1
@@ -47,7 +53,7 @@ echo "fake \$(basename "\$o")" > "\$o"
 EOF
   chmod +x "$CCF"
 }
-run() { OUT="$(cd / && env -u SHIMS_FROM_SOURCE -u RUN_DIR -u FAKE_ZIP HOME="$T/home" PATH="$T/bin:$PATH" "$@" 2>&1)"; RC=$?; }
+run() { OUT="$(cd / && env "${CLEAN_ENV[@]}" -u FAKE_ZIP HOME="$T/home" PATH="$T/bin:$PATH" "$@" 2>&1)"; RC=$?; }
 ALL="d3dwp/d3dwp.dll ncryptshim/ncrypt.dll pdfprinter/add_printer.exe rvtfix/rvtfix.dll svcshim/svcshim.exe tlbpin/msls31.dll vkshim/vulkan-1.dll wbemshim/wbemshim.dll wv2fix/version.dll"
 V="$(sed -n 's/^SHIMS_VERSION=//p' "$REPO/scripts/lib/shims.sh")"   # the pinned version: the tests follow the pin
 OLD="d3dwp/d3dwp.dll ncrypt-shim/ncrypt.dll pdf-printer/add_printer.exe rvtfix/rvtfix.dll svcshim/svcshim.exe tlbpin/msls31.dll vkshim/vulkan-1.dll wbem-shim/wbemshim.dll wv2fix/version.dll"

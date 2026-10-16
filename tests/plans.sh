@@ -5,6 +5,12 @@
 #   install.sh runs for real with stub actions: arguments with spaces, a failed action, failed steps after Revit.exe.
 # Runs under /bin/bash 3.2. Nothing real is touched.
 set -uo pipefail
+# every control variable of the engine: none of the caller's may reach the sandbox (a REVIT_DATA or REVIT_SOURCE_LIST
+# could point at real folders); tests set what they need after this
+CLEAN_ENV=(-u REVIT_DATA -u REVIT_LOCK_DIR -u SHIMS_DIR -u REVIT_BUNDLED -u REVIT_EVENTS_FD -u REVIT_RUN_ID -u REVIT_RUN_CTX
+  -u REVIT_ACCEPT_EULA -u REVIT_SOURCE_LIST -u REVIT_REUSE_EXTRACTED -u REVIT_REEXTRACT -u REVIT_UNPACK_AGAIN
+  -u REVIT_FOR_BOTTLE -u INSTALL_PARENT -u W_CACHE -u SHIMS_FROM_SOURCE -u RUN_DIR -u RUN_KIND -u CX_RECREATE
+  -u INSTALL_DRYRUN -u REVIT_LANG -u ODIS_PKGS -u REVIT_THEME -u REVIT_YEAR)
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)" && [ -d "$TMP" ] || { echo "mktemp failed" >&2; exit 1; }
 TOP="$(cd "$TMP" && pwd -P)" || exit 1
@@ -22,7 +28,7 @@ reset() {
 # ---- snapshots ----
 for y in 2020 2023 2024 2025 2026 2027; do
   reset
-  out="$(cd / && env -u INSTALL_DRYRUN -u CX_RECREATE -u RUN_DIR HOME="$H" REVIT_CX="$T/no-crossover" /bin/bash "$R/revit" check "$y" 2>&1 | sed -n '/^Plan:/,$p')"
+  out="$(cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$T/no-crossover" /bin/bash "$R/revit" check "$y" 2>&1 | sed -n '/^Plan:/,$p')"
   if [ "${UPDATE:-0}" = 1 ]; then printf '%s\n' "$out" > "$REPO/tests/plans/$y.txt"; ok "plan $y written"
   elif [ "$out" = "$(cat "$REPO/tests/plans/$y.txt")" ]; then ok "plan $y"
   else fail "plan $y" "$(diff <(printf '%s\n' "$out") "$REPO/tests/plans/$y.txt")"; fi
@@ -50,7 +56,7 @@ echo tlbpin >> "\$RUN_DIR/failed.txt"; exit 1
 EOF
     chmod +x "$R"/scripts/*.sh
   }
-  INST_ENV=(env -u RUN_DIR -u RUN_KIND -u CX_RECREATE -u INSTALL_DRYRUN HOME="$H" REVIT_CX="$CXF" PATH="$T/bin:$PATH")
+  INST_ENV=(env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" PATH="$T/bin:$PATH")
   inst() { OUT="$(cd / && "${INST_ENV[@]}" /bin/bash "$R/install.sh" "$@" 2>&1)"; RC=$?; }
   prep; inst 2024 rvt2024-t
   if [ "$RC" = 1 ] && grep -qF "Some steps failed" <<<"$OUT" && grep -qx "  tlbpin" <<<"$OUT"; then ok "install.sh goes on after a failed fix and lists it"

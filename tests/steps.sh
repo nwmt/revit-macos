@@ -3,6 +3,12 @@
 # HOME and a fake CrossOver (REVIT_CX) whose wine records its arguments and follows rules. Runs under /bin/bash 3.2.
 # Nothing real is touched. Usage: tests/steps.sh
 set -uo pipefail
+# every control variable of the engine: none of the caller's may reach the sandbox (a REVIT_DATA or REVIT_SOURCE_LIST
+# could point at real folders); tests set what they need after this
+CLEAN_ENV=(-u REVIT_DATA -u REVIT_LOCK_DIR -u SHIMS_DIR -u REVIT_BUNDLED -u REVIT_EVENTS_FD -u REVIT_RUN_ID -u REVIT_RUN_CTX
+  -u REVIT_ACCEPT_EULA -u REVIT_SOURCE_LIST -u REVIT_REUSE_EXTRACTED -u REVIT_REEXTRACT -u REVIT_UNPACK_AGAIN
+  -u REVIT_FOR_BOTTLE -u INSTALL_PARENT -u W_CACHE -u SHIMS_FROM_SOURCE -u RUN_DIR -u RUN_KIND -u CX_RECREATE
+  -u INSTALL_DRYRUN -u REVIT_LANG -u ODIS_PKGS -u REVIT_THEME -u REVIT_YEAR)
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)" && [ -d "$TMP" ] || { echo "mktemp failed" >&2; exit 1; }
 TOP="$(cd "$TMP" && pwd -P)" || exit 1
@@ -57,14 +63,14 @@ builtin_dll() { # a file that carries Wine's builtin marker where Wine puts it (
 }
 rule() { printf '%s\t%s\t%s\n' "$1" "$2" "${3:-}" >> "$RULES"; }   # $1 = text in wine's arguments, $2 = exit, $3 = code
 # control variables of the caller's shell must not reach the sandbox (a RUN_DIR could point at a real folder)
-SANDBOX_ENV=(env -u SHIMS_FROM_SOURCE -u RUN_DIR -u RUN_KIND -u CX_RECREATE -u INSTALL_DRYRUN -u REVIT_LANG -u ODIS_PKGS -u REVIT_THEME HOME="$H" REVIT_CX="$CXF")
+SANDBOX_ENV=(env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF")
 in_repo() { # $1 = bash code run with ROOT set and common.sh loaded (cwd /, fake HOME and CrossOver). Sets OUT, RC
   OUT="$(cd / && "${SANDBOX_ENV[@]}" ROOT="$R" /bin/bash -c '. "$ROOT/scripts/lib/common.sh"; '"$1" 2>&1)"; RC=$?
 }
 hold_lock() { # $1 = owner text: a background process that holds the lock like a script would, until stop_bg
-  mkdir -p "$R/logs"
+  mkdir -p "$H/Library/Application Support/revit-macos"
   /usr/bin/perl -MFcntl=:flock -e 'open(my $f, ">>", $ARGV[0]) or die; flock($f, LOCK_EX) or die;
-    open(my $o, ">", "$ARGV[0].owner") or die; print $o "$ARGV[1]\n"; close $o; sleep 60' "$R/logs/.lock" "$1" &
+    open(my $o, ">", "$ARGV[0].owner") or die; print $o "$ARGV[1]\n"; close $o; sleep 60' "$H/Library/Application Support/revit-macos/lock" "$1" &
   PIDS="$PIDS $!"; sleep 0.5
 }
 
@@ -106,6 +112,26 @@ reset; ( cd / && "${SANDBOX_ENV[@]}" ROOT="$R" /bin/bash -c '. "$ROOT/scripts/li
 PIDS="$PIDS $!"; sleep 0.5; in_repo 'lock_take test; echo took'; expect "exec keeps the lock" 1 "Another task is running: execer."
 reset; in_repo 'lock_free && echo free'; expect "lock_free: free" 0 "free"
 reset; hold_lock holder; in_repo 'lock_free && echo free'; expect "lock_free: held" 1 ""
+reset; mkdir -p "$T/other/scripts/lib"; cp "$R/scripts/lib/"*.sh "$T/other/scripts/lib/"; cp -R "$R/scripts/profiles" "$T/other/scripts/"
+hold_lock "install.sh 2024 rvt2024-t"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" ROOT="$T/other" /bin/bash -c '. "$ROOT/scripts/lib/common.sh"; lock_take test; echo took' 2>&1)"; RC=$?
+expect "two ROOTs share the lock" 1 "Another task is running: install.sh 2024 rvt2024-t."
+stop_bg
+reset; in_repo 'REVIT_RUN_ID=r1 REVIT_RUN_CTX=/x/ctx; lock_take "./revit install 2025 rvt2025-a"; cat "$LOCK_FILE.owner"; echo; lock_owner'
+expect "the owner file has its fields" 0 "command=./revit install 2025 rvt2025-a"
+check "owner: run_id" grep -qx "run_id=r1" <<<"$OUT"
+check "owner: ctx" grep -qx "ctx=/x/ctx" <<<"$OUT"
+check "owner: pid and its start time" eval 'grep -qE "^pid=[0-9]+$" <<<"$OUT" && grep -qE "^pid_start=[A-Z][a-z]{2} " <<<"$OUT"'
+check "lock_owner prints the command only" eval '[ "$(tail -1 <<<"$OUT")" = "./revit install 2025 rvt2025-a" ]'
+reset; mkdir -p "$H/Library/Application Support/revit-macos"
+printf 'install.sh 2023 rvt2023-a\n' > "$H/Library/Application Support/revit-macos/lock.owner"
+in_repo 'lock_owner'; expect "a one-line owner file still names the owner" 0 "install.sh 2023 rvt2023-a"
+reset; in_repo 'lock_take --no-trap quiet; trap -p INT; echo end'
+check "lock_take --no-trap sets no trap" eval '! grep -q "trap --" <<<"$OUT"'
+reset; in_repo 'lock_take test; echo took'; expect "first run creates the lock folder" 0 "took"
+check "the lock is outside the repo" test -e "$H/Library/Application Support/revit-macos/lock"
+check "no lock in the repo" test ! -e "$R/logs/.lock"
+reset; hold_lock holder; mkdir -p "$T/ctx"; in_repo 'REVIT_RUN_CTX="'"$T"'/ctx"; lock_take x'; check "a busy lock is a busy result" grep -qx "result=busy" "$T/ctx/result"
 
 # ---- bottle_guard ----
 mkbottle() { # $1 = name, $2 = year in the description ("" = none), $3 = year of the Revit folder ("" = none)
