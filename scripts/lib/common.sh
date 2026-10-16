@@ -2,6 +2,12 @@
 # Source after setting ROOT:  ROOT="$(cd "$(dirname "$0")/.." && pwd)"; . "$ROOT/scripts/lib/common.sh"
 # Defines functions and variables only. REVIT_CX (tests only) points at a fake CrossOver.
 . "$ROOT/scripts/lib/versions.sh"
+if [ -f "$ROOT/.app-bundle" ]; then   # inside <App>.app/Contents/Resources/engine (app/make-bundle.sh writes the file):
+  # the app's data folder, its shims only, and the tools next to the engine before anything on PATH (Homebrew, the CLT)
+  APP_NAME="$(sed -n 's/^app_name=//p' "$ROOT/.app-bundle")"; APP_RES="${ROOT%/engine}"
+  export REVIT_BUNDLED="${REVIT_BUNDLED:-1}" REVIT_DATA="${REVIT_DATA:-$HOME/Library/Application Support/$APP_NAME}"
+  case ":$PATH:" in *":$APP_RES/bin:"*) ;; *) export PATH="$APP_RES/bin:$APP_RES/python/bin:$PATH" ;; esac
+fi
 DATA="${REVIT_DATA:-$ROOT}"   # what the scripts write (installers, unpacked files, logs); the app sets it, a clone does not
 shim_dir() { echo "${SHIMS_DIR:-$ROOT/build}"; }   # our shims: build/ of a clone, or the app's prebuilt copy
 CX="${REVIT_CX:-/Applications/CrossOver.app/Contents/SharedSupport/CrossOver}"
@@ -14,6 +20,14 @@ die()       { echo "$*" >&2; exit 1; }
 usage_die() { echo "$*" >&2; exit 2; }
 tilde() { case "$1" in "$HOME"/*) echo "~${1#"$HOME"}" ;; *) echo "$1" ;; esac; }
 bottle_path() { echo "$BOTTLES/$1"; }
+app_path() { # the <App>.app this engine is inside; 1 for a clone
+  [ -f "$ROOT/.app-bundle" ] || return 1
+  case "$ROOT" in */Contents/Resources/engine) echo "${ROOT%/Contents/Resources/engine}" ;; *) return 1 ;; esac
+}
+app_placement() { # $1 = app path → ok (in /Applications or ~/Applications) | move (a DMG, Downloads, App Translocation)
+  case "$1" in */AppTranslocation/*) echo move; return 0 ;; esac
+  case "$1" in /Applications/*|"$HOME"/Applications/*) echo ok ;; *) echo move ;; esac
+}
 bottle_sfx() { [ "$1" = "$(revit_bottle_default "$2")" ] || printf ' %s' "$1"; }   # hints name a non-default bottle
 
 free_gb() { # what Finder and System Settings call "available": includes purgeable space that df does not count

@@ -148,6 +148,10 @@ if [ "$CMD" = status ]; then
     printf '"busy":{"busy":%s,"command":%s,"run_id":%s,"pid":%s,"pid_start":%s,"pgid":%s,"ctx":%s},' "$busy" \
       "$(json_str "$([ $busy = true ] && lock_owner)")" "$(json_str "$(lock_owner_field run_id)")" "$(json_str "$(lock_owner_field pid)")" \
       "$(json_str "$(lock_owner_field pid_start)")" "$(json_str "$(lock_owner_field pgid)")" "$(json_str "$(lock_owner_field ctx)")"
+    if ap="$(app_path)"; then   # only inside the app: a clone's JSON stays as it was
+      printf '"app":{"name":%s,"version":%s,"path":%s,"placement":%s},' "$(json_str "$APP_NAME")" \
+        "$(json_str "$(sed -n 's/^app_version=//p' "$ROOT/.app-bundle")")" "$(json_str "$ap")" "$(json_str "$(app_placement "$ap")")"
+    fi
     printf '"bottles":[%s]}\n' "$b_json"
   else
     [ -n "$human" ] && printf '%s' "$human" || echo "No Revit bottles yet. To install one: ./revit install <year>"
