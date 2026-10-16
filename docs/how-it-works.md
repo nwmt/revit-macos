@@ -100,6 +100,11 @@ installers, unpacked files and logs out of the project folder. With `--events <f
 JSON lines to `<folder>/events.ndjson`, ending with one `end` line that carries the result. `./revit status --json`,
 `./revit find-installer <folder> --json` and `./revit addins list <year> --json` answer the app's questions.
 
+Inside the app the engine lives in `Contents/Resources/engine` and runs read-only: it keeps installers, unpacked files
+and logs in `~/Library/Application Support/<app name>`, and uses only the tools the app brings (7-Zip, cabextract,
+winetricks, Python) and its own copy of the shims. Nothing it writes into a bottle or `~/Applications` points into the
+app, so moving the app breaks nothing. `scripts/check-bundle.sh` checks the app's tools and shims.
+
 ## Our shims in tools/
 
 | Tool | What it fixes |

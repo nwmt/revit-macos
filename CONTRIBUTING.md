@@ -68,6 +68,12 @@ Shim DLLs are built and published by GitHub Actions, never by hand: push a tag `
 Then set `SHIMS_VERSION` and `SHIMS_SHA256` in `scripts/lib/shims.sh` to the new release, so
 `./revit install` downloads it. Until then, clones with changed shim sources build them from source.
 
+The menu bar app is built and published the same way: push a tag `app-vX.Y.Z` (`.github/workflows/app.yml` runs
+`app/build.sh` and publishes a pre-release with the DMG and the 7-Zip and cabextract sources). The tools it bundles
+are pinned in `app/tools.sh`, its name and minimum macOS in `app/app.conf`. If the shim sources changed since the
+pinned shims release, release the shims first: the app build refuses shims that do not fit the sources.
+`app/build.sh <version>` builds the same DMG locally; the Command Line Tools are enough.
+
 Locally, `scripts/build-shims.sh [name…]` builds shims into `build/<name>/` (the compiler comes from
 `scripts/get-toolchain.sh`). The list of shims is `SHIMS` in `scripts/lib/shims.sh`; each one's flags are in
 `build-shims.sh`.
