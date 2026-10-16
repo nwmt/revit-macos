@@ -77,7 +77,7 @@ hold_lock() { # $1 = owner text: a background process that holds the lock like a
 # ---- versions.sh and profiles ----
 reset; in_repo 'echo "${REVIT_SUPPORTED[*]}"'; expect "supported years come from the profiles" 0 "2020 2023 2024 2025 2026 2027"
 reset; in_repo 'load_profile 2024 && echo "$YEAR $PRODKEY ${#STEPS[@]} ${REVITINI[1]}"'
-expect "a profile loads" 0 '2024 829P1 22 Interoperability.RealDWGInstalledLocation=C:\Program Files\Autodesk\RealDWG Shared 2024\'
+expect "a profile loads" 0 '2024 829P1 21 Interoperability.RealDWGInstalledLocation=C:\Program Files\Autodesk\RealDWG Shared 2024\'
 reset; in_repo 'load_profile 2021'; expect "a year without a profile is not loaded" 1 ""
 reset; in_repo 'load_profile 2027; load_profile 2023; echo "[${ENSCAPE}] ${#ADDIN_STEPS[@]}"'
 expect "loading a profile clears the previous one" 0 "[] 5"
@@ -86,7 +86,9 @@ reset; in_repo '. "$ROOT/scripts/lib/wine.sh"; for f in "$ROOT"/scripts/steps/*.
     for s in ${STEPS[@]+"${STEPS[@]}"} ${ADDIN_STEPS[@]+"${ADDIN_STEPS[@]}"}; do declare -F "step_$s" >/dev/null || echo "missing: $y $s"; done
   done; echo checked'
 expect "every step of every profile has a function" 0 "checked"; check "no profile names a missing step" test -z "$(grep missing <<<"$OUT")"
-reset; in_repo 'load_profile 2020 && echo "${#STEPS[@]} ${STEPS[0]} ${STEPS[21]}"'; expect "the 2020 profile has its 22 steps" 0 "22 netfx samples"
+reset; in_repo 'load_profile 2020 && echo "${#STEPS[@]} ${STEPS[0]} ${STEPS[20]}"'; expect "the 2020 profile has its 21 steps" 0 "21 netfx samples"
+reset; in_repo 'for y in "${REVIT_SUPPORTED[@]}"; do load_profile "$y"; in_list pdfprinter "${STEPS[@]}" && echo "$y"; done; echo checked'
+expect "no year installs the PDF printer by default" 0 "checked"; check "pdfprinter in no STEPS" test "$OUT" = checked
 
 # ---- run folder ----
 reset; in_repo 'a="$(run_dir_new rvt2024-t steps)"; b="$(run_dir_new rvt2024-t steps)"; [ "$a" != "$b" ] && [ -d "$a" ] && [ -d "$b" ] && echo two'
@@ -447,7 +449,7 @@ rule "rvt.cmd" 0 "mkdir -p '$RV20/Samples'; touch '$RV20/Revit.exe' '$RV20/Sampl
 STEP_ENV=(PATH="$T/bin:$PATH"); run_steps 2020 rvt2020-t
 expect "the whole 2020 profile runs" 0 "samples"; miss=""
 for s in netfx vc fonts licensing svcshim adsso rcl rvt ret materials register ncryptshim ssoenv wbemshim richedit dynamo \
-  d3d9dxvk warpshim rvtfix pdfprinter tlbpin samples; do grep -qE "^   $s +exit=0 " "$RUN/summary.txt" || miss+=" $s"; done
+  d3d9dxvk warpshim rvtfix tlbpin samples; do grep -qE "^   $s +exit=0 " "$RUN/summary.txt" || miss+=" $s"; done
 check "2020: every step done (missing:$miss)" test -z "$miss"
 check "2020: no failed.txt" test ! -e "$RUN/failed.txt"
 check "2020: rvtfix keeps CefSharp's flag off" grep -q '"RVTFIX_CEF_ARGS" = ""' "$BOTTLES/rvt2020-t/cxbottle.conf"

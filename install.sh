@@ -30,7 +30,7 @@ elif [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = 1 ]; then
 fi
 /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null || need "Rosetta 2 is not installed" "softwareupdate --install-rosetta --agree-to-license"
 [ -x "$CX/bin/cxbottle" ] || need "CrossOver not found in /Applications" "install it from https://www.codeweavers.com/crossover (trial available)"
-for t in 7zz:sevenzip winetricks:winetricks cabextract:cabextract gs:ghostscript python3:python3; do
+for t in 7zz:sevenzip winetricks:winetricks cabextract:cabextract python3:python3; do
   command -v "${t%%:*}" >/dev/null || need "${t%%:*} not found" "brew install ${t#*:}"
 done
 SRC="$(revit_installers "$YEAR")"; DST="$(revit_extracted "$YEAR")"
@@ -133,5 +133,6 @@ else
   echo "which app should open the link, choose \"Autodesk Sign-In ($BOTTLE)\"."
 fi
 [ ${#ADDIN_STEPS[@]} -eq 0 ] || echo "Optional add-ins (RevitLookup, pyRevit): ./revit addins $YEAR$SFX"
+echo "PDF printer (needs Ghostscript: brew install ghostscript): ./scripts/run-steps.sh $YEAR $BOTTLE pdfprinter"
 echo "Everyday commands: ./revit"
 [ -z "$problems" ]

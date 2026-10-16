@@ -41,7 +41,7 @@ prep() { # preflight passes: fake CrossOver and tools, an unpacked installer, ms
     sed -i '' -e 's|sysctl -n hw.optional.arm64|echo 1|' -e 's|sysctl -n sysctl.proc_translated|echo 0|' \
       -e 's|/usr/bin/arch -x86_64 /usr/bin/true|true|' "$R/install.sh"
     printf '#!/bin/bash\nexit 0\n' > "$CXF/bin/cxbottle"; chmod +x "$CXF/bin/cxbottle"
-    local t; for t in 7zz winetricks cabextract gs; do printf '#!/bin/bash\nexit 0\n' > "$T/bin/$t"; chmod +x "$T/bin/$t"; done
+    local t; for t in 7zz winetricks cabextract; do printf '#!/bin/bash\nexit 0\n' > "$T/bin/$t"; chmod +x "$T/bin/$t"; done
     echo '<Setup/>' > "$R/installers/extracted/revit2024/setup.xml"; touch "$R/installers/redist/win7sp1/x64/msls31.dll"
     local s; for s in get-shims get-redist unpack-revit make-apps; do printf '#!/bin/bash\necho "%s $*" >> "%s/calls"\n' "$s" "$T" > "$R/scripts/$s.sh"; done
     cat > "$R/scripts/new-bottle.sh" <<EOF
@@ -58,6 +58,9 @@ EOF
   }
   INST_ENV=(env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" PATH="$T/bin:$PATH")
   inst() { OUT="$(cd / && "${INST_ENV[@]}" /bin/bash "$R/install.sh" "$@" 2>&1)"; RC=$?; }
+  # no Ghostscript anywhere on PATH (a Mac with Homebrew may have it): only the stubbed tools and the system
+  prep; OUT="$(cd / && "${INST_ENV[@]}" PATH="$T/bin:/usr/bin:/bin" /bin/bash "$R/install.sh" 2024 rvt2024-t 2>&1)"
+  if ! grep -q "gs not found" <<<"$OUT"; then ok "preflight does not ask for Ghostscript"; else fail "preflight does not ask for Ghostscript" "$OUT"; fi
   prep; inst 2024 rvt2024-t
   if [ "$RC" = 1 ] && grep -qF "Some steps failed" <<<"$OUT" && grep -qx "  tlbpin" <<<"$OUT"; then ok "install.sh goes on after a failed fix and lists it"
   else fail "install.sh goes on after a failed fix and lists it" "rc=$RC
