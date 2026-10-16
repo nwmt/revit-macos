@@ -357,6 +357,73 @@ reset; run "" status --json; check "status: CrossOver found in the fake" grep -q
 reset; bottle rvt2024-a 2024 2024; run "" status; expect "status without --json" 0 ""
 check "status in words" grep -qE '^  rvt2024-a +Revit 2024$' <<<"$OUT"
 
+# ---- doctor ----
+fake_wine() { # a wine in the fake CrossOver that records its calls, as wineserver and cxbottle do
+  printf '#!/bin/bash\necho "wine $*" >> "%s"\n' "$CALLS" > "$CXF/bin/wine"; chmod +x "$CXF/bin/wine"
+}
+no_wine_calls() { ! grep -qE '^(wine|wineserver|cxbottle) ' "$CALLS"; }
+rc_says() { # the exit code is 1 exactly when a check failed (a ✗ line, or "fail" in the JSON summary)
+  local f; f="$(/usr/bin/perl -MJSON::PP -e 'local $/; my $j = eval { decode_json(<STDIN>) }; print $j ? $j->{summary}{fail} : -1' <<<"$OUT")"
+  if [ "$f" = -1 ]; then grep -q '✗' <<<"$OUT" && f=1 || f=0; fi
+  if [ "$f" -gt 0 ]; then [ "$RC" = 1 ]; else [ "$RC" = 0 ]; fi
+}
+valid_doctor_json() { /usr/bin/perl -MJSON::PP -e 'local $/; my $j = decode_json(<STDIN>); my $s = $j->{summary};
+  exit 1 unless ref $j->{checks} eq "ARRAY" && @{$j->{checks}} == $s->{checks} && $s->{checks} == $s->{fail} + $s->{warn} + $s->{ok} + $s->{info};
+  for (@{$j->{checks}}) { exit 1 unless $_->{status} =~ /^(ok|warn|fail|info)$/ && join(",", sort keys %$_) eq "detail,doc,fix,group,id,status,title" }' <<<"$OUT"; }
+reset; run "" doctor 2021;           expect "doctor: an unsupported year" 1 "Revit 2021 is not supported yet"
+reset; run "" doctor rvt2025-a;      expect "doctor: a bottle where the year goes" 1 '"rvt2025-a" is not a Revit year'
+reset; run "" doctor 2025 "a b";     expect "doctor: a bad bottle name" 1 "Bottle name may contain only"
+reset; run "" doctor --frob;         expect "doctor: an unknown flag" 1 "Unknown option: --frob"
+reset; fake_wine; run "" doctor
+check "doctor without a year: this Mac and CrossOver" grep -qx "Checking this Mac and CrossOver…" <<<"$OUT"
+check "doctor without a year: exit 1 exactly with a ✗" rc_says
+check "doctor without a year: the count of checks last" eval 'tail -1 <<<"$OUT" | grep -qE "\([0-9]+ checks\)$"'
+check "doctor without a year: no bottles yet" grep -qF "  · no Revit bottles yet" <<<"$OUT"
+reset; fake_wine; bottle rvt2025-a 2025 2025; revit_exe rvt2025-a 2025; bottle exp "" ""; run "" doctor
+check "doctor without a year: one line per Revit bottle" eval 'grep -qxF "  · rvt2025-a: Revit 2025" <<<"$OUT" && ! grep -q exp <<<"$OUT"'
+reset; run "" doctor 2025;           expect "doctor: no bottle is a ✗" 1 "  ✗ there is no bottle rvt2025-a"
+check "doctor: the fix line says how to install" grep -qxF "      fix: to install Revit 2025: ./revit install 2025" <<<"$OUT"
+reset; fake_wine; bottle rvt2025-a 2025 2025; revit_exe rvt2025-a 2025; apps 2025 rvt2025-a; mkdir -p "$R/logs"
+touch "$T/stamp"; sleep 1
+run "" doctor 2025 --json;           check "doctor --json: valid JSON in the shape of the spec" valid_doctor_json
+check "doctor --json: exit 1 exactly when a check failed" rc_says
+check "doctor --json: the bottle's checks are there" grep -qF '"id":"bottle.revit","group":"bottle","status":"ok"' <<<"$OUT"
+run "" doctor 2025 --all;            check "doctor --all: the passed checks too" grep -qF "  ✓ Revit.exe is in the bottle" <<<"$OUT"
+check "doctor --all: exit 1 exactly with a ✗" rc_says
+run "" doctor 2025;                  check "doctor: problems only" eval '! grep -qF "  ✓ Revit.exe is in the bottle" <<<"$OUT"'
+run "" doctor;                       check "doctor: no wine, wineserver or cxbottle" no_wine_calls
+check "doctor writes nothing (no file newer than before it ran)" eval '[ -z "$(find "$H" "$R" -newer "$T/stamp" 2>/dev/null)" ]'
+reset; fake_wine; bottle rvt2025-a 2025 2025; revit_exe rvt2025-a 2025; fake_lock "install.sh 2025 rvt2025-a"
+run "" doctor 2025;                  check "doctor while another task holds the lock: it runs and names the task" \
+  eval 'grep -qxF "  · another task is running: install.sh 2025 rvt2025-a" <<<"$OUT" && ! grep -q "Wait until it finishes" <<<"$OUT"'
+check "doctor while the lock is held: exit as its checks say" rc_says
+reset; fake_wine; bottle rvt2025-a 2025 2025; revit_exe rvt2025-a 2025; fake_revit rvt2025-a 2025; run "" doctor 2025
+check "doctor while Revit runs: it says so and does not refuse" eval 'grep -qxF "  · Revit or its background services run in rvt2025-a" <<<"$OUT" && ! grep -q "Save your work" <<<"$OUT"'
+check "doctor while Revit runs: no wine, wineserver or cxbottle" no_wine_calls
+reset; bottle rvt2025-a 2024 2024; run "" doctor 2025; expect "doctor: a bottle of another year is a ✗" 1 "✗ bottle rvt2025-a is for Revit 2024, not 2025"
+reset; bottle rvt2024-a 2024 2024; revit_exe rvt2024-a 2024; run_install INSTALL_DRYRUN=1 2024
+check "check on an installed Revit points at doctor" grep -qxF "  Revit 2024 is installed in rvt2024-a. To check it: ./revit doctor 2024" <<<"$OUT"
+check "check on an installed Revit: not a ✗" eval '! grep -q "already exists" <<<"$OUT"'
+reset; bottle rvt2024-b 2024 2024; revit_exe rvt2024-b 2024; run_install INSTALL_DRYRUN=1 2024 rvt2024-b
+check "check on an installed Revit names a non-default bottle" grep -qF "To check it: ./revit doctor 2024 rvt2024-b" <<<"$OUT"
+reset; bottle rvt2024-a 2024 2024; run_install "" 2024
+check "install on an existing bottle is still refused" grep -qF "✗ bottle rvt2024-a already exists" <<<"$OUT"
+# free space on the volume of each path the install writes: a fake stat puts installers/extracted on another volume
+install_with() { # $1 = a folder put first on PATH: install.sh 2025 as ./revit check runs it (run_install splits at spaces)
+  cp "$REPO/install.sh" "$R/install.sh"
+  OUT="$(cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" PATH="$1:$PATH" INSTALL_DRYRUN=1 /bin/bash "$R/install.sh" 2025 2>&1)"; RC=$?
+}
+FK="$T/fake"; reset; mkdir -p "$FK" "$T/vol/x"; ln -s "$T/vol/x" "$R/installers/extracted"
+printf '#!/bin/bash\nr="$(cd "${@: -1}" 2>/dev/null && pwd -P)"\ncase "$r" in *"/vol/"*) echo 2 ;; *) echo 1 ;; esac\n' > "$FK/stat"
+printf '#!/bin/bash\ncase "$*" in *"/vol/"*) echo 5 ;; *) echo 500 ;; esac\n' > "$FK/osascript"; chmod +x "$FK/"*
+install_with "$FK"
+check "install: free space of another volume, on its own" eval 'grep -qxF "  ! only 5 GB free on the disk of installers/extracted" <<<"$OUT" &&
+  grep -qxF "      this install puts up to ~15 GB there (extracted files)" <<<"$OUT" && ! grep -q "only 500" <<<"$OUT"'
+reset; mkdir -p "$FK"; printf '#!/bin/bash\necho 30\n' > "$FK/osascript"; chmod +x "$FK/osascript"
+install_with "$FK"
+check "install: one volume adds up what goes there" eval 'grep -qxF "  ! only 30 GB free" <<<"$OUT" &&
+  grep -qxF "      an install needs up to ~40 GB (extracted files, bottle)" <<<"$OUT"'
+
 # ---- installer folder ----
 reset; mkdir -p "$T/dl"; touch "$T/dl/Revit_2020_G1_Win_64bit_r3_dlm_001_002.sfx.exe"; run "" find-installer "$T/dl" --json
 expect "find-installer --json" 0 '"year": "2020"'

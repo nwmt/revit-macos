@@ -188,6 +188,9 @@ fake_bundle() { # $1 = app path: from here on, the real assembly with the fixtur
 }
 AE="$A/Contents/Resources/engine"
 fake_bundle "$A"; chmod -R a-w "$A"
+touch "$T/before-doctor"; sleep 1; in_sandbox "$AE/revit" doctor 2025
+check "read-only bundle: doctor runs and writes nothing" eval 'grep -qE "\([0-9]+ checks\)$" <<<"$OUT" &&
+  [ -z "$(find "$A" "$H" -newer "$T/before-doctor" 2>/dev/null)" ]'
 : > "$CALLS"; in_sandbox "$AE/scripts/check-bundle.sh"
 expect "read-only bundle: check-bundle passes" 0 ""
 check "check-bundle: five ok lines" [ "$(grep -c '^ok ' <<<"$OUT")" = 5 ]
@@ -235,8 +238,12 @@ in_sandbox "$WE/revit" check 2025;                        rcs+="$RC "
 in_sandbox "$WE/revit" find-installer "$T/ci" --json;     rcs+="$RC "
 in_sandbox "$WE/revit" addins list 2025 --json;           rcs+="$RC "
 in_sandbox "$WE/scripts/get-shims.sh";                    rcs+="$RC "
+# doctor exits 0 or 1 by what this Mac has; that it ran shows in its last line ("… (N checks)") and in valid JSON
+in_sandbox "$WE/revit" doctor;                            dr1="$RC $(tail -1 <<<"$OUT" | grep -cE '\([0-9]+ checks\)$')"
+in_sandbox "$WE/revit" doctor 2025 --json;                dr2="$RC $(jget "$OUT" summary.checks | grep -cE '^[0-9]+$')"
 # each ran as it should (check 2025 stops at its preflight, as the read-only run above): the listing below means something
 check "writable bundle: the engine commands ran" [ "$rcs" = "0 0 $r1 0 0 0 " ]
+check "writable bundle: doctor ran, with and without a year" eval 'case "$dr1|$dr2" in [01]" 1|1 1") true ;; *) false ;; esac'
 check "writable bundle: running the engine changes nothing in it" [ "$before" = "$(listing "$WB")" ]
 [ "$before" = "$(listing "$WB")" ] || diff <(echo "$before") <(listing "$WB") | head -10 | sed 's/^/     /'
 

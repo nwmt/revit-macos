@@ -111,17 +111,40 @@ fi
 export REVIT_SOURCE_LIST="$SL" REVIT_UNPACK_AGAIN="$UNPACK_AGAIN" REVIT_FOR_BOTTLE="$BOTTLE"
 [ -f "$DATA/installers/redist/win7sp1/x64/msls31.dll" ] || need "installers/redist/win7sp1/x64/msls31.dll missing" \
   "copy C:\\Windows\\System32\\msls31.dll from a licensed Windows 7/10 x64 PC, see installers/README.md"
+INSTALLED=0
 if [ -d "$B" ] && [ "${CX_RECREATE:-0}" != 1 ]; then
-  need "bottle $BOTTLE already exists" "pick another name (./revit install $YEAR rvt$YEAR-b) or rebuild it: ./revit rebuild $YEAR$SFX"
+  if [ "${INSTALL_DRYRUN:-0}" = 1 ] && [ -f "$(revit_dir_unix "$B" "$YEAR")/Revit.exe" ]; then   # ./revit check
+    INSTALLED=1; echo "  Revit $YEAR is installed in $BOTTLE. To check it: ./revit doctor $YEAR$SFX"
+  else
+    need "bottle $BOTTLE already exists" "pick another name (./revit install $YEAR rvt$YEAR-b) or rebuild it: ./revit rebuild $YEAR$SFX"
+  fi
 fi
-free=$(free_gb)
-if [ -n "$GET" ]; then [ "$free" -ge 55 ] || warn "only $free GB free" "an install that downloads Revit needs up to ~55 GB (download, extracted files, bottle)"
-else [ "$free" -ge 40 ] || warn "only $free GB free" "an install needs up to ~45 GB (installer, extracted files, bottle)"; fi
+# free space on the volume of each real path the install writes: the download, the unpacked installer (unless it is
+# used as it is), the bottle. Paths on one volume add up
+V_ID=(); V_PATH=(); V_NEED=(); V_WHAT=(); V_WHERE=()
+space_for() { # $1 = path, $2 = GB it needs there, $3 = what, $4 = where it is (for the message)
+  local d i; d="$(volume_id "$1")"
+  for i in ${V_ID[@]+"${!V_ID[@]}"}; do
+    if [ "${V_ID[$i]}" = "$d" ]; then
+      V_NEED[$i]=$((V_NEED[$i] + $2)); V_WHAT[$i]+=", $3"; V_WHERE[$i]+=" and $4"; return 0
+    fi
+  done
+  V_ID+=("$d"); V_PATH+=("$1"); V_NEED+=("$2"); V_WHAT+=("$3"); V_WHERE+=("$4")
+}
+[ -z "$GET" ] || space_for "$DLD" 15 download "installers/${DLD##*/}"
+[ -d "$DST" ] && [ -z "$UNPACK_AGAIN" ] || space_for "$DATA/installers/extracted" 15 "extracted files" installers/extracted
+space_for "$BOTTLES" 25 bottle "the bottles"
+for i in "${!V_ID[@]}"; do
+  free=$(free_gb "${V_PATH[$i]}")
+  [ "$free" -ge "${V_NEED[$i]}" ] && continue
+  if [ ${#V_ID[@]} = 1 ]; then warn "only $free GB free" "an install needs up to ~${V_NEED[$i]} GB (${V_WHAT[$i]})"
+  else warn "only $free GB free on the disk of ${V_WHERE[$i]}" "this install puts up to ~${V_NEED[$i]} GB there (${V_WHAT[$i]})"; fi
+done
 H="$(hostname)"
 grep -qE "[[:space:]]$H([[:space:]]|\$)" /etc/hosts \
   || warn "this Mac's name is not in /etc/hosts — Revit waits ~5 s on every lookup of it" \
           "sudo sh -c 'printf \"127.0.0.1\\t$H\\n::1\\t$H\\n\" >> /etc/hosts'"
-[ $missing -eq 1 ] || echo "  ✓ ready"
+[ $missing -eq 1 ] || [ $INSTALLED = 1 ] || echo "  ✓ ready"
 
 # ---- plan: actions, each a script with its arguments ----
 PLAN=(shims); [ -n "$GET" ] && PLAN+=(revit); PLAN+=(redist unpack bottle steps apps)
