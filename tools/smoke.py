@@ -15,12 +15,27 @@
   smoke.py lint [FILE...]
       checks the journal templates (scripts/smoke/*.txt unless files are given); exit 1 on a problem
 
+For the runner (scripts/smoke.sh):
+  smoke.py clone-conf <cxbottle.conf> [--uuid UUID]
+      rewrites [Bottle] of a copy: MenuMode and AssocMode ignore, a new BottleID; every other line stays
+  smoke.py conf-get <file.conf> <section> <key>
+      the value of one key of a CrossOver .conf file (names without case); exit 1 if it has none
+  smoke.py replayed <clone_dir> <year> --since MARKER
+      "PATH<TAB>SIZE<TAB>IDLE" of the journal Revit writes for this run (IDLE 1 once it says appPriv idle); exit 1
+      while there is none
+  smoke.py result <state_dir> --out FILE
+      writes result.json from what the runner kept in <state_dir>; prints the run's result (ok, failed,
+      needs_person, prepare_failed, stopped)
+  smoke.py summary <result.json> [--history LOGS_DIR]
+      the table of scenarios and times, with the times of earlier passes of the same Revit year in LOGS_DIR
+
 --journal is the journal we generated, --replayed the journal.NNNN.txt Revit wrote while playing it ('' if none),
 --since the file touched just before Revit started, --outputs the Mac path of C:\\revit-smoke\\out. The runner says
 what its watchdog did and whether it saw a sign-in process (--signin-seen) or no Revit at all (--no-start).
 
 Revit's journals hold the Autodesk user name and file paths, so nothing here prints a line of one: only dialog ids,
-the build, the release, line numbers and times. Only journal writes a file (--out). Run with python3 -I -B.
+the build, the release, line numbers and times; result.json holds no path of the Mac. Only journal, clone-conf and
+result write a file. Run with python3 -I -B.
 """
 import datetime
 import glob
@@ -28,12 +43,15 @@ import json
 import ntpath
 import os
 import re
+import stat as stat_mod
 import sys
+import tempfile
 import time
+import uuid
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from bottleread import ini_get, newest_journal, read_ini, read_lines  # noqa: E402
+from bottleread import ini_get, journals_dir, newest_journal, read_conf, read_ini, read_lines  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATES = os.path.join(ROOT, "scripts", "smoke")
@@ -422,6 +440,283 @@ def verdict(scenario, journal, replayed, since, out_dir=None, watchdog="none", s
             "longest_gap": round(j["gap"], 1) if j and j["gap"] is not None else None, "outputs": outputs}
 
 
+# --- runner: the copy's cxbottle.conf, the journal of a run, result.json and the summary ---
+
+SECTION_LINE = re.compile(r"^\s*\[(.*)\]\s*(?:;[^\]]*)?$")
+FIELD_LINE = re.compile(r'^(\s*)(;*\s*)"((?:[^"\\]|\\.)*)"(\s*=\s*)"((?:[^"\\]|\\.)*)"(.*)$')
+JOURNAL_NAME = re.compile(r"journal\.\d{4}\.txt")
+RESULTS = {"pass": "passed", "fail": "failed", "person": "needs_person"}
+WORDS = {"passed": "passed", "failed": "FAILED", "needs_person": "needs you", "skipped": "skipped",
+         "stopped": "stopped"}
+NOT_CHECKED = ["sign-in", "add-ins", "web panels", "how Revit looks"]
+
+
+def _conf_escape(s):
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def clone_conf(path, bottle_id):
+    """Sets MenuMode and AssocMode to ignore (CrossOver makes no menu apps or file associations for the copy) and a new
+    BottleID in [Bottle] of a copy's cxbottle.conf. Keys match without case, as CrossOver reads them; a key that is
+    only there commented out is set on that line, as CrossOver itself does; a missing one goes after the section's
+    last key. Every other line stays as it is, CRLF too. Written to a file next to it and renamed over it, so a reader
+    sees the old file or the new one; the mode stays."""
+    want = {"menumode": ("MenuMode", "ignore"), "assocmode": ("AssocMode", "ignore"),
+            "bottleid": ("BottleID", bottle_id)}
+    with open(path, "rb") as f:
+        text = f.read().decode("utf-8", errors="surrogateescape")
+    nl = "\r\n" if "\r\n" in text else "\n"
+    lines = text.split(nl)
+    start = next((i for i, l in enumerate(lines) if (m := SECTION_LINE.match(l)) and m.group(1).lower() == "bottle"),
+                 None)
+    if start is None:
+        raise SystemExit(f"no [Bottle] section in {os.path.basename(path)}")
+    end = next((i for i in range(start + 1, len(lines)) if SECTION_LINE.match(lines[i])), len(lines))
+
+    def field(i):
+        m = FIELD_LINE.match(lines[i])
+        return (m, _unescape(m.group(3)).lower()) if m else (None, None)
+
+    def put(i, m, key):
+        name, value = want[key]
+        lines[i] = f'{m.group(1)}"{_conf_escape(name)}"{m.group(4)}"{_conf_escape(value)}"'
+
+    done, last = set(), start
+    for i in range(start + 1, end):
+        m, key = field(i)
+        if m:
+            last = i
+            if key in want and not m.group(2).strip():
+                put(i, m, key)
+                done.add(key)
+    for i in range(start + 1, end):
+        m, key = field(i)
+        if m and key in want and key not in done:
+            put(i, m, key)
+            done.add(key)
+    for key in [k for k in want if k not in done]:
+        name, value = want[key]
+        last += 1
+        lines.insert(last, f'"{name}" = "{_conf_escape(value)}"')
+    mode = stat_mod.S_IMODE(os.stat(path).st_mode)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)), prefix=".cxbottle.conf.")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(nl.join(lines).encode("utf-8", errors="surrogateescape"))
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+    got = {k.lower(): v for k, v in conf_section(path, "Bottle").items()}
+    if any(got.get(k) != v for k, (_, v) in want.items()):
+        raise SystemExit(f"{os.path.basename(path)}: the new values did not stick")
+
+
+def _unescape(s):
+    return re.sub(r"\\(.)", r"\1", s)
+
+
+def conf_section(path, section):
+    """One section of a CrossOver .conf file ({} if there is none), the section name matched without case."""
+    for name, keys in read_conf(path).items():
+        if name.lower() == section.lower():
+            return keys
+    return {}
+
+
+def conf_get(path, section, key):
+    return next((v for k, v in conf_section(path, section).items() if k.lower() == key.lower()), None)
+
+
+def replayed(clone, year, since_ns):
+    """(path, size, idle) of the journal Revit writes for this run: the newest journal.NNNN.txt that is not older than
+    the start marker, in C:\\revit-smoke first (2026 and newer write it there while they play a journal), else in
+    AppData's Journals. None while there is none."""
+    for d in (os.path.join(clone, "drive_c", "revit-smoke"), journals_dir(clone, year)):
+        best = None
+        try:
+            names = os.listdir(d)
+        except OSError:
+            continue
+        for n in names:
+            if not JOURNAL_NAME.fullmatch(n):
+                continue
+            p = os.path.join(d, n)
+            try:
+                st = os.stat(p)
+            except OSError:
+                continue
+            if stat_mod.S_ISREG(st.st_mode) and st.st_mtime_ns >= since_ns and (best is None or
+                                                                                 (st.st_mtime_ns, n) > best[0]):
+                best = ((st.st_mtime_ns, n), p, st.st_size)
+        if best:
+            return best[1], best[2], any("appPriv idle" in line for line in read_lines(best[1]))
+    return None
+
+
+def read_kv(path):
+    """key=value lines (the last one of a key counts); {} for a missing file."""
+    out = {}
+    for line in read_lines(path) if os.path.isfile(path) else ():
+        k, sep, v = line.partition("=")
+        if sep and re.fullmatch(r"[a-z_]+", k):
+            out[k] = v
+    return out
+
+
+def _load(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def _int(s):
+    return int(s) if re.fullmatch(r"\d+", s or "") else None
+
+
+def _flag(s):
+    return {"1": True, "0": False}.get(s or "")
+
+
+def template_entry(path, source):
+    """The template for result.json: its path only when it is one of Autodesk's (C:\\ProgramData\\Autodesk\\...); a
+    template of the user's own may name a firm or a client."""
+    if not path:
+        return None
+    ours = bool(re.match(r"(?i)C:\\ProgramData\\Autodesk\\", path)) and journal_safe(path) and path.isascii()
+    return {"path": path if ours else None, "source": source or None, "own": not ours}
+
+
+def build_result(state):
+    """result.json as a dict, from the runner's state folder: meta (key=value lines) and, per scenario that ran,
+    <name>.verdict.json (smoke.py verdict) and <name>.run (seconds, watchdog, worker_killed, signin_seen, no_start,
+    stopped)."""
+    meta = read_kv(os.path.join(state, "meta"))
+    names = [n for n in meta.get("scenarios", "").split() if n in SCENARIOS]
+    prep = meta.get("prepare", "")
+    stopped = meta.get("stopped") == "1"
+    scen, overall, before = [], None, None
+    for name in names:
+        run = read_kv(os.path.join(state, name + ".run"))
+        v = _load(os.path.join(state, name + ".verdict.json"))
+        e = {"name": name}
+        if isinstance(v, dict) and v.get("verdict") in RESULTS:
+            e["result"] = RESULTS[v["verdict"]]
+            e.update({k: v.get(k) for k in ("kind", "reason", "fix", "dialog_id", "build", "release", "stopped_at",
+                                            "exit_line", "t_start_idle", "t_total", "longest_gap", "outputs")})
+        elif run.get("stopped") == "1":
+            e["result"], e["reason"] = "stopped", "stopped by a signal (Ctrl-C)"
+        elif run:
+            e["result"], e["reason"] = "failed", run.get("error") or "the run gave no verdict"
+        else:
+            e["result"] = "skipped"
+            e["reason"] = before or ("the copy was not ready" if prep != "ok" else "the test stopped before it")
+        if run:
+            e.update({"seconds": _int(run.get("seconds")), "watchdog": run.get("watchdog") or "none",
+                      "revit_worker_killed": run.get("worker_killed") == "1",
+                      "signin_seen": run.get("signin_seen") == "1", "no_start": run.get("no_start") == "1"})
+        if e["result"] not in ("passed", "skipped") and before is None:
+            before = f"{name} did not pass"
+            overall = overall or {"needs_person": "needs_person", "stopped": "stopped"}.get(e["result"], "failed")
+        scen.append(e)
+    if stopped:
+        overall = "stopped"
+    elif prep and prep != "ok":
+        overall = "prepare_failed"
+    elif overall is None:
+        ran = [e for e in scen if e["result"] != "skipped"]
+        overall = "ok" if ran and not meta.get("error") else "failed"
+    year = _int(meta.get("year"))
+    return {
+        "format": 1, "tool": "./revit test", "run_id": meta.get("run_id") or None, "time": meta.get("time") or None,
+        "year": year, "bottle": meta.get("bottle") or None, "copy": meta.get("copy") or None, "result": overall,
+        "reason": meta.get("error") or (meta.get("prepare_reason") or None if prep and prep != "ok" else None),
+        "crossover": meta.get("crossover") or None, "engine": meta.get("engine") or None,
+        "prepare": {"ok": {"ok": True, "failed": False}.get(prep), "upgraded": _flag(meta.get("upgraded")),
+                    "seconds": _int(meta.get("prepare_seconds")), "reason": meta.get("prepare_reason") or None},
+        "template": template_entry(meta.get("template"), meta.get("template_source")),
+        "scenarios": scen, "copy_removed": _flag(meta.get("copy_removed")), "copy_kept": meta.get("kept") == "1",
+        "not_checked": NOT_CHECKED,
+    }
+
+
+def write_result(state, out):
+    res = build_result(state)
+    tmp = out + ".new"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(res, f, indent=1)
+        f.write("\n")
+    os.replace(tmp, out)
+    return res
+
+
+def _secs(x):
+    return f"{x:g} s" if isinstance(x, (int, float)) else "?"
+
+
+def earlier(res, history, here):
+    """{scenario: [(t_start_idle, t_total), ...]} of the newest earlier passes (at most 3 each) of the same Revit year,
+    from the result.json files of other test runs in the log folder."""
+    out = {}
+    if not history or not res.get("year"):
+        return out
+    seen = []
+    for p in glob.glob(os.path.join(history, "*", "*-test", "result.json")):
+        if here and os.path.realpath(p) == os.path.realpath(here):
+            continue
+        r = _load(p)
+        if (isinstance(r, dict) and r.get("year") == res["year"] and isinstance(r.get("time"), str)
+                and (not res.get("time") or r["time"] < res["time"]) and isinstance(r.get("scenarios"), list)):
+            seen.append(r)
+    for r in sorted(seen, key=lambda r: r["time"], reverse=True):
+        for s in r["scenarios"]:
+            if isinstance(s, dict) and s.get("result") == "passed" and isinstance(s.get("t_total"), (int, float)):
+                lst = out.setdefault(s.get("name"), [])
+                if len(lst) < 3:
+                    lst.append((s.get("t_start_idle"), s["t_total"]))
+    return out
+
+
+def summary(res, history=None, here=None):
+    """The lines ./revit test prints at the end: one per scenario, earlier times, what it does not check."""
+    year, bottle = res.get("year"), res.get("bottle") or ""
+    sfx = "" if bottle == f"rvt{year}-a" else f" {bottle}"
+    build = next(((s.get("release"), s.get("build")) for s in res.get("scenarios", []) if s.get("build")), None)
+    head = f"Revit {year} in a temporary copy of {bottle}"
+    if build:
+        head += f" (release {build[0] or '?'}, build {build[1]})"
+    lines = [head + ":"]
+    if res.get("result") == "prepare_failed":
+        lines.append(f"  CrossOver could not prepare the copy: {res.get('reason') or 'no reason given'}.")
+        lines.append("  This is not a Revit failure, and your bottle is not changed.")
+    elif res.get("reason"):
+        lines.append(f"  The test did not run: {res['reason']}.")
+    past = earlier(res, history, here)
+    for s in res.get("scenarios", []):
+        word = WORDS.get(s.get("result"), s.get("result") or "?")
+        if s.get("result") == "passed":
+            text = (f"Revit ready in {_secs(s.get('t_start_idle'))}, done in {_secs(s.get('t_total'))}, "
+                    f"longest pause {_secs(s.get('longest_gap'))}")
+        else:
+            text = s.get("reason") or ""
+        lines.append(f"  {s.get('name', '?'):<7} {word:<10} {text}".rstrip())
+        if s.get("fix"):
+            lines.append(f"  {'':<7} {'':<10} {s['fix']}")
+        if s.get("result") == "passed" and past.get(s.get("name")):
+            ready = "/".join(_secs(a)[:-2] for a, _ in past[s["name"]])
+            done = "/".join(_secs(b)[:-2] for _, b in past[s["name"]])
+            lines.append(f"  {'':<7} {'':<10} earlier passes: ready in {ready} s, done in {done} s")
+    lines.append("Not checked: " + ", ".join(NOT_CHECKED) + ".")
+    lines.append(f"To share this result: ./revit report {year}{sfx}")
+    return lines
+
+
 # --- lint ---
 
 LINT = [
@@ -501,6 +796,40 @@ def main():
         print(json.dumps(verdict(pos[0], o["journal"], o.get("replayed", ""), o["since"], o.get("outputs"),
                                  o.get("watchdog", "none"), bool(o.get("signin-seen")), bool(o.get("no-start")),
                                  o.get("crash-log"))))
+    elif cmd == "clone-conf":
+        pos, o = options(a[1:], ("--uuid",))
+        if len(pos) != 1 or not os.path.isfile(pos[0]):
+            sys.exit(__doc__)
+        bid = o.get("uuid") or str(uuid.uuid4()).upper()
+        if not re.fullmatch(r"[0-9A-Za-z-]{2,}", bid):   # what cxbottle --set-uuid accepts
+            sys.exit("--uuid: letters, digits and -")
+        clone_conf(pos[0], bid)
+    elif cmd == "conf-get" and len(a) == 4:
+        v = conf_get(a[1], a[2], a[3])
+        if v is None:
+            sys.exit(1)
+        print(v)
+    elif cmd == "replayed":
+        pos, o = options(a[1:], ("--since",))
+        if len(pos) != 2 or "since" not in o or not os.path.isfile(o["since"]):
+            sys.exit(__doc__)
+        r = replayed(pos[0], year_arg(pos[1]), os.stat(o["since"]).st_mtime_ns)
+        if not r:
+            sys.exit(1)
+        print(f"{r[0]}\t{r[1]}\t{int(r[2])}")
+    elif cmd == "result":
+        pos, o = options(a[1:], ("--out",))
+        if len(pos) != 1 or "out" not in o or not os.path.isdir(pos[0]):
+            sys.exit(__doc__)
+        print(write_result(pos[0], o["out"])["result"])
+    elif cmd == "summary":
+        pos, o = options(a[1:], ("--history",))
+        if len(pos) != 1:
+            sys.exit(__doc__)
+        res = _load(pos[0])
+        if not isinstance(res, dict):
+            sys.exit(f"cannot read {os.path.basename(pos[0])}")
+        print("\n".join(summary(res, o.get("history"), pos[0])))
     elif cmd == "lint":
         paths = a[1:] or sorted(glob.glob(os.path.join(TEMPLATES, "*.txt")))
         if not paths:
