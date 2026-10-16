@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Tests for ./revit test (scripts/smoke.sh), in a sandbox: a copy of the repo, a fake HOME with fake bottles and a fake
 # CrossOver (REVIT_CX) whose wine maps C:\ through --bottle and starts a stand-in for Revit.exe. The stand-in writes a
-# journal over time into the copy, as Revit does when it plays one, in a mode the test picks: pass, crash, hang,
-# hang_start, dialog, nostart, signin, worker, stubborn (ignores INT and TERM). Fakes on PATH: diskutil, cp (notes
-# CrossOver's bottle lock), lsof (can fail). Runs under /bin/bash 3.2. Nothing real is touched. Usage: tests/smoke.sh
+# journal over time into the copy, as Revit does when it plays one, in a mode the test picks: pass, crash, dialog,
+# nostart, signin, worker (leaves a RevitWorker), stubborn (hangs, ignores INT and TERM). Fakes on PATH: diskutil, cp
+# (notes CrossOver's bottle lock), lsof (can fail). Runs under /bin/bash 3.2. Nothing real is touched.
+# Usage: tests/smoke.sh
 set -uo pipefail
 # every control variable of the engine: none of the caller's may reach the sandbox (a REVIT_DATA or REVIT_SOURCE_LIST
 # could point at real folders); tests set what they need after this
@@ -117,12 +118,11 @@ st "  0:< manage licensing"
 st "  0:< License Update: (reason=1)"
 st "  0:< Delayed start"
 raw "' 0:< License mode: User"
-[ "$mode" != hang_start ] || forever
 st "  0:< appPriv idle"
 st "started journal file playback of \"$jw\""
 case "$mode" in
   crash) st "  0:< unrecoverable error: synthetic"; exit 1 ;;
-  hang|stubborn) forever ;;
+  stubborn) forever ;;
   dialog) raw "  ' 1:< TaskDialog \"Something needs an answer\""; raw "  'Id : TaskDialog_Synthetic_Question"; forever ;;
 esac
 case "$s" in
