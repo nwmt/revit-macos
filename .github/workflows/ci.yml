@@ -31,6 +31,8 @@ jobs:
           git diff --quiet "v$SHIMS_VERSION" -- "${SHIMS_SOURCES[@]}" || echo "::warning::shim sources changed since v$SHIMS_VERSION: tag a release and bump scripts/lib/shims.sh (until then install.sh builds from source)"
       - name: Python helpers compile
         run: python3 -I -m py_compile tools/*.py tools/shims/ncryptshim/gen_forwards.py tests/test_tools.py
+      - name: 7-Zip for the installer tests (tools/installer_source.py reads a fake Create Installer with 7zz)
+        run: command -v 7zz >/dev/null || brew install sevenzip
       - name: Sandbox tests (/bin/bash 3.2)
         run: |
           tests/revit-cli.sh

@@ -58,6 +58,8 @@ Usage: ./revit <command> <year> [bottle]
   rebuild   delete the bottle and install Revit again
   remove    delete Revit, its bottle and its apps
   status    list the Revit bottles on this Mac (no year)
+  find-installer  say which Revit installer a folder holds (a folder, no year)
+  link-installer  use an installer folder anywhere on this Mac (a year and a folder)
 
 Example: ./revit install 2025
 Each Revit year lives in its own bottle, rvt<year>-a. To use another bottle, add its name at the end.
@@ -114,7 +116,7 @@ if [ -n "$EVENTS_DIR" ]; then
 fi
 [ -z "$FLAG_ERR" ] || die "$FLAG_ERR"
 case "$CMD" in
-  install|check|addins|stop|logs|debug|rebuild|remove|status) ;;
+  install|check|addins|stop|logs|debug|rebuild|remove|status|find-installer|link-installer) ;;
   ""|help|-h|--help) usage; exit 0 ;;
   *) echo "Unknown command: $CMD" >&2; echo >&2; usage >&2; exit 1 ;;
 esac
@@ -145,11 +147,22 @@ if [ "$CMD" = status ]; then
   fi
   exit 0
 fi
+if [ "$CMD" = find-installer ]; then
+  [ -n "$YEAR_ARG" ] || die "Which folder? Example: ./revit find-installer ~/Downloads/Revit"
+  out="$(python3 -I "$ROOT/tools/installer_source.py" detect "$YEAR_ARG")" || die "Could not read $YEAR_ARG"
+  if [ "$JSON" = 1 ]; then echo "$out"; exit 0; fi
+  /usr/bin/perl -MJSON::PP -e 'my $d = decode_json(join "", <STDIN>);
+    if (!$d->{year}) { print "No Revit installer found here.\n"; exit 0 }
+    print "Revit $d->{year}, $d->{kind}: ", ($d->{complete} ? "complete" : $d->{downloadable} ? "the rest is downloaded at install"
+      : $d->{problem} eq "payload" ? "the .7z payload is missing" : "missing @{$d->{missing}}"), "\n"' <<<"$out"
+  exit 0
+fi
 [ -n "$YEAR_ARG" ] || die "Which Revit year? Example: ./revit $CMD 2025"
 if ! load_profile "$YEAR_ARG"; then
   [[ "$YEAR_ARG" =~ ^[0-9]{4}$ ]] || die "\"$YEAR_ARG\" is not a Revit year. Example: ./revit $CMD 2025"
   die "Revit $YEAR_ARG is not supported yet. Supported: ${REVIT_SUPPORTED[*]}."
 fi
+FOLDER=""; if [ "$CMD" = link-installer ]; then FOLDER="$NAME"; NAME=""; fi   # a folder, not a bottle
 DEFAULT="$(revit_bottle_default "$YEAR")"; NAME="${NAME:-$DEFAULT}"
 revit_bottle_name_ok "$NAME" || die "Bottle name may contain only letters, digits, - and _, and cannot be \"default\": \"$NAME\""
 RESULT_HINT=failed
@@ -228,6 +241,14 @@ case "$CMD" in
     run_ctx_new; sup_traps; lock_take --no-trap "./revit rebuild $YEAR $NAME"
     bottle_guard must_exist "$YEAR" "$NAME"   # again: the bottle may have changed, or Revit started, while the user read
     export CX_RECREATE=1; supervise "$ROOT/install.sh" "$YEAR" "$NAME" ;;
+  link-installer)
+    [ -n "$FOLDER" ] && [ -d "$FOLDER" ] || die "Which folder? Example: ./revit link-installer $YEAR ~/Downloads/Revit$YEAR"
+    not_busy; lock_take "./revit link-installer $YEAR"
+    L="$DATA/installers/revit$YEAR"; mkdir -p "$DATA/installers" || die "Cannot write to $(tilde "$DATA/installers")."
+    if [ -L "$L" ]; then rm -f "$L"
+    elif [ -d "$L" ]; then rmdir "$L" 2>/dev/null || die "installers/revit$YEAR already holds files. Move them away first."; fi
+    ln -s "$(cd "$FOLDER" && pwd)" "$L" || die "Could not link $FOLDER"
+    echo "Revit $YEAR installer: $(tilde "$(cd "$FOLDER" && pwd)")" ;;
   remove)
     APPS=(); NA=0
     for a in "Revit $YEAR" "Revit Viewer $YEAR" "Autodesk Sign-In"; do

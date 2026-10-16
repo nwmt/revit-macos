@@ -59,7 +59,7 @@ reset() { # a fresh sandbox for each test
   stop_fakes; chmod -R u+w "$T" 2>/dev/null; rm -rf "$T"
   mkdir -p "$R/scripts/lib" "$R/logs" "$R/installers/revit2024" "$H/Documents" "$H/Applications" "$BOTTLES" "$CXF/bin" \
     || { echo "sandbox setup failed"; exit 1; }
-  cp "$REPO/revit" "$R/"; cp "$REPO/scripts/lib/common.sh" "$REPO/scripts/lib/versions.sh" "$R/scripts/lib/"
+  cp "$REPO/revit" "$R/"; cp -R "$REPO/tools" "$R/"; cp "$REPO/scripts/lib/common.sh" "$REPO/scripts/lib/versions.sh" "$R/scripts/lib/"
   mkdir -p "$R/scripts/profiles"; cp "$REPO"/scripts/profiles/*.sh "$R/scripts/profiles/"
   stub "$R/install.sh"; stub "$R/scripts/run-steps.sh"; stub "$R/scripts/launch.sh"
   cat > "$CXF/bin/wineserver" <<EOF
@@ -355,6 +355,17 @@ check "status: busy with its owner" grep -qF '"busy":{"busy":true,"command":"ins
 reset; run "" status --json; check "status: CrossOver found in the fake" grep -qF '"crossover":{"found":true' <<<"$OUT"
 reset; bottle rvt2024-a 2024 2024; run "" status; expect "status without --json" 0 ""
 check "status in words" grep -qE '^  rvt2024-a +Revit 2024$' <<<"$OUT"
+
+# ---- installer folder ----
+reset; mkdir -p "$T/dl"; touch "$T/dl/Revit_2020_G1_Win_64bit_r3_dlm_001_002.sfx.exe"; run "" find-installer "$T/dl" --json
+expect "find-installer --json" 0 '"year": "2020"'
+check "find-installer names the missing part" grep -qF "Revit_2020_G1_Win_64bit_r3_dlm_002_002.sfx.exe" <<<"$OUT"
+reset; mkdir -p "$T/dl"; touch "$T/dl/Revit_2020_G1_Win_64bit_r3_dlm_001_002.sfx.exe"; run "" find-installer "$T/dl"
+expect "find-installer in words" 0 "Revit 2020, parts: missing Revit_2020_G1_Win_64bit_r3_dlm_002_002.sfx.exe"
+reset; mkdir -p "$T/mine"; touch "$T/mine/a.exe"; rm -rf "$R/installers/revit2024"; run "" link-installer 2024 "$T/mine"
+expect "link-installer links the folder" 0 "Revit 2024 installer:"
+check "the link is there" test -L "$R/installers/revit2024"
+reset; run "" link-installer 2024 "$T"; expect "link-installer refuses a folder with files" 1 "already holds files"
 
 # ---- end ----
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]

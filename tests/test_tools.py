@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Unit tests for the Python helpers in tools/. Run: python3 -I -m unittest discover -s tests -p 'test_*.py'
 Every input is generated here; nothing from Autodesk or Microsoft is needed."""
-import importlib.util, io, os, struct, subprocess, sys, tempfile, unittest, zipfile
+import hashlib, importlib.util, io, json, os, shutil, struct, subprocess, sys, tempfile, unittest, zipfile
 
 TOOLS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools")
 
@@ -190,6 +190,215 @@ class GenForwards(Tmp):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("gen_forwards:", r.stderr)
 
+
+
+class InstallerSource(Tmp):
+    def setUp(self):
+        super().setUp()
+        self.inp = self.path("in"); self.dl = self.path("dl"); os.makedirs(self.inp); os.makedirs(self.dl)
+        self.sums = self.path("CHECKSUMS.txt"); open(self.sums, "w").close()
+        self.hashes = self.path("hashes.tsv"); self.src = self.path("source.json")
+
+    def put(self, d, name, data=b"x"):
+        p = os.path.join(d, name); os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "wb") as f: f.write(data)
+        return p
+
+    def create_installer(self, d, year, base, updates=()):
+        """A fake Create Installer: a zip (7zz reads zips) with collection.xml and an update manifest."""
+        p = os.path.join(d, f"Create_Installer_RVT_{year}_1_English_WIN64.exe")
+        with zipfile.ZipFile(p, "w") as z:
+            z.writestr("collection.xml", "<C><BrowserImageUrl>" + ";".join(
+                f"https://dds.autodesk.com/x/{b}" for b in base) + "</BrowserImageUrl></C>")
+            if updates:
+                z.writestr("B/setup_ext.xml", '<E><Package sourceDir="U"/></E>')
+                z.writestr("B/U/setup.xml", "<S><BuildNumber>9</BuildNumber><Payload>" + "".join(
+                    f'<File checkSum="{s}" sizePacked="{n}">https://dds.autodesk.com/u/{u}</File>' for u, n, s in updates)
+                    + "</Payload></S>")
+        return p
+
+    def resolve(self, year="2025"):
+        r = run("installer_source", "resolve", year, self.inp, self.dl, self.sums, self.src)
+        return r, (json.load(open(self.src)) if os.path.exists(self.src) else None)
+
+    def tool(self, *a):
+        return run("installer_source", *a)
+
+    def names(self, s, role):
+        return [os.path.basename(f["path"]) for f in s["files"] if f["role"] == role]
+
+    def extract(self, s):
+        return [os.path.basename(f["path"]) for f in s["files"] if f.get("extract")]
+
+    def test_create_installer_extracts_the_payload_not_the_downloader(self):
+        self.create_installer(self.inp, "2025", ["RVT_2025_B_001_002.exe", "RVT_2025_B_002_002.7z"])
+        r, s = self.resolve()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.extract(s), ["RVT_2025_B_002_002.7z"])
+
+    def test_create_installer_picks_its_own_base_not_a_stale_set(self):
+        self.create_installer(self.inp, "2025", ["RVT_2025_B_001_002.exe", "RVT_2025_B_002_002.7z"])
+        self.put(self.inp, "RVT_2025_A_001_002.exe"); self.put(self.inp, "RVT_2025_A_002_002.7z")
+        self.put(self.dl, "RVT_2025_B_001_002.exe"); self.put(self.dl, "RVT_2025_B_002_002.7z")
+        r, s = self.resolve()
+        self.assertEqual([f["path"] for f in s["files"] if f["role"] == "base"],
+                         [os.path.join(self.dl, "RVT_2025_B_001_002.exe"), os.path.join(self.dl, "RVT_2025_B_002_002.7z")])
+        self.assertIn("complete=1", r.stdout)
+
+    def test_base_to_download_goes_to_downloads(self):
+        self.create_installer(self.inp, "2025", ["RVT_2025_B_002_002.7z"])
+        r, s = self.resolve()
+        f = [f for f in s["files"] if f["role"] == "base"][0]
+        self.assertEqual((f["path"], f["url"]), (os.path.join(self.dl, "RVT_2025_B_002_002.7z"), "https://dds.autodesk.com/x/RVT_2025_B_002_002.7z"))
+        self.assertIn("complete=0", r.stdout)
+
+    def test_create_installer_without_a_base_list_is_an_error(self):
+        self.create_installer(self.inp, "2025", [])
+        r, _ = self.resolve()
+        self.assertEqual(r.returncode, 1); self.assertIn("full installer", r.stderr)
+
+    def test_parts_must_sit_together(self):
+        self.put(self.inp, "Revit_2023_G1_Win_64bit_dlm_001_002.sfx.exe"); self.put(self.dl, "Revit_2023_G1_Win_64bit_dlm_002_002.sfx.exe")
+        r, s = self.resolve("2023")
+        self.assertEqual(s["kind"], "parts"); self.assertIn("complete=0", r.stdout)
+
+    def test_a_complete_set_in_downloads_beats_an_incomplete_one_in_input(self):
+        self.put(self.inp, "Revit_2023_A_dlm_001_002.sfx.exe")
+        self.put(self.dl, "Revit_2023_B_dlm_001_002.sfx.exe"); self.put(self.dl, "Revit_2023_B_dlm_002_002.sfx.exe")
+        r, s = self.resolve("2023")
+        self.assertIn("complete=1", r.stdout); self.assertEqual(self.extract(s), ["Revit_2023_B_dlm_001_002.sfx.exe"])
+
+    def test_archive_without_create_installer(self):
+        self.put(self.inp, "RVT_2025_NA_win_db_001_002.exe", b"s"); self.put(self.inp, "RVT_2025_NA_win_db_002_002.zip", b"big" * 10)
+        self.put(self.inp, "update/Revit_2025_10.exe"); self.put(self.inp, "update/Revit_2025_9.exe")
+        r, s = self.resolve()
+        self.assertEqual((s["kind"], self.extract(s)), ("archive", ["RVT_2025_NA_win_db_002_002.zip"]))
+        self.assertEqual(self.names(s, "update"), ["Revit_2025_9.exe", "Revit_2025_10.exe"])   # as sort -V
+
+    def test_a_downloader_without_its_payload(self):
+        self.put(self.inp, "RVT_2025_NA_win_db_001_002.exe")
+        r, s = self.resolve()
+        self.assertEqual((s["kind"], s["problem"]), ("archive", "payload")); self.assertIn("complete=0", r.stdout)
+
+    def test_finalize_gives_a_stable_source_id_and_lists_unknown_sums(self):
+        self.put(self.inp, "RVT_2025_NA_win_db_002_002.zip", b"payload")
+        self.resolve(); self.assertEqual(self.tool("finalize", self.src, self.hashes).returncode, 0)
+        s = json.load(open(self.src)); self.assertEqual(s["unknown"], ["RVT_2025_NA_win_db_002_002.zip"])
+        self.resolve(); self.tool("finalize", self.src, self.hashes)
+        self.assertEqual(json.load(open(self.src))["source_id"], s["source_id"]); self.assertIsNotNone(s["source_id"])
+
+    def test_finalize_prints_checking_for_known_sums(self):
+        p = self.put(self.inp, "RVT_2025_NA_win_db_002_002.zip", b"payload")
+        open(self.sums, "w").write(hashlib.sha256(b"payload").hexdigest() + "  revit2025/RVT_2025_NA_win_db_002_002.zip  (x)\n")
+        self.resolve(); r = self.tool("finalize", self.src, self.hashes)
+        self.assertEqual(r.stdout, ">> checking RVT_2025_NA_win_db_002_002.zip\n")
+        open(p, "wb").write(b"payloaX")
+        self.resolve(); self.assertEqual(self.tool("finalize", self.src, self.hashes).returncode, 4)
+
+    def test_update_conflict_and_equal_copies(self):
+        self.put(self.inp, "RVT_2025_NA_win_db_002_002.zip")
+        self.put(self.inp, "update/U.exe", b"one"); self.put(self.dl, "update/U.exe", b"one")
+        self.resolve(); self.assertEqual(self.tool("finalize", self.src, self.hashes).returncode, 0)
+        dot = self.path("dot.json"); shutil.copy(self.src, dot)
+        self.resolve(); self.assertEqual(self.tool("compare", self.src, dot, self.hashes).stdout.strip(), "match")
+        self.put(self.dl, "update/U.exe", b"two")
+        self.resolve(); r = self.tool("finalize", self.src, self.hashes)
+        self.assertEqual(r.returncode, 4); self.assertIn("U.exe", r.stderr)
+
+    def test_two_copies_of_a_manifest_update(self):
+        good = hashlib.sha256(b"u1").hexdigest()
+        self.create_installer(self.inp, "2025", ["RVT_2025_B_002_002.7z"], [("U1.exe", 2, good)])
+        self.put(self.dl, "RVT_2025_B_002_002.7z"); self.put(self.inp, "update/U1.exe", b"u1"); self.put(self.dl, "update/U1.exe", b"u1")
+        self.resolve(); self.assertEqual(self.tool("finalize", self.src, self.hashes).returncode, 0)
+        self.assertEqual(self.names(json.load(open(self.src)), "update"), ["U1.exe"])
+        self.put(self.dl, "update/U1.exe", b"u2")
+        self.resolve(); self.assertEqual(self.tool("finalize", self.src, self.hashes).returncode, 4)
+
+    def test_compare_all_present(self):
+        self.put(self.inp, "RVT_2025_NA_win_db_002_002.zip", b"A")
+        self.resolve(); self.tool("finalize", self.src, self.hashes)
+        dot = self.path("dot.json"); shutil.copy(self.src, dot)
+        self.assertEqual(self.tool("compare", self.src, dot, self.hashes).stdout.strip(), "match")
+        self.put(self.inp, "update/U2.exe", b"new"); self.resolve()
+        self.assertTrue(self.tool("compare", self.src, dot, self.hashes).stdout.startswith("mismatch"))
+
+    def test_compare_create_installer_with_the_base_deleted(self):
+        self.create_installer(self.inp, "2025", ["RVT_2025_B_002_002.7z"])
+        self.put(self.dl, "RVT_2025_B_002_002.7z", b"base"); self.put(self.inp, "update/U1.exe", b"u1")
+        self.resolve(); self.tool("finalize", self.src, self.hashes)
+        dot = self.path("dot.json"); shutil.copy(self.src, dot)
+        os.remove(os.path.join(self.dl, "RVT_2025_B_002_002.7z"))
+        self.resolve(); self.assertEqual(self.tool("compare", self.src, dot, self.hashes).stdout.strip(), "match")
+        self.put(self.inp, "update/U9.exe", b"added")          # the case of the last spec review
+        self.resolve(); self.assertTrue(self.tool("compare", self.src, dot, self.hashes).stdout.startswith("mismatch"))
+        os.remove(os.path.join(self.inp, "update", "U9.exe")); self.put(self.inp, "update/U1.exe", b"u!")   # same size
+        self.resolve(); self.assertTrue(self.tool("compare", self.src, dot, self.hashes).stdout.startswith("mismatch"))
+        os.remove(os.path.join(self.inp, "update", "U1.exe"))
+        self.resolve(); self.assertTrue(self.tool("compare", self.src, dot, self.hashes).stdout.startswith("mismatch"))
+
+    def test_only_updates_left(self):
+        self.put(self.inp, "RVT_2025_NA_win_db_002_002.zip", b"base"); self.put(self.inp, "update/U1.exe", b"u1")
+        self.resolve(); self.tool("finalize", self.src, self.hashes)
+        dot = self.path("dot.json"); shutil.copy(self.src, dot)
+        os.remove(os.path.join(self.inp, "RVT_2025_NA_win_db_002_002.zip"))
+        r, s = self.resolve(); self.assertEqual((r.returncode, s["kind"]), (0, "updates-only"))
+        self.assertEqual(self.tool("finalize", self.src, self.hashes).returncode, 0)
+        self.assertIsNone(json.load(open(self.src))["source_id"])            # never a source for a fresh unpack
+        self.resolve(); self.assertEqual(self.tool("compare", self.src, dot, self.hashes).stdout.strip(), "match")
+        self.put(self.inp, "update/U2.exe", b"u2"); self.resolve()
+        self.assertTrue(self.tool("compare", self.src, dot, self.hashes).stdout.startswith("mismatch"))
+        self.put(self.dl, "update/U2.exe", b"other"); self.resolve()
+        self.assertEqual(self.tool("finalize", self.src, self.hashes).returncode, 4)
+        os.remove(os.path.join(self.dl, "update", "U2.exe"))
+        r, _ = self.resolve(); self.assertIn("complete=0", r.stdout)                      # never a complete installer
+        self.assertFalse(json.loads(self.tool("detect", self.inp).stdout)["complete"])
+
+    def test_downloader_left_with_updates(self):
+        self.put(self.inp, "RVT_2025_NA_win_db_001_002.exe"); self.put(self.inp, "update/U1.exe", b"u1")
+        r, s = self.resolve()
+        self.assertEqual((s["kind"], s["problem"], self.names(s, "update")), ("updates-only", "payload", ["U1.exe"]))
+        self.assertIn("complete=0", r.stdout)
+
+    def test_known_sum_of_a_local_update_is_checked(self):
+        self.put(self.inp, "RVT_2024_NA_win_db_002_002.zip"); self.put(self.inp, "update/Revit_2024_3_6.exe", b"broken")
+        open(self.sums, "w").write("0" * 64 + "  revit2024/update/Revit_2024_3_6.exe  (x)\n")
+        self.resolve("2024"); self.assertEqual(self.tool("finalize", self.src, self.hashes).returncode, 4)
+
+    def test_compare_without_any_source(self):
+        self.resolve()
+        dot = self.path("dot.json"); json.dump({"kind": "archive", "files": [], "source_id": "x", "manifest_id": None}, open(dot, "w"))
+        self.assertEqual(self.tool("compare", self.src, dot, self.hashes).stdout.strip(), "nosource")
+
+    def test_compare_refuses_an_unreadable_dot_source(self):
+        self.put(self.inp, "RVT_2025_NA_win_db_002_002.zip"); self.resolve()
+        bad = self.path("bad.json"); open(bad, "w").write("{")
+        self.assertEqual(self.tool("compare", self.src, bad, self.hashes).returncode, 1)
+
+    def test_hash_cache_sees_a_same_size_change_in_the_same_second(self):
+        p = self.put(self.inp, "RVT_2025_NA_win_db_002_002.zip", b"AAAA"); self.resolve(); self.tool("finalize", self.src, self.hashes)
+        a = json.load(open(self.src))["source_id"]; st = os.stat(p)
+        open(p, "wb").write(b"BBBB"); os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns + 1))
+        self.resolve(); self.tool("finalize", self.src, self.hashes)
+        self.assertNotEqual(json.load(open(self.src))["source_id"], a)
+
+    def test_two_writers_of_the_hash_cache(self):
+        self.put(self.inp, "RVT_2025_NA_win_db_002_002.zip", b"x" * 100000); self.resolve()
+        a = self.path("a.json"); b = self.path("b.json"); shutil.copy(self.src, a); shutil.copy(self.src, b)
+        for _ in range(10):
+            ps = [subprocess.Popen([sys.executable, "-I", os.path.join(TOOLS, "installer_source.py"), "finalize", x, self.hashes],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE) for x in (a, b)]
+            self.assertEqual([q.wait() for q in ps], [0, 0])
+
+    def test_detect(self):
+        self.put(self.inp, "Revit_2020_G1_Win_64bit_r3_dlm_002_003.sfx.exe"); self.put(self.inp, "Revit_2020_G1_Win_64bit_r3_dlm_003_003.sfx.exe")
+        d = json.loads(self.tool("detect", self.inp).stdout)
+        self.assertEqual((d["year"], d["kind"], d["complete"]), ("2020", "parts", False))
+        self.assertEqual(d["missing"], ["Revit_2020_G1_Win_64bit_r3_dlm_001_003.sfx.exe"])   # a missing first part too
+
+    def test_detect_create_installer_alone_is_downloadable_not_complete(self):
+        self.create_installer(self.inp, "2026", ["RVT_2026_B_002_002.7z"])
+        d = json.loads(self.tool("detect", self.inp).stdout)
+        self.assertEqual((d["year"], d["kind"], d["complete"], d["downloadable"]), ("2026", "create-installer", False, True))
 
 if __name__ == "__main__":
     unittest.main()

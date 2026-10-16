@@ -24,6 +24,10 @@ load_profile() { # $1 = year: sets YEAR and the profile variables (scripts/profi
 
 revit_dir_unix() { echo "$1/drive_c/Program Files/Autodesk/Revit $2"; }   # $1 = bottle path, $2 = year
 revit_installers() { echo "$DATA/installers/revit$1"; }                    # downloads (gitignored); may be a link: find -H
+revit_input()     { echo "$DATA/installers/revit$1"; }   # what the install reads: a folder, or a link to the user's
+revit_downloads() { # where downloads go: the input folder, unless it is a link to the user's folder (never written)
+  if [ -L "$DATA/installers/revit$1" ]; then echo "$DATA/installers/revit$1-dl"; else echo "$DATA/installers/revit$1"; fi
+}
 revit_extracted()  { echo "$DATA/installers/extracted/revit$1"; }          # unpacked (gitignored)
 revit_dist() { # the installer root (setup.xml): the unpacked folder (2023+) or its one subfolder (multi-part 2020)
   local d; d="$(revit_extracted "$1")"
