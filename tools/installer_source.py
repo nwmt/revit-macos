@@ -11,7 +11,8 @@ made from. Resolved once (source.json); get-revit.sh, unpack-revit.sh and instal
 Kinds: create-installer (2024+: Autodesk's small tool and the files its manifest names), parts (an Autodesk multi-part
 download, every part in one folder), archive (a base archive without the tool). Updates: the manifest's and every
 update/*.exe of both folders, one copy per name. Large files are hashed once per (path, size, mtime in ns).
-The list also carries revit_build_expected: finalize keeps it, so it reaches source.list and the unpacked .source."""
+The list also carries revit_build_expected (build): install.sh's preflight sets a first answer, unpack-revit.sh the
+build of what it unpacked; finalize keeps it, so it reaches source.list and the unpacked .source."""
 import glob, hashlib, json, os, re, shutil, subprocess, sys, tempfile
 import xml.etree.ElementTree as ET
 

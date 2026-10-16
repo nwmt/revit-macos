@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Unpacks the Revit <year> installer (the source tools/installer_source.py resolves) into installers/extracted/revit<year>/,
 # lays its updates over it, oldest first, each once, and records the source in .source. A new unpack goes to
-# <folder>.partial and replaces the old one only when complete.
+# <folder>.partial and replaces the old one only when complete. The Revit build of what is unpacked goes into the source
+# list as revit_build_expected (install.sh takes it from there for the run record) and so into .source.
 # Usage: ./scripts/unpack-revit.sh <year>     Log: logs/revit<year>/<time>-unpack/unpack.log
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; . "$ROOT/scripts/lib/common.sh"
@@ -18,14 +19,26 @@ if [ -z "$SL" ]; then
   python3 -I "$ROOT/tools/installer_source.py" resolve "$YEAR" "$SRC" "$(revit_downloads "$YEAR")" "$ROOT/installers/CHECKSUMS.txt" "$SL" >/dev/null 2>&1
 fi
 extracted_recover "$DST"   # install.sh did it before deciding; by hand, here
+keep_build() { # $1 = the source list of what is unpacked, $2 = its installer root: the Revit build they give
+  # (tools/installer_drift.py) goes into $SL as revit_build_expected, unknown as null. A recorded unpacked folder keeps
+  # the build its unpack found: nothing is laid on it afterwards, and its installer files may be gone. Never stops
+  local b=""
+  [ "$1" != "$DST/.source" ] || b="$(/usr/bin/perl -MJSON::PP -0 -ne 'my $v = eval { decode_json($_)->{revit_build_expected} } // "";
+    print $v if $v =~ /^\d+(\.\d+){3}$/' "$1" 2>/dev/null)"
+  [ -n "$b" ] || b="$(python3 -I -B "$ROOT/tools/installer_drift.py" expected-build "$YEAR" "$1" "$2" 2>/dev/null)"
+  python3 -I -B "$ROOT/tools/installer_source.py" build "$SL" "${b:-unknown}" >/dev/null 2>&1
+  return 0
+}
 if [ -d "$DST" ] && [ "${REVIT_REUSE_EXTRACTED:-0}" = 1 ] && [ "${REVIT_UNPACK_AGAIN:-}" != 1 ]; then
-  # used exactly as it is: no installer file is read, so a broken or conflicting one does not matter
-  echo "== already unpacked: installers/extracted/revit$YEAR"; echo "== ready: installers/extracted/revit$YEAR"; exit 0
+  # used exactly as it is: no installer file is unpacked or checked, so a broken or conflicting one does not matter
+  echo "== already unpacked: installers/extracted/revit$YEAR"; keep_build "$DST/.source" "$(revit_dist "$YEAR")"
+  echo "== ready: installers/extracted/revit$YEAR"; exit 0
 fi
 if [ -d "$DST" ] && [ "${REVIT_UNPACK_AGAIN:-}" != 1 ] \
    && ! /usr/bin/perl -MJSON::PP -0777 -e 'my $s = eval { decode_json(<STDIN>) }; exit($s && $s->{kind} ? 0 : 1)' < "$SL" 2>/dev/null; then
   # no installer, or one that cannot be read: the unpacked folder is used as it is (install.sh already said if that matters)
-  echo "== already unpacked: installers/extracted/revit$YEAR"; echo "== ready: installers/extracted/revit$YEAR"; exit 0
+  echo "== already unpacked: installers/extracted/revit$YEAR"; keep_build "$DST/.source" "$(revit_dist "$YEAR")"
+  echo "== ready: installers/extracted/revit$YEAR"; exit 0
 fi
 # every path below works on checked files: sums against the known ones, one copy per update name (two different
 # copies stop here), the warnings for unknown sums
@@ -49,6 +62,7 @@ if [ -d "$DST" ] && [ "${REVIT_UNPACK_AGAIN:-}" != 1 ]; then
   echo "== already unpacked: installers/extracted/revit$YEAR"
   # made before .source existed: as before, the (now checked) updates go on top; a recorded one stays as recorded
   [ -f "$DST/.source" ] || apply_updates "$(revit_dist "$YEAR")" || die "!! update failed"
+  if [ -f "$DST/.source" ]; then keep_build "$DST/.source" "$(revit_dist "$YEAR")"; else keep_build "$SL" "$(revit_dist "$YEAR")"; fi
   echo "== ready: installers/extracted/revit$YEAR"; exit 0
 fi
 complete="$(/usr/bin/perl -MJSON::PP -0 -ne 'print decode_json($_)->{source_id} ? 1 : 0' "$SL")"
@@ -69,6 +83,7 @@ esac || { rm -rf "$DST.partial"; die "!! unpacking failed (an incomplete downloa
 [ -n "$(find "$DST.partial" -maxdepth 4 \( -iname setup.xml -o -iname Setup.ini \) | head -1)" ] \
   || { rm -rf "$DST.partial"; die "!! the unpacked files have no Setup.ini or setup.xml: not a Revit installer?"; }
 apply_updates "$(revit_dist_of "$DST.partial")" || { rm -rf "$DST.partial"; die "!! an update failed; the old unpacked files are kept"; }
+keep_build "$SL" "$(revit_dist_of "$DST.partial")"   # before the copy: .source keeps it too
 cp "$SL" "$DST.partial/.source" || die "!! cannot write $DST.partial/.source"
 bak="$DST.old.$$"   # a name of this run only
 if [ -d "$DST" ]; then mv "$DST" "$bak" || die "!! cannot move the old unpacked files"; fi

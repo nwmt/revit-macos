@@ -11,6 +11,9 @@ installer root (revit_dist in scripts/lib/versions.sh). With it, that folder is 
 packages, and the updates of its applied-updates.txt besides the list's. Without it: the Create Installer's own
 manifests, each update's setup.xml, and the base archive only when no update gives a build (one small file of a solid
 11 GB archive takes 4-5 s; of an update, 0.01 s). A Setup.ini installer (2020) has no build: unknown.
+install.sh's preflight asks with what is there, a first answer (a Create Installer's files may not be downloaded yet);
+unpack-revit.sh asks again with the folder it unpacked and keeps that answer in the source list and .source
+(revit_build_expected), from where install.sh takes it for the run record.
 
 check prints a line only for what the code does not know: a PKGS name the installer lacks, an update package that is
 not installed and not in KNOWN, an AdskLicensing outside LICENSING_TESTED (of the unpacked folder: the Create

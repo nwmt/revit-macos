@@ -755,6 +755,28 @@ check "no poller outlives the downloader" eval '! pgrep -f "sand box/repo/script
 reset; mkdir -p "$R/installers/revit2025/update"; touch "$R/installers/revit2025/update/Revit_2025_5_0.exe"
 mkzip "$R/installers/revit2025/RVT_2025_NA_win_db_002_002.zip" "setup.xml=<Setup/>"
 in_repo 'revit_main_installer 2025'; expect "the main installer is not an update" 0 "RVT_2025_NA_win_db_002_002.zip"
+# the Revit build of what is unpacked goes into the source list and .source: real 7z archives, the base's manifest with a
+# namespace and attributes, the update's build from its own setup.xml
+build_of() { /usr/bin/perl -MJSON::PP -0 -ne 'print decode_json($_)->{revit_build_expected} // "null"' "$1" 2>/dev/null; }
+reset; mkdir -p "$T/a/x64/p" "$T/u/x64/q" "$R/installers/revit2025/update"
+printf '<?xml version="1.0"?>\n<Bundle version="1" xmlns="urn:example:b"><Identity><BuildNumber envvar="B">25.0.2.419</BuildNumber></Identity></Bundle>\n' > "$T/a/setup.xml"
+printf '<Bundle><Identity><Type>UPD</Type><BuildNumber>25.5.0.57</BuildNumber></Identity><Packages/></Bundle>\n' > "$T/u/setup.xml"
+echo 1 > "$T/a/x64/p/a.txt"; echo 2 > "$T/u/x64/q/b.txt"
+( cd "$T/a" && 7zz a -t7z "$R/installers/revit2025/RVT_2025_B_002_002.7z" . >/dev/null ) \
+  && ( cd "$T/u" && 7zz a -t7z "$R/installers/revit2025/update/Revit_2025_5_0.exe" . >/dev/null ) || fail "7z archives for the build" ""
+OUT="$(cd / && "${SANDBOX_ENV[@]}" /bin/bash "$R/scripts/unpack-revit.sh" 2025 2>&1)"; RC=$?
+expect "unpack lays the update on the base" 0 "applying update Revit_2025_5_0.exe"
+check "unpack keeps the build of what it unpacked in .source" test "$(build_of "$R/installers/extracted/revit2025/.source")" = 25.5.0.57
+check "and in its source list" test "$(build_of "$(ls -d "$R"/logs/revit2025/*-unpack | tail -1)/source.list")" = 25.5.0.57
+cp "$R/installers/extracted/revit2025/.source" "$T/dot"; echo '{"files": []}' > "$T/list.json"
+rm "$R/installers/revit2025/update/Revit_2025_5_0.exe"   # its build is in no list now: .source keeps what the unpack found
+OUT="$(cd / && "${SANDBOX_ENV[@]}" REVIT_REUSE_EXTRACTED=1 REVIT_SOURCE_LIST="$T/list.json" /bin/bash "$R/scripts/unpack-revit.sh" 2025 2>&1)"; RC=$?
+expect "--reuse-extracted: the unpacked folder as it is" 0 "ready"
+check "--reuse-extracted: its build goes into the source list" test "$(build_of "$T/list.json")" = 25.5.0.57
+check "--reuse-extracted: .source stays as it was" cmp -s "$T/dot" "$R/installers/extracted/revit2025/.source"
+rm "$R/installers/extracted/revit2025/.source"; echo '{"files": []}' > "$T/list.json"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" REVIT_REUSE_EXTRACTED=1 REVIT_SOURCE_LIST="$T/list.json" /bin/bash "$R/scripts/unpack-revit.sh" 2025 2>&1)"; RC=$?
+check "--reuse-extracted, no record: an applied update of unknown build makes it unknown" test "$(build_of "$T/list.json")" = null
 
 # ---- review fixes ----
 # Ctrl-C (events mode notes it) while json_str runs: the value stays, so no event gets an empty JSON value
