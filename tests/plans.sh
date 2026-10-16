@@ -156,5 +156,62 @@ $OUT"; fi
   inst 2024 rvt2024-t
   if [ "$RC" = 0 ] && ! grep -q "No such file" <<<"$OUT"; then ok "a clean install prints no file error"; else fail "a clean install prints no file error" "rc=$RC
 $OUT"; fi
+  # ---- run record: install.sh adds one line to the bottle it made ----
+  runs() { echo "$BOTTLES/$1/revit-macos/runs.ndjson"; }
+  last_run() { # $1 = bottle: "kind year result requested=a,b done=… skipped=… failed=… run_id=… lines=N"; nothing
+    # unless every line is JSON
+    /usr/bin/perl -MJSON::PP -ne 'my $x = eval { decode_json($_) }; ref $x eq "HASH" ? ($r = $x) : ($bad = 1); $n++;
+      END { exit 3 if $bad || !$r; my $j = sub { join ",", @{$_[0]} };
+        print join(" ", @$r{qw(kind year result)}, map("$_=" . $j->($r->{$_}), qw(requested done skipped failed)),
+          "run_id=$r->{run_id}", "lines=$n"), "\n" }' "$(runs "$1")" 2>/dev/null
+  }
+  okrun() { # a runner that puts Revit.exe in place and writes two step lines, as run-steps.sh does
+    cat > "$R/scripts/run-steps.sh" <<EOF
+#!/bin/bash
+mkdir -p "$BOTTLES/\$2/drive_c/Program Files/Autodesk/Revit \$1"; touch "$BOTTLES/\$2/drive_c/Program Files/Autodesk/Revit \$1/Revit.exe"
+printf '   %-10s exit=%-5s %s\n' vc 0 fine fonts skip "not needed" >> "\$RUN_DIR/summary.txt"
+EOF
+    chmod +x "$R/scripts/run-steps.sh"
+  }
+  oldbottle() { mkdir -p "$BOTTLES/rvt2024-t/drive_c/Program Files/Autodesk/Revit 2024"; printf '[Bottle]\n"Description" = "Revit 2024"\n' > "$BOTTLES/rvt2024-t/cxbottle.conf"; }
+  S24="$(sed -n 's/^Steps: //p' "$REPO/tests/plans/2024.txt" | tr ' ' ',')"
+  prep; okrun; inst 2024 rvt2024-t; L="$(last_run rvt2024-t)"
+  if [ "$RC" = 0 ] && [ "$L" = "install 2024 ok requested=$S24 done=vc skipped=fonts failed= run_id=$(basename "$R"/logs/rvt2024-t/*-install) lines=1" ]; then
+    ok "run record: install, ok, the year's steps from summary.txt (not the actions)"
+  else fail "run record: install, ok" "rc=$RC $L
+$OUT"; fi
+  prep; inst 2024 rvt2024-t; L="$(last_run rvt2024-t | cut -d' ' -f3,7)"
+  [ "$L" = "partial failed=tlbpin" ] && ok "run record: failed steps after Revit.exe: partial" || fail "run record: partial" "$L"
+  prep; okrun; printf '#!/bin/bash\nexit 1\n' > "$R/scripts/make-apps.sh"; inst 2024 rvt2024-t; L="$(last_run rvt2024-t | cut -d' ' -f3,5)"
+  if [ "$RC" = 1 ] && grep -qF "Step failed: scripts/make-apps.sh" <<<"$OUT" && [ "$L" = "failed done=vc" ]; then ok "run record: a failed action: failed"
+  else fail "run record: a failed action: failed" "rc=$RC $L
+$OUT"; fi
+  prep; printf '#!/bin/bash\nexit 1\n' > "$R/scripts/get-shims.sh"; inst 2024 rvt2024-t
+  [ "$RC" = 1 ] && [ ! -e "$BOTTLES/rvt2024-t" ] && ok "run record: none when the install stops before the bottle" || fail "run record: no bottle" "rc=$RC
+$OUT"
+  # a rebuild that stops before the bottle action: the bottle is still the old one, it gets no record
+  prep; oldbottle; printf '#!/bin/bash\nexit 1\n' > "$R/scripts/get-shims.sh"
+  OUT="$(cd / && "${INST_ENV[@]}" CX_RECREATE=1 /bin/bash "$R/install.sh" 2024 rvt2024-t 2>&1)"; RC=$?
+  [ "$RC" = 1 ] && [ ! -e "$(runs rvt2024-t)" ] && ok "run record: none in the old bottle of a rebuild that stops early" || fail "run record: old bottle" "rc=$RC
+$OUT"
+  prep; cat > "$R/scripts/run-steps.sh" <<EOF
+#!/bin/bash
+trap 'exit 1' TERM
+echo "run-steps started" >> "$T/calls"; sleep 10 >/dev/null 2>&1 9>&- & wait \$!
+EOF
+  chmod +x "$R/scripts/run-steps.sh"
+  (cd / && exec "${INST_ENV[@]}" /bin/bash "$R/install.sh" 2024 rvt2024-t) > "$T/out" 2>&1 & ip=$!
+  for i in $(seq 1 50); do grep -q "run-steps started" "$T/calls" 2>/dev/null && break; sleep 0.2; done
+  kill -TERM "$ip"; wait "$ip"; RC=$?; L="$(last_run rvt2024-t | cut -d' ' -f3,9)"
+  [ "$RC" = 1 ] && [ "$L" = "stopped lines=1" ] && ok "run record: TERM during an action: stopped" || fail "run record: TERM" "rc=$RC $L
+$(cat "$T/out")"
+  prep; oldbottle; OUT="$(cd / && "${INST_ENV[@]}" /bin/bash "$R/revit" check 2024 rvt2024-t 2>&1)"
+  OUT="$OUT$(cd / && "${INST_ENV[@]}" INSTALL_DRYRUN=1 CX_RECREATE=1 /bin/bash "$R/install.sh" 2024 rvt2024-t 2>&1)"
+  grep -qF "(dry run: nothing changed)" <<<"$OUT" && [ ! -e "$(runs rvt2024-t)" ] && ok "run record: none from ./revit check or a dry run" \
+    || fail "run record: check" "$OUT"
+  prep; okrun; OUT="$(cd / && "${INST_ENV[@]}" /bin/bash "$R/revit" install 2024 rvt2024-t 2>&1)"; RC=$?; L="$(last_run rvt2024-t | cut -d' ' -f3,8,9)"
+  if [ "$RC" = 0 ] && [ "$L" = "ok run_id=$(ls "$R/logs/runs") lines=1" ] && ! grep -q "run record" <<<"$OUT"; then ok "run record: ./revit install: its run id, nothing printed"
+  else fail "run record: ./revit install" "rc=$RC $L
+$OUT"; fi
 
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]

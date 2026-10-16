@@ -256,6 +256,83 @@ check "TERM: the running Wine program finished" test -f "$T/slow-done"
 check "TERM: the next step did not run" test "$(tr '\n' ' ' < "$T/order")" = "t_slow "
 in_repo 'lock_free && echo free'; expect "TERM: the lock is free afterwards" 0 "free"
 
+# ---- run record: <bottle>/revit-macos/runs.ndjson after a run of its own ----
+runs() { echo "$BOTTLES/$1/revit-macos/runs.ndjson"; }
+last_run() { # $1 = bottle: its newest record as "kind year result requested=a,b done=… skipped=… failed=… engine=…
+  # shims=… crossover=… compatdb_sha256=… revit_build_expected=… run_id=… lines=N"; nothing unless every line is JSON
+  /usr/bin/perl -MJSON::PP -ne 'my $x = eval { decode_json($_) }; ref $x eq "HASH" ? ($r = $x) : ($bad = 1); $n++;
+    END { exit 3 if $bad || !$r; my $j = sub { join ",", @{$_[0]} };
+      print join(" ", @$r{qw(kind year result)}, map("$_=" . $j->($r->{$_}), qw(requested done skipped failed)),
+        map("$_=" . ($r->{$_} // "null"), qw(engine shims crossover compatdb_sha256 revit_build_expected run_id)), "lines=$n"), "\n" }' \
+    "$(runs "$1")" 2>/dev/null
+}
+SV="$(sed -n 's/^SHIMS_VERSION=//p' "$REPO/scripts/lib/shims.sh")"
+reset; mkbottle rvt2024-t 2024 2024; teststeps; STEP_ENV=(RUN_KIND=addins); run_steps 2024 rvt2024-t t_two t_ok t_skip
+expect "run record: the run ends as before" 0 ">> Revit 2024"
+check "run record: kind, steps, ok; engine unknown in a copy without .git; the release's shims" test "$(last_run rvt2024-t)" = \
+  "addins 2024 ok requested=t_two,t_ok,t_skip done=t_two,t_ok skipped=t_skip failed= engine=unknown shims=$SV crossover=null compatdb_sha256=null revit_build_expected=null run_id=$(basename "$RUN") lines=1"
+check "run record: the year is a number" grep -q '"year":2024,' "$(runs rvt2024-t)"
+check "run record: nothing about it on the terminal" eval '! grep -q "run record" <<<"$OUT"'
+run_steps 2024 rvt2024-t t_fail t_ok
+check "run record: a failed step is partial" test "$(last_run rvt2024-t | cut -d' ' -f1-7)" = "steps 2024 partial requested=t_fail,t_ok done=t_ok skipped= failed=t_fail"
+check "run record: the second run adds a line; each line is JSON" eval 'last_run rvt2024-t | grep -q " lines=2$"'
+reset; mkbottle rvt2024-t 2024 2024; teststeps; mkdist 2024; rule "licensing.exe" 5; run_steps 2024 rvt2024-t licensing t_ok
+check "run record: a failed critical step is failed" test "$(last_run rvt2024-t | cut -d' ' -f1-7)" = "steps 2024 failed requested=licensing,t_ok done= skipped= failed=licensing"
+reset; mkbottle rvt2024-t 2024 2024; teststeps; rule "t-slow" 0 "sleep 2"
+(cd / && exec "${SANDBOX_ENV[@]}" /bin/bash "$R/scripts/run-steps.sh" 2024 rvt2024-t t_slow t_ok) > "$T/out" 2>&1 &
+rs=$!; sleep 1; kill -TERM "$rs"; wait "$rs"; RC=$?; OUT="$(cat "$T/out")"
+expect "run record: TERM still stops with code 1" 1 "Stopped."
+check "run record: TERM during a step is stopped" test "$(last_run rvt2024-t | cut -d' ' -f1-7)" = "steps 2024 stopped requested=t_slow,t_ok done=t_slow skipped= failed="
+# ./revit addins, Ctrl-C to the whole process group (python in the EXIT handler gets it too): one record, no noise.
+# The Wine program ignores it here, so the step it is in ends done
+reset; cp "$REPO/revit" "$REPO/install.sh" "$R/"; mkbottle rvt2024-t 2024 2024; teststeps; rule "t-slow" 0 "trap '' INT; sleep 2"
+sed -i '' 's|^ADDIN_STEPS=.*|ADDIN_STEPS=(t_slow t_ok)|' "$R/scripts/profiles/2024.sh"
+(cd / && exec "${SANDBOX_ENV[@]}" /usr/bin/perl -e '$SIG{INT}="DEFAULT"; setpgrp(0,0); exec @ARGV' \
+  /bin/bash "$R/revit" addins 2024 rvt2024-t) > "$T/out" 2>&1 &
+rs=$!; sleep 1; kill -INT -- "-$rs"; wait "$rs"; RC=$?; OUT="$(cat "$T/out")"
+expect "run record: supervised Ctrl-C still stops the run" 1 "Stopped."
+check "run record: ./revit addins and Ctrl-C: addins, stopped, the run id of ./revit" \
+  test "$(last_run rvt2024-t | cut -d' ' -f1-7,13)" = "addins 2024 stopped requested=t_slow,t_ok done=t_slow skipped= failed= run_id=$(ls "$R/logs/runs")"
+check "run record: written once, nothing printed about it" \
+  eval 'last_run rvt2024-t | grep -q " lines=1$" && ! grep -qiE "record|traceback|terminated|interrupt" <<<"$OUT"'
+reset; mkbottle rvt2024-t 2024 2024; teststeps; run_steps 2024 rvt2024-t licensing
+expect "run record: a run that ends before its first step" 1 "No unpacked Revit 2024 installer"
+check "run record: none before the first step" test ! -e "$BOTTLES/rvt2024-t/revit-macos"
+run_steps 2024 rvt2024-t t_ok nonsense; check "run record: none for bad arguments" test ! -e "$BOTTLES/rvt2024-t/revit-macos"
+run_steps 2024 rvt2024-x t_ok; check "run record: no bottle, none made" test ! -e "$BOTTLES/rvt2024-x"
+mkdir -p "$R/logs/rvt2024-t/given"; STEP_ENV=(INSTALL_PARENT=1 RUN_DIR="$R/logs/rvt2024-t/given"); run_steps 2024 rvt2024-t t_ok t_fail
+check "run record: under install.sh the runner writes none" test ! -e "$BOTTLES/rvt2024-t/revit-macos"
+reset; mkbottle rvt2024-t 2024 2024; teststeps; mkdir -p "$BOTTLES/rvt2024-t/revit-macos"; chmod 555 "$BOTTLES/rvt2024-t/revit-macos"
+run_steps 2024 rvt2024-t t_ok; expect "run record: a folder that cannot be written: a warning, exit 0 as before" 0 "could not write the run record: "
+check "run record: one warning line" test "$(grep -c "run record" <<<"$OUT")" = 1
+run_steps 2024 rvt2024-t t_fail; expect "run record: a folder that cannot be written: a warning, exit 1 as before" 1 "could not write the run record: "
+chmod 755 "$BOTTLES/rvt2024-t/revit-macos"
+# what ran it: CrossOver's build (CFBundleVersion), the newest compatdb, ./revit's run id, the app's version
+reset; mkbottle rvt2024-t 2024 2024; teststeps; CXA="$T/CrossOver.app/Contents"; mkdir -p "$CXA/SharedSupport"
+cp -R "$CXF" "$CXA/SharedSupport/CrossOver"
+printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>26.3</string><key>CFBundleVersion</key><string>26.3.0.39832</string></dict></plist>\n' > "$CXA/Info.plist"
+CDB="$H/Library/Application Support/CrossOver"; mkdir -p "$CDB"; printf 'old rules' > "$CDB/compatdb-25.dat"
+touch -t 202001010000 "$CDB/compatdb-25.dat"; printf 'new rules' > "$CDB/compatdb-26.dat"; printf 'x' > "$CDB/compatdb-26.dat.sha256"
+STEP_ENV=(REVIT_CX="$CXA/SharedSupport/CrossOver" REVIT_RUN_ID=r-test-1); run_steps 2024 rvt2024-t t_ok
+check "run record: CrossOver's build, the newest compatdb, the run id" test "$(last_run rvt2024-t | cut -d' ' -f10,11,13)" = \
+  "crossover=26.3.0.39832 compatdb_sha256=$(printf 'new rules' | shasum -a 256 | cut -d' ' -f1) run_id=r-test-1"
+reset; mkbottle rvt2024-t 2024 2024; teststeps; printf 'app_name=Test App\napp_version=0.0.1\n' > "$R/.app-bundle"; run_steps 2024 rvt2024-t t_ok
+check "run record: in the app, its version" test "$(last_run rvt2024-t | cut -d' ' -f8,9)" = "engine=app:0.0.1 shims=$SV"
+# a clone: its commit and the tree of the shim sources; +dirty for changed tracked files (shims: new sources too)
+reset; mkbottle rvt2024-t 2024 2024; teststeps; rm -f "$R/build/.prebuilt"
+G=(git -C "$R" -c core.hooksPath=/dev/null -c user.name=test -c user.email=test@example.com -c commit.gpgsign=false)
+"${G[@]}" init -q && "${G[@]}" add -A && "${G[@]}" commit -qm fixture || fail "run record: git fixture" ""
+GH="$(git -C "$R" rev-parse --short HEAD)"; GS="$(git -C "$R" rev-parse --short HEAD:tools/shims)"
+mkdir -p "$T/gitwrap"; printf '#!/bin/bash\n{ printf "git"; [ -e /dev/fd/9 ] && printf " FD9"; [ -e /dev/fd/7 ] && printf " FD7"; echo; } >> "%s"\nexec "%s" "$@"\n' \
+  "$CALLS" "$(command -v git)" > "$T/gitwrap/git"; chmod +x "$T/gitwrap/git"
+echo new > "$R/notes.txt"; exec 7>"$T/ev7"; STEP_ENV=(PATH="$T/gitwrap:$PATH"); run_steps 2024 rvt2024-t t_ok; exec 7>&-
+check "run record: a clone: commit and shim sources; a new file is no change" test "$(last_run rvt2024-t | cut -d' ' -f8,9)" = "engine=git:$GH shims=source:$GS"
+check "run record: git runs without the lock's or the events fd" eval 'called git && not_called FD9 && not_called FD7'
+echo "# changed" >> "$R/scripts/lib/versions.sh"; run_steps 2024 rvt2024-t t_ok
+check "run record: a changed tracked file: engine +dirty" test "$(last_run rvt2024-t | cut -d' ' -f8,9)" = "engine=git:$GH+dirty shims=source:$GS"
+echo "/* new */" > "$R/tools/shims/rvtfix/new.c"; run_steps 2024 rvt2024-t t_ok
+check "run record: a new shim source: shims +dirty" test "$(last_run rvt2024-t | cut -d' ' -f9)" = "shims=source:$GS+dirty"
+
 # ---- steps: runtimes, licensing ----
 lic_rule() { # $1 = exit code of the fake licensing installer; it lays out AdskLicensing as the real one does
   rule "licensing.exe" "$1" "mkdir -p '$BOTTLES/rvt$2-t/drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing/16.1.0.1/helper' '$BOTTLES/rvt$2-t/drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing/Currentx'; touch '$BOTTLES/rvt$2-t/drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing/16.1.0.1/helper/AdskLicensingInstHelper.exe'"

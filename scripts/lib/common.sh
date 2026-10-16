@@ -15,6 +15,9 @@ BOTTLES="$HOME/Library/Application Support/CrossOver/Bottles"
 LOCK_DIR="${REVIT_LOCK_DIR:-$HOME/Library/Application Support/revit-macos}"   # one for every clone and the app:
 LOCK_FILE="$LOCK_DIR/lock"                                                    # they share the bottles
 STOP_REQUESTED=0; CHILD=""
+# the run record (runlog_append): install.sh and run-steps.sh set the kind once the run is one to record, the steps
+# asked for and the Revit build the installer gives; result_set keeps the result
+RUNLOG_KIND=""; RUNLOG_REQUESTED=""; RUNLOG_BUILD=""; RUNLOG_RESULT=""
 
 die()       { echo "$*" >&2; exit 1; }
 usage_die() { echo "$*" >&2; exit 2; }
@@ -72,7 +75,9 @@ emit_line() { # stdin = one line; $1 = "end" for the last one. Every writer take
     if ($ctx ne "" && $end) { open(my $m, ">", "$ctx/.ended"); close $m }' "${REVIT_RUN_CTX:-}" "$1" )
 }
 
-result_set() { # $1 = key, $2 = value: the run's result for ./revit (and the app); nothing without a run context
+result_set() { # $1 = key, $2 = value: the run's result for ./revit (and the app); nothing without a run context.
+  # The run record takes the same result, with or without one
+  [ "$1" != result ] || RUNLOG_RESULT="$2"
   [ -n "${REVIT_RUN_CTX:-}" ] && [ -d "$REVIT_RUN_CTX" ] || return 0
   local f="$REVIT_RUN_CTX/result"
   { grep -v "^$1=" "$f" 2>/dev/null; printf '%s=%s\n' "$1" "$2"; } > "$f.new" && mv -f "$f.new" "$f"
@@ -168,6 +173,7 @@ run_child() { # [--log <file>] <command…>: runs it in the background so that T
 
 # ---- bottle checks, shared by ./revit and every script that changes a bottle ----
 crossover_version() { plutil -extract CFBundleShortVersionString raw -o - "$CX/../../Info.plist" 2>/dev/null; }
+crossover_build() { plutil -extract CFBundleVersion raw -o - "$CX/../../Info.plist" 2>/dev/null; }   # 26.3.0.39832
 bottle_years() { # the Revit years of bottle path $1: its description (new-bottle.sh names it "Revit <year>" before
   # installing anything, so a half-done install has it too) and its Revit folders
   sed -n 's/^"Description" = "Revit \([0-9][0-9][0-9][0-9]\)"$/\1/p' "$1/cxbottle.conf" 2>/dev/null
@@ -199,4 +205,55 @@ bottle_guard() { # $1 = must_exist | running_ok (like must_exist, Revit may run:
   [ "$ys" = "$year" ] || die "Bottle $name is for Revit $ys, not $year. Check the year and the bottle name."
   [ "$mode" = running_ok ] || ! revit_running "$b" "$year" \
     || die "Revit $year is running in $name. Save your work and quit Revit, then try again. If it hangs: ./revit stop $year$sfx"
+}
+
+# ---- the run record: what ran in a bottle and how it ended, <bottle>/revit-macos/runs.ndjson (tools/runlog.py) ----
+runlog_engine() { # what made the run: app:<version> | git:<short HEAD>[+dirty: tracked files changed] | unknown. A copy
+  # without .git asks no git: on a Mac without the Command Line Tools, /usr/bin/git opens an install prompt
+  local v
+  if [ -f "$ROOT/.app-bundle" ]; then echo "app:$(sed -n 's/^app_version=//p' "$ROOT/.app-bundle")"; return 0; fi
+  if [ -e "$ROOT/.git" ] && v="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null)"; then
+    [ -z "$(GIT_OPTIONAL_LOCKS=0 git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ] || v+="+dirty"
+    echo "git:$v"; return 0
+  fi
+  echo unknown
+}
+runlog_shims() { # the shims the steps took: the release in $(shim_dir) (its .prebuilt) | source:<tree of tools/shims at
+  # HEAD>[+dirty: build-shims.sh compiles every source file there, new ones too] | unknown
+  local v
+  if [ -f "$(shim_dir)/.prebuilt" ]; then head -n 1 "$(shim_dir)/.prebuilt"; return 0; fi
+  if [ -e "$ROOT/.git" ] && v="$(git -C "$ROOT" rev-parse --short HEAD:tools/shims 2>/dev/null)"; then
+    [ -z "$(GIT_OPTIONAL_LOCKS=0 git -C "$ROOT" status --porcelain -- tools/shims 2>/dev/null)" ] || v+="+dirty"
+    echo "source:$v"; return 0
+  fi
+  echo unknown
+}
+runlog_compatdb() { # CrossOver's newest compatibility database: it updates itself, without a new CrossOver
+  local f c=""
+  for f in "$HOME/Library/Application Support/CrossOver/"compatdb-*.dat; do
+    [ -f "$f" ] && { [ -z "$c" ] || [ "$f" -nt "$c" ]; } && c="$f"
+  done
+  echo "$c"
+}
+runlog_append() { # $1 = result: one line in the run record of bottle $B (kind, steps and build from RUNLOG_*, done,
+  # skipped and failed from RUN_DIR), only for a bottle that exists. A write error is one warning line and never
+  # changes the exit code. INT/TERM/HUP are ignored meanwhile: a Ctrl-C at the end must not cut the record short.
+  # Nothing it starts gets fd 9 or 7 (git may leave a daemon behind)
+  [ -n "${RUNLOG_KIND:-}" ] && [ -f "${B:-}/cxbottle.conf" ] || return 0
+  local err
+  err="$(trap '' INT TERM HUP; exec 7>&- 9>&-
+    python3 -I -B "$ROOT/tools/runlog.py" append "$B" --kind "$RUNLOG_KIND" --year "$YEAR" \
+      --run-id "${REVIT_RUN_ID:-$(basename "${RUN_DIR:-none}")}" --result "$1" --requested "${RUNLOG_REQUESTED:-}" \
+      --run-dir "${RUN_DIR:-}" --engine "$(runlog_engine)" --crossover "$(crossover_build)" \
+      --compatdb "$(runlog_compatdb)" --shims "$(runlog_shims)" --build "${RUNLOG_BUILD:-}" 2>&1 >/dev/null)" \
+    || echo "could not write the run record: $(tail -n 1 <<<"${err:-no message}")" >&2
+  return 0
+}
+runlog_exit() { # $1 = exit code: the record from an EXIT handler. Its result is the one result_set reported; without
+  # one, a signal or a stop is stopped, 0 is ok, anything else failed
+  local r="${RUNLOG_RESULT:-}"
+  if [ -z "$r" ]; then
+    if [ "$1" -gt 128 ] || [ "${STOP_REQUESTED:-0}" != 0 ]; then r=stopped; elif [ "$1" = 0 ]; then r=ok; else r=failed; fi
+  fi
+  runlog_append "$r"
 }

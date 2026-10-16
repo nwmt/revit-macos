@@ -5,7 +5,8 @@
 #   REVIT_LANG=en-US (default) | ru-RU — Revit's interface language; ODIS_PKGS="A|B" — other packages for step pkgs
 # Each step is a function step_<name> in scripts/steps/*.sh. Its output goes to <run folder>/<step>.log; the run folder
 # is RUN_DIR (install.sh passes it) or a new logs/<bottle>/<time>-<RUN_KIND or steps>/. One line per step goes to
-# summary.txt, failed steps to failed.txt. A failed critical step stops the run: the steps after it need it.
+# summary.txt, failed steps to failed.txt. A failed critical step stops the run: the steps after it need it. A run of
+# its own (not under install.sh) ends with a line in the bottle's run record (runlog_append in scripts/lib/common.sh).
 # Exit: 0 all done, 1 a step failed or the run was stopped (TERM/HUP after the current step), 2 bad arguments.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -46,6 +47,8 @@ export RUN_DIR
 # Wine's working folder is the script's: relative MSI paths (INSTALLDIR without Setup.exe) would land there
 cd "$B/drive_c" || die "Cannot enter $(tilde "$B/drive_c")."
 echo ">> Revit $YEAR → bottle $NAME, logs: $(tilde "$RUN_DIR")"
+# the run record of a run of its own, from the first step on, also after a critical step or a stop (install.sh writes one)
+[ -n "${INSTALL_PARENT:-}" ] || { RUNLOG_KIND="${RUN_KIND:-steps}"; RUNLOG_REQUESTED="${LIST[*]}"; trap 'runlog_exit $?' EXIT; }
 
 failed=0
 for s in "${LIST[@]}"; do

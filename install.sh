@@ -131,6 +131,9 @@ bottle_guard allow_missing "$YEAR" "$BOTTLE"
 [ ! -d "$B" ] || [ "${CX_RECREATE:-0}" = 1 ] || die "Bottle $BOTTLE already exists. To rebuild it: ./revit rebuild $YEAR$SFX"
 RUN_DIR="$(run_dir_new "$BOTTLE" install)" || die "Cannot create a log folder in $(tilde "$DATA/logs")."
 export RUN_DIR
+# one EXIT handler for the run record and the source list. The record goes into the bottle once the bottle action has
+# started (RUNLOG_KIND, in the loop): before that, a rebuild's bottle is still the old one
+RUNLOG_REQUESTED="${STEPS[*]}"; trap 'runlog_exit $?; rm -f "$SL"' EXIT
 cp "$SL" "$RUN_DIR/source.list"; export REVIT_SOURCE_LIST="$RUN_DIR/source.list"
 result_set log_dir "$RUN_DIR"; export INSTALL_PARENT=1   # the runner leaves the final result to this script
 echo; echo "Logs: $(tilde "$RUN_DIR")"
@@ -138,6 +141,7 @@ t0=$SECONDS; i=1
 for a in "${PLAN[@]}"; do
   stop_check
   action_argv "$a"; echo; echo "==> [$i/${#PLAN[@]}] ${A[*]}"; t=$SECONDS
+  [ "$a" != bottle ] || RUNLOG_KIND=install   # from here on the bottle is this run's
   # the action's output also goes to action-<name>.log (new-bottle.sh and run-steps.sh write their own logs as well)
   emit action id "$(json_str "$a")" state "$(json_str running)"
   run_child --log "$RUN_DIR/action-$a.log" "$ROOT/${A[0]}" "${A[@]:1}"; rc=$?
