@@ -287,6 +287,7 @@ expect "pass: says the copy is temporary and how the sign-in is used" 0 "a tempo
 check "pass: no 'without signing in'" eval '! grep -qi "without signing in" <<<"$OUT"'
 check "pass: every scenario passed" test "$(grep -cE '^  (start|core|reopen) +passed' <<<"$OUT")" = 3
 expect "pass: earlier times of this year" 0 "earlier passes: ready in 15 s, done in 30 s"
+expect "pass: says the journals are not proven on a real Revit of the year yet" 0 "not run on a real Revit 2027 yet"
 check "pass: one end event, ok, with the log folder" eval 'one_end ok && tail -1 <<<"$EV" | grep -q "\"log_dir\":\".*-test\""'
 check "pass: the copy got its marker before the first wine call" eval 'grep -qx "smoke_clone=1" "$T/first-marker" && grep -qx "state=ready" "$T/first-marker" && grep -qx "source=rvt2027-a" "$T/first-marker"'
 check "pass: menus and associations off before the first wine call" eval 'grep -qx "\"MenuMode\" = \"ignore\"" "$T/first-conf" && grep -qx "\"AssocMode\" = \"ignore\"" "$T/first-conf"'

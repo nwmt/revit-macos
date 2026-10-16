@@ -149,6 +149,7 @@ class Result(Tmp):
         self.assertEqual(res["scenarios"][0]["seconds"], 35)
         self.assertEqual((res["prepare"]["ok"], res["prepare"]["upgraded"], res["copy_removed"]), (True, False, True))
         self.assertEqual(res["not_checked"], ["sign-in", "add-ins", "web panels", "how Revit looks"])
+        self.assertEqual(res["journals_on_real_revit"], 2027 in sm.REAL_REVIT)
 
     def test_a_failure_skips_the_rest_and_a_person_has_its_own_result(self):
         fail = dict(VERDICT_PASS, verdict="fail", kind="crash", reason="Revit crashed (captureTryCrash)")
@@ -203,6 +204,8 @@ class Summary(Tmp):
         self.assertEqual(lines[2].strip(), "earlier passes: ready in 15/15 s, done in 32/30 s")
         self.assertEqual(lines[-2:], ["Not checked: sign-in, add-ins, web panels, how Revit looks.",
                                       "To share this result: ./revit report 2027"])
+        real = "These journals were not run on a real Revit 2027 yet: a failure can be theirs, not Revit's."
+        self.assertEqual(real in lines, 2027 not in sm.REAL_REVIT)
 
     def test_failures_people_and_another_bottle(self):
         res = self.res(bottle="rvt2027-b", result="needs_person", scenarios=[

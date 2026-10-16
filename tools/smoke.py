@@ -449,6 +449,9 @@ RESULTS = {"pass": "passed", "fail": "failed", "person": "needs_person"}
 WORDS = {"passed": "passed", "failed": "FAILED", "needs_person": "needs you", "skipped": "skipped",
          "stopped": "stopped"}
 NOT_CHECKED = ["sign-in", "add-ins", "web panels", "how Revit looks"]
+# the years whose start, core and reopen passed on a real Revit (a person adds a year after such a run); for any other
+# year a failure can be the journal's own
+REAL_REVIT = ()
 
 
 def _conf_escape(s):
@@ -642,7 +645,7 @@ def build_result(state):
                     "seconds": _int(meta.get("prepare_seconds")), "reason": meta.get("prepare_reason") or None},
         "template": template_entry(meta.get("template"), meta.get("template_source")),
         "scenarios": scen, "copy_removed": _flag(meta.get("copy_removed")), "copy_kept": meta.get("kept") == "1",
-        "not_checked": NOT_CHECKED,
+        "not_checked": NOT_CHECKED, "journals_on_real_revit": year in REAL_REVIT,
     }
 
 
@@ -712,6 +715,8 @@ def summary(res, history=None, here=None):
             ready = "/".join(_secs(a)[:-2] for a, _ in past[s["name"]])
             done = "/".join(_secs(b)[:-2] for _, b in past[s["name"]])
             lines.append(f"  {'':<7} {'':<10} earlier passes: ready in {ready} s, done in {done} s")
+    if year not in REAL_REVIT:
+        lines.append(f"These journals were not run on a real Revit {year} yet: a failure can be theirs, not Revit's.")
     lines.append("Not checked: " + ", ".join(NOT_CHECKED) + ".")
     lines.append(f"To share this result: ./revit report {year}{sfx}")
     return lines
