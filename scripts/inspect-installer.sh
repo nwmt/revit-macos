@@ -15,7 +15,7 @@ exec > >(tee "$OUT") 2>&1
 if load_profile "$YEAR"; then echo "== Revit $YEAR: profile scripts/profiles/$YEAR.sh, .NET $DOTNET"
 else echo "== Revit $YEAR: no profile yet"; fi
 echo "== files in installers/revit$YEAR:"
-find "$SRC" -maxdepth 2 -type f ! -name .gitkeep -exec ls -lh {} \; 2>/dev/null | awk '{print "   "$5"  "$NF}'
+find -H "$SRC" -maxdepth 2 -type f ! -name .gitkeep -exec ls -lh {} \; 2>/dev/null | awk '{print "   "$5"  "$NF}'
 main="$(revit_main_installer "$YEAR")"
 [ -n "$main" ] || { echo "!! no installer in $SRC"; exit 1; }
 echo "== main file: $main"

@@ -35,17 +35,17 @@ for t in 7zz:sevenzip winetricks:winetricks cabextract:cabextract gs:ghostscript
 done
 SRC="$(revit_installers "$YEAR")"; DST="$(revit_extracted "$YEAR")"
 # Autodesk Account now gives only "Create Installer": scripts/get-revit.sh downloads the full installer it points to
-GET=""; [ ! -d "$DST" ] && [ -n "$(find "$SRC" -maxdepth 1 -type f -iname "Create_Installer_RVT_${YEAR}_*.exe" 2>/dev/null | head -1)" ] && GET=1
-if [ ! -d "$DST" ] && [ -z "$(find "$SRC" -maxdepth 2 -type f \( -iname '*.exe' -o -iname '*.7z' -o -iname '*.zip' -o -iname '*.iso' \) 2>/dev/null | head -1)" ]; then
+GET=""; [ ! -d "$DST" ] && [ -n "$(find -H "$SRC" -maxdepth 1 -type f -iname "Create_Installer_RVT_${YEAR}_*.exe" 2>/dev/null | head -1)" ] && GET=1
+if [ ! -d "$DST" ] && [ -z "$(find -H "$SRC" -maxdepth 2 -type f \( -iname '*.exe' -o -iname '*.7z' -o -iname '*.zip' -o -iname '*.iso' \) 2>/dev/null | head -1)" ]; then
   need "no Revit $YEAR installer in installers/revit$YEAR/" "download it from your Autodesk Account, see installers/README.md"
 fi
-part1=$(find "$SRC" -maxdepth 2 -type f -iname '*_001_0*.sfx.exe' 2>/dev/null | head -1)
+part1=$(find -H "$SRC" -maxdepth 2 -type f -iname '*_001_0*.sfx.exe' 2>/dev/null | head -1)
 if [ ! -d "$DST" ] && [ -z "$GET" ] && [ -n "$part1" ]; then # multi-part download (2020, 2023): every part 001…NNN
   total=$(basename "$part1" | sed -E 's/.*_001_0*([0-9]+)\.sfx\.exe$/\1/'); stem="${part1%_001_*}"; tot3=$(printf '%03d' "$total")
   gone=""; for p in $(seq -f '%03g' 1 "$total"); do [ -f "${stem}_${p}_${tot3}.sfx.exe" ] || gone+=" $p"; done
   [ -z "$gone" ] || need "installer parts missing in installers/revit$YEAR/:$gone (of $tot3)" "download all parts from your Autodesk Account"
 fi
-if [ ! -d "$DST" ] && [ -z "$GET" ] && [ -z "$part1" ] && [ -z "$(find "$SRC" -maxdepth 2 -type f -iname '*.7z' 2>/dev/null | head -1)" ]; then
+if [ ! -d "$DST" ] && [ -z "$GET" ] && [ -z "$part1" ] && [ -z "$(find -H "$SRC" -maxdepth 2 -type f -iname '*.7z' 2>/dev/null | head -1)" ]; then
   need "no .7z payload in installers/revit$YEAR/ (the small .exe alone is only the downloader)" \
        "download both files of the Autodesk download, see versions/$YEAR.md"
 fi

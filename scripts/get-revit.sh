@@ -15,7 +15,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"; . "$ROOT/scripts/lib/common.sh"; lock_
 SRC="$(revit_installers "$YEAR")"
 command -v 7zz >/dev/null || { echo "7zz required: brew install sevenzip" >&2; exit 1; }
 
-ci="$(find "$SRC" -maxdepth 1 -type f -iname "Create_Installer_RVT_${YEAR}_*.exe" | sort | tail -1)"
+ci="$(find -H "$SRC" -maxdepth 1 -type f -iname "Create_Installer_RVT_${YEAR}_*.exe" | sort | tail -1)"
 [ -n "$ci" ] || { echo "no Create_Installer_RVT_${YEAR}_*.exe in installers/revit$YEAR/" >&2; exit 1; }
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 7zz x -y -o"$TMP" "$ci" collection.xml bootstrap.json '*/setup_ext.xml' '*/*/setup.xml' >/dev/null 2>&1

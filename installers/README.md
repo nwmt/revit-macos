@@ -70,6 +70,10 @@ Approximate sizes:
 `installers/extracted/revit<year>` (the unpacked files). `./revit rebuild` then
 unpacks them again from the download; `./revit remove` deletes them for you.
 
+To keep the files on another disk, move the folders there and leave links in `installers/`, for example
+`ln -s /Volumes/<disk>/revit2025 installers/revit2025`. Keep `README.md` and `CHECKSUMS.txt` here. The disk must be
+connected while you install.
+
 ## Checksums
 
 Optional. [CHECKSUMS.txt](CHECKSUMS.txt) lists the files we tested. To compare yours, for example for Revit 2025
