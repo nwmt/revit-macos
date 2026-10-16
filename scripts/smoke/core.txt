@@ -1,0 +1,19 @@
+' Written by hand for ./revit test; no recorded or third-party journal text.
+' core: a new project from the year's project template, saved as C:\revit-smoke\out\smoke.rvt, then Revit quits.
+' tools/smoke.py journal fills in the Version directive and the template (found by tools/smoke.py template).
+Dim Jrn
+Set Jrn = CrsJournalScript
+Jrn.Directive "Version", "{{VERSION}}", "{{FORMAT}}"
+Jrn.Directive "DebugMode", "GfxUseDXAccelerationOnPlay", 1
+Jrn.Data "JournalDefaultViewDiscipline", "Coordination"
+' File > New > Project: Browse... in the New Project dialog, the template, OK.
+Jrn.Command "Menu", "Create a new project , ID_FILE_NEW_CHOOSE_TEMPLATE"
+Jrn.PushButton "Modal , New Project , Dialog_Revit_NewProject", "Browse..., Control_Revit_BrowseTemplateName"
+Jrn.Data "FileDialog", "IDOK", "{{TEMPLATE}}", "rte", "{{TEMPLATE_NAME}}", "{{TEMPLATE_NAME}}"
+Jrn.Data "FileType", "Template Files (*.rte)"
+Jrn.PushButton "Modal , New Project , Dialog_Revit_NewProject", "OK, IDOK"
+' Save As into the output folder, which the test empties before the run.
+Jrn.Command "Menu", "Save the active project with a new name , ID_REVIT_FILE_SAVE_AS"
+Jrn.Data "File Name", "IDOK", "C:\revit-smoke\out\smoke.rvt"
+' Nothing changed since the save, so quitting asks nothing.
+Jrn.Command "Internal", "Quit the application; prompts to save projects , ID_APP_EXIT"

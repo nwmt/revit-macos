@@ -1,0 +1,11 @@
+' Written by hand for ./revit test; no recorded or third-party journal text.
+' start: Revit starts, takes its license as it does for the user, and quits. Nothing is opened or saved.
+' tools/smoke.py journal fills in the Version directive for the Revit year.
+Dim Jrn
+Set Jrn = CrsJournalScript
+Jrn.Directive "Version", "{{VERSION}}", "{{FORMAT}}"
+' Hardware graphics during playback, as in a session started from ~/Applications.
+Jrn.Directive "DebugMode", "GfxUseDXAccelerationOnPlay", 1
+' The view discipline of a fresh session.
+Jrn.Data "JournalDefaultViewDiscipline", "Coordination"
+Jrn.Command "Internal", "Quit the application; prompts to save projects , ID_APP_EXIT"

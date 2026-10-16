@@ -1,0 +1,13 @@
+' Written by hand for ./revit test; no recorded or third-party journal text.
+' reopen: a new Revit session opens C:\revit-smoke\out\smoke.rvt that core saved, saves it as smoke2.rvt, quits.
+' tools/smoke.py journal fills in the Version directive for the Revit year.
+Dim Jrn
+Set Jrn = CrsJournalScript
+Jrn.Directive "Version", "{{VERSION}}", "{{FORMAT}}"
+Jrn.Directive "DebugMode", "GfxUseDXAccelerationOnPlay", 1
+Jrn.Data "JournalDefaultViewDiscipline", "Coordination"
+Jrn.Command "Internal", "Open an existing project , ID_REVIT_FILE_OPEN"
+Jrn.Data "File Name", "IDOK", "C:\revit-smoke\out\smoke.rvt"
+Jrn.Command "Menu", "Save the active project with a new name , ID_REVIT_FILE_SAVE_AS"
+Jrn.Data "File Name", "IDOK", "C:\revit-smoke\out\smoke2.rvt"
+Jrn.Command "Internal", "Quit the application; prompts to save projects , ID_APP_EXIT"
