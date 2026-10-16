@@ -191,6 +191,19 @@ fake_bundle "$A"; chmod -R a-w "$A"
 touch "$T/before-doctor"; sleep 1; in_sandbox "$AE/revit" doctor 2025
 check "read-only bundle: doctor runs and writes nothing" eval 'grep -qE "\([0-9]+ checks\)$" <<<"$OUT" &&
   [ -z "$(find "$A" "$H" -newer "$T/before-doctor" 2>/dev/null)" ]'
+only_under() { # $1 = folder, $2 = stamp: every path in $H newer than $2 is in $1 or a folder on the way to it
+  local p
+  while IFS= read -r p; do
+    case "$1/" in "$p"/*) continue ;; esac
+    case "$p" in "$1"|"$1"/*) ;; *) return 1 ;; esac
+  done < <(find "$H" -newer "$2" 2>/dev/null)
+}
+AD="$H/Library/Application Support/Test App"
+touch "$T/before-report"; sleep 1; in_sandbox "$AE/revit" report 2025
+check "read-only bundle: report writes its folder in the app's data folder only" eval '[ "$RC" = 0 ] &&
+  [ -s "$(ls -d "$AD/logs/rvt2025-a/"*-report 2>/dev/null | head -1)/report.zip" ] &&
+  [ -z "$(find "$A" -newer "$T/before-report" 2>/dev/null)" ] && only_under "$AD/logs/rvt2025-a" "$T/before-report"'
+[ "$RC" = 0 ] || printf '%s\n' "$OUT" | head -5 | sed 's/^/     /'
 : > "$CALLS"; in_sandbox "$AE/scripts/check-bundle.sh"
 expect "read-only bundle: check-bundle passes" 0 ""
 check "check-bundle: five ok lines" [ "$(grep -c '^ok ' <<<"$OUT")" = 5 ]

@@ -1516,6 +1516,7 @@ def _collect(root, data, bdir, year, bottle, run, doctor_json, now):
             with open(doctor_json, encoding="utf-8", errors="replace") as f:
                 text = f.read(MEMBER_MAX * 2)
             c.facts["doctor"] = json.loads(text)
+            text = json.dumps(c.facts["doctor"], indent=1, ensure_ascii=False)   # a field a line: none is cut
         except (OSError, ValueError):
             text = None
         if text:

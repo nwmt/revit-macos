@@ -194,7 +194,7 @@ reset; ln -s "$BOTTLES/elsewhere" "$BOTTLES/rvt2024-a"; mkdir -p "$R/logs/rvt202
 run "" logs 2024;                    expect "logs is not blocked by a bottle link" 0 "logs/rvt2024-a/20261011-100000-install"
 reset; mkdir -p "$R/logs/install-rvt2024-a-20261011-100000"; run "" logs 2024
 expect "logs points at the older layout" 1 "Older logs are in logs/ directly"
-reset; bottle rvt2024-a 2024 2024; run "" debug 2024; expect "debug starts Revit with logging" 0 "then run ./revit logs 2024."
+reset; bottle rvt2024-a 2024 2024; run "" debug 2024; expect "debug starts Revit with logging" 0 "quit Revit, then run ./revit report 2024."
 check "debug passes the year" called "launch.sh 2024 rvt2024-a |"
 reset; bottle rvt2024-a 2024 2024; fake_revit rvt2024-a 2024; run "" debug 2024
 expect "debug refuses while Revit runs" 1 "Revit 2024 is running in rvt2024-a."
@@ -402,6 +402,48 @@ reset; fake_wine; bottle rvt2025-a 2025 2025; revit_exe rvt2025-a 2025; fake_rev
 check "doctor while Revit runs: it says so and does not refuse" eval 'grep -qxF "  · Revit or its background services run in rvt2025-a" <<<"$OUT" && ! grep -q "Save your work" <<<"$OUT"'
 check "doctor while Revit runs: no wine, wineserver or cxbottle" no_wine_calls
 reset; bottle rvt2025-a 2024 2024; run "" doctor 2025; expect "doctor: a bottle of another year is a ✗" 1 "✗ bottle rvt2025-a is for Revit 2024, not 2025"
+
+# ---- report ----
+report_dir() { ls -d "$R/logs/$1/"*-report 2>/dev/null | head -1; }   # $1 = bottle (or mac): the report folder
+zip_has() { /usr/bin/unzip -l "$1" 2>/dev/null | grep -qE " $2\$"; }   # $1 = zip, $2 = member name
+reset; run "" report 2021;           expect "report: an unsupported year" 1 "Revit 2021 is not supported yet"
+reset; run "" report rvt2025-a;      expect "report: a bottle where the year goes" 1 '"rvt2025-a" is not a Revit year'
+reset; run "" report 2025 "a b";     expect "report: a bad bottle name" 1 "Bottle name may contain only"
+reset; run "" report 2025 --run;     expect "report: --run needs a value" 1 "--run needs a value"
+reset; run "" report 2025 --run "$T/no such run"; expect "report: --run takes a log folder" 1 "No such log folder"
+reset; run "" doctor 2025 --run "$T"; expect "--run is for report only" 1 "--run is for ./revit report only."
+reset; run "" status --exclude doctor.json; expect "--exclude is for report only" 1 "--exclude is for ./revit report only."
+check "report: a refused argument writes nothing" eval '[ -z "$(ls -A "$R/logs")" ]'
+reset; fake_wine; bottle rvt2025-a 2025 2025; revit_exe rvt2025-a 2025; apps 2025 rvt2025-a; mkdir -p "$R/logs/rvt2025-a" "$T/tmp"
+touch "$T/stamp"; sleep 1
+TMPDIR="$T/tmp" run "" report 2025; expect "report: it says where report.txt and report.zip are" 0 "Read both before you post them."
+check "report: the files are in logs/<bottle>" eval 'd="$(report_dir rvt2025-a)"; [ -s "$d/report.txt" ] && [ -s "$d/report.zip" ] &&
+  grep -qF "Report: " <<<"$OUT" && grep -qF "Attach: " <<<"$OUT"'
+check "report: doctor's checks are in it" eval 'zip_has "$(report_dir rvt2025-a)/report.zip" doctor.json &&
+  grep -q "^./revit doctor: " "$(report_dir rvt2025-a)/report.txt"'
+check "report: no wine, wineserver or cxbottle" no_wine_calls
+check "report: nothing written outside its logs folder" eval '[ -z "$(find "$H" "$R" -newer "$T/stamp" 2>/dev/null | grep -vF "$R/logs/rvt2025-a")" ]'
+check "report: no temporary file left" eval '[ -z "$(ls -A "$T/tmp")" ]'
+run "" report 2025 --json --exclude doctor.json
+check "report --json: report.py's JSON" eval 'printf "%s" "$OUT" | /usr/bin/perl -MJSON::PP -e "local \$/; my \$j = decode_json(<STDIN>);
+  exit 1 unless -s \$j->{report_txt} && -s \$j->{report_zip} && ref \$j->{left_out} eq q(ARRAY) && !defined \$j->{refused}"'
+check "report --json: nothing but the JSON" eval '[ "$(printf "%s\n" "$OUT" | wc -l | tr -d " ")" = 1 ] && [ "$RC" = 0 ]'
+check "report --exclude: that member is left out" eval 'z="$(printf "%s" "$OUT" | /usr/bin/perl -MJSON::PP -e "local \$/; print decode_json(<STDIN>)->{report_zip}")";
+  [ -s "$z" ] && ! zip_has "$z" doctor.json && zip_has "$z" manifest.txt'
+reset; fake_wine; mkdir -p "$R/logs/rvt2024-a/20261011-100000-install"; printf '   rvt        exit=0     RVT.msi (8 s)\n' > "$R/logs/rvt2024-a/20261011-100000-install/summary.txt"
+run "" report; expect "report without a year: this Mac and the last runs" 0 "Read both before you post them."
+check "report without a year: in logs/mac, with the last install" eval 'd="$(report_dir mac)"; grep -qx "Revit: no year given" "$d/report.txt" &&
+  zip_has "$d/report.zip" install/summary.txt'
+check "report without a year: no wine, wineserver or cxbottle" no_wine_calls
+GONE="/Users/$(printf 'z%s' qtest)/Gone"   # a home path of someone else: the report cannot clean it and refuses
+reset; fake_wine; bottle rvt2025-a 2025 2025; revit_exe rvt2025-a 2025; rm "$BOTTLES/rvt2025-a/drive_c/users/crossover/Documents"
+ln -s "$GONE" "$BOTTLES/rvt2025-a/drive_c/users/crossover/Documents"; run "" report 2025
+expect "report: refused when report.txt holds personal data" 1 "No report: report.txt holds personal data that could not be removed."
+check "report refused: no report folder left" eval '[ -z "$(report_dir rvt2025-a)" ]'
+run "" report 2025 --json
+check "report refused --json: exit 1 and the reason" eval '[ "$RC" = 1 ] && printf "%s" "$OUT" | /usr/bin/perl -MJSON::PP -e "local \$/;
+  my \$j = decode_json(<STDIN>); exit 1 unless \$j->{refused} && !defined \$j->{report_txt}"'
+reset; bottle rvt2024-a 2024 2024; run "" --help; check "report is in the help" grep -q "^  report    make a report for a GitHub issue" <<<"$OUT"
 reset; bottle rvt2024-a 2024 2024; revit_exe rvt2024-a 2024; run_install INSTALL_DRYRUN=1 2024
 check "check on an installed Revit points at doctor" grep -qxF "  Revit 2024 is installed in rvt2024-a. To check it: ./revit doctor 2024" <<<"$OUT"
 check "check on an installed Revit: not a ✗" eval '! grep -q "already exists" <<<"$OUT"'

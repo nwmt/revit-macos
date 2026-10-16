@@ -6,6 +6,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"; . "$ROOT/scripts/lib/common.sh"
 YES=0; JSON=0; ALL=0; EVENTS_DIR=""; ONLY=""; EULA=""; REUSE_X=0; REEXTRACT=0; FLAG_ERR=""; SIG_GOT=""; END_DONE=0
 LOG=0; KEEP=0   # ./revit test: --log, and --keep (the maintainer's, not in the help)
+RUN_ARG=""; EXCL=()   # ./revit report: --run <log_dir>, --exclude <file> (again for more files)
 RESULT_HINT=usage   # what an exit before the child means: usage until the arguments check out (Task 5 reads it)
 sup_end() { # $1 = exit status: the one end event, from the child's result file or from what an early exit means
   [ "$END_DONE" = 0 ] || return 0; END_DONE=1
@@ -54,6 +55,7 @@ Usage: ./revit <command> <year> [bottle]
   install   install Revit
   check     check what the install needs, change nothing
   doctor    check an installed Revit, its bottle and this Mac, change nothing (no year: this Mac and CrossOver)
+  report    make a report for a GitHub issue, with personal data removed (no year: this Mac and the last runs)
   addins    add RevitLookup and pyRevit (--only <add-ins>; ./revit addins list <year>)
   stop      quit a Revit that hangs
   logs      list the newest logs
@@ -86,9 +88,10 @@ while [ $# -gt 0 ]; do
     --reextract) REEXTRACT=1 ;;
     --log) LOG=1 ;;
     --keep) KEEP=1 ;;
-    --events|--only|--accept-eula)
+    --events|--only|--accept-eula|--run|--exclude)
       if [ $# -lt 2 ]; then FLAG_ERR="$1 needs a value"
-      else case "$1" in --events) EVENTS_DIR="$2" ;; --only) ONLY="$2" ;; --accept-eula) EULA="$2" ;; esac; shift; fi ;;
+      else case "$1" in --events) EVENTS_DIR="$2" ;; --only) ONLY="$2" ;; --accept-eula) EULA="$2" ;;
+        --run) RUN_ARG="$2" ;; --exclude) EXCL+=("$2") ;; esac; shift; fi ;;
     -h|--help) POS+=(help) ;;
     --*) FLAG_ERR="Unknown option: $1" ;;
     *) POS+=("$1") ;;
@@ -99,6 +102,8 @@ CMD="${POS[0]:-}"; YEAR_ARG="${POS[1]:-}"; NAME="${POS[2]:-}"
 [ "$REUSE_X$REEXTRACT" != 11 ] || FLAG_ERR="Use --reuse-extracted or --reextract, not both."
 [ "$LOG" = 0 ] || [ "$CMD" = test ] || FLAG_ERR="--log is for ./revit test only."
 [ "$KEEP" = 0 ] || [ "$CMD" = test ] || FLAG_ERR="Unknown option: --keep"
+[ -z "$RUN_ARG" ] || [ "$CMD" = report ] || FLAG_ERR="--run is for ./revit report only."
+[ ${#EXCL[@]} = 0 ] || [ "$CMD" = report ] || FLAG_ERR="--exclude is for ./revit report only."
 SUPERVISED=0; case "$CMD" in install|check|addins|rebuild|test) SUPERVISED=1 ;; esac
 sup_traps() { # signals noted, not ignored (an ignored signal would be inherited by the child), from here to the child
   trap 'SIG_GOT=INT' INT; trap 'SIG_GOT=TERM' TERM; trap 'SIG_GOT=HUP' HUP
@@ -124,7 +129,7 @@ if [ -n "$EVENTS_DIR" ]; then
 fi
 [ -z "$FLAG_ERR" ] || die "$FLAG_ERR"
 case "$CMD" in
-  install|check|doctor|addins|stop|logs|debug|rebuild|remove|status|find-installer|link-installer|test) ;;
+  install|check|doctor|report|addins|stop|logs|debug|rebuild|remove|status|find-installer|link-installer|test) ;;
   ""|help|-h|--help) usage; exit 0 ;;
   *) echo "Unknown command: $CMD" >&2; echo >&2; usage >&2; exit 1 ;;
 esac
@@ -204,26 +209,48 @@ if [ "$CMD" = addins ] && [ "$YEAR_ARG" = list ]; then
   if [ "$JSON" = 1 ]; then echo "[$out]"; else for id in "${ADDIN_IDS[@]}"; do addin_load "$id"; addin_available && echo "  $id  $ADDIN_NAME — $ADDIN_ABOUT"; done; fi
   exit 0
 fi
-if [ "$CMD" = doctor ]; then   # reads files only (tools/doctor.py): no lock, no Wine, writes nothing; no year: the
-  # Mac and CrossOver. Works while another task holds the lock and while Revit runs
+if [ "$CMD" = doctor ] || [ "$CMD" = report ]; then   # read files only: no lock, no Wine; they work while another
+  # task holds the lock and while Revit runs. doctor (tools/doctor.py) writes nothing; no year: the Mac and CrossOver.
+  # report (tools/report.py) writes only its own folder in logs/<bottle>, logs/mac without a year (the Mac and the
+  # last runs), with doctor's checks in it
   RESULT_HINT=failed
   da=(--root "$ROOT" --data "$DATA" --cx "$CX" --bottles "$BOTTLES" --shims "$(shim_dir)" --lock "$LOCK_FILE"
     --cx-tested "$CX_TESTED" --engine "$(runlog_engine)" --shims-release "$(runlog_shims)")
-  [ "$JSON" = 0 ] || da+=(--json); [ "$ALL" = 0 ] || da+=(--all)
-  if [ -z "$YEAR_ARG" ]; then python3 -I -B "$ROOT/tools/doctor.py" "${da[@]}" </dev/null; exit $?; fi
-  if ! load_profile "$YEAR_ARG"; then
-    [[ "$YEAR_ARG" =~ ^[0-9]{4}$ ]] || die "\"$YEAR_ARG\" is not a Revit year. Example: ./revit doctor 2025"
-    die "Revit $YEAR_ARG is not supported yet. Supported: ${REVIT_SUPPORTED[*]}."
+  if [ -n "$YEAR_ARG" ]; then
+    if ! load_profile "$YEAR_ARG"; then
+      [[ "$YEAR_ARG" =~ ^[0-9]{4}$ ]] || die "\"$YEAR_ARG\" is not a Revit year. Example: ./revit $CMD 2025"
+      die "Revit $YEAR_ARG is not supported yet. Supported: ${REVIT_SUPPORTED[*]}."
+    fi
+    NAME="${NAME:-$(revit_bottle_default "$YEAR")}"
+    revit_bottle_name_ok "$NAME" || die "Bottle name may contain only letters, digits, - and _, and cannot be \"default\": \"$NAME\""
+    B="$(bottle_path "$NAME")"; ad=""
+    for id in ${ADDIN_IDS[@]+"${ADDIN_IDS[@]}"}; do   # each add-in's own test (scripts/addins/<id>.sh), as status does
+      addin_load "$id" && [ -d "$B" ] && [ ! -L "$B" ] && addin_is_installed \
+        && ad+="${ad:+,}{\"id\":$(json_str "$id"),\"name\":$(json_str "$ADDIN_NAME")}"
+    done
   fi
-  NAME="${NAME:-$(revit_bottle_default "$YEAR")}"
-  revit_bottle_name_ok "$NAME" || die "Bottle name may contain only letters, digits, - and _, and cannot be \"default\": \"$NAME\""
-  B="$(bottle_path "$NAME")"; ad=""
-  for id in ${ADDIN_IDS[@]+"${ADDIN_IDS[@]}"}; do   # each add-in's own test (scripts/addins/<id>.sh), as status does
-    addin_load "$id" && [ -d "$B" ] && [ ! -L "$B" ] && addin_is_installed \
-      && ad+="${ad:+,}{\"id\":$(json_str "$id"),\"name\":$(json_str "$ADDIN_NAME")}"
-  done
-  profile_json | python3 -I -B "$ROOT/tools/doctor.py" "${da[@]}" --year "$YEAR" --bottle "$NAME" --profile-json - --addins "[$ad]"
-  exit $?
+  doctor_py() { # $@ = more flags of doctor.py
+    if [ -z "$YEAR_ARG" ]; then python3 -I -B "$ROOT/tools/doctor.py" "${da[@]}" "$@" </dev/null; return; fi
+    profile_json | python3 -I -B "$ROOT/tools/doctor.py" "${da[@]}" "$@" --year "$YEAR" --bottle "$NAME" --profile-json - --addins "[$ad]"
+  }
+  if [ "$CMD" = doctor ]; then
+    [ "$JSON" = 0 ] || da+=(--json); [ "$ALL" = 0 ] || da+=(--all)
+    doctor_py; exit $?
+  fi
+  [ -z "$RUN_ARG" ] || [ -d "$RUN_ARG" ] || die "No such log folder: $RUN_ARG"
+  dj="$(mktemp "${TMPDIR:-/tmp}/revit-doctor.XXXXXX")" || die "Cannot create a temporary file."   # 0600
+  trap '_rc=$?; rm -f "$dj"; sup_end "$_rc"' EXIT
+  doctor_py --json > "$dj" 2>/dev/null   # exit 1 means a check failed: the report says which
+  ra=(--root "$ROOT" --data "$DATA" --bottles "$BOTTLES" --doctor-json "$dj"); folder=mac
+  [ -z "$YEAR_ARG" ] || { ra+=(--year "$YEAR" --bottle "$NAME"); folder="$NAME"; }
+  [ -z "$RUN_ARG" ] || ra+=(--run "$RUN_ARG")
+  for x in ${EXCL[@]+"${EXCL[@]}"}; do ra+=(--exclude "$x"); done
+  [ "$JSON" = 0 ] || ra+=(--json)
+  out="$(run_dir_new "$folder" report)" || die "Cannot create a log folder in $(tilde "$DATA/logs")."
+  python3 -I -B "$ROOT/tools/report.py" build "${ra[@]}" --out-dir "$out" </dev/null; rc=$?
+  if [ "$rc" != 0 ]; then rmdir "$out" 2>/dev/null; exit "$rc"; fi   # refused: nothing was written
+  [ "$JSON" = 1 ] || echo "Read both before you post them."
+  exit 0
 fi
 [ -n "$YEAR_ARG" ] || die "Which Revit year? Example: ./revit $CMD 2025"
 if ! load_profile "$YEAR_ARG"; then
@@ -310,7 +337,7 @@ case "$CMD" in
   debug)
     need_crossover; bottle_guard must_exist "$YEAR" "$NAME"; not_busy
     "$ROOT/scripts/launch.sh" "$YEAR" "$NAME" || exit 1
-    echo "Make the problem happen, quit Revit, then run ./revit logs $YEAR$SFX." ;;
+    echo "Make the problem happen, quit Revit, then run ./revit report $YEAR$SFX." ;;
   rebuild)
     need_crossover; bottle_guard must_exist "$YEAR" "$NAME"; not_busy
     echo "This deletes the bottle $NAME and installs Revit $YEAR into it again (10–30 minutes)."
