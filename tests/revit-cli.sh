@@ -312,5 +312,33 @@ reset; run "" -h;     expect "-h still prints the help" 0 "Usage: ./revit <comma
 reset; printf '#!/bin/bash\nprintf "result=partial\\nlog_dir=/x\\n" > "$REVIT_RUN_CTX/result"; exit 1\n' > "$R/install.sh"
 run "" install 2024; check "the child's result file is kept in the run context" eval 'grep -qx "result=partial" "$R"/logs/runs/*/result'
 
+# ---- events ----
+EV() { cat "$T/ev/events.ndjson" 2>/dev/null; }
+valid_ndjson() { /usr/bin/perl -MJSON::PP -ne 'eval { JSON::PP->new->decode($_) } or exit 1' "$1"; }
+reset; run "" install 2024 --events "$T/ev"
+check "events: every line is JSON" valid_ndjson "$T/ev/events.ndjson"
+check "events: start first, with the year as a number and the default bottle" eval 'head -1 "$T/ev/events.ndjson" | grep -qF "{\"event\":\"start\",\"run_id\":\"ev\",\"command\":\"install\",\"year\":2024,\"bottle\":\"rvt2024-a\","'
+check "events: end last, exactly once" eval '[ "$(EV | grep -c "\"event\":\"end\"")" = 1 ] && EV | tail -1 | grep -q "\"event\":\"end\""'
+check "events: nothing on the terminal" eval '! grep -q "\"event\"" <<<"$OUT"'
+reset; run "" install 2021 --events "$T/ev"
+check "events: a bad year ends as usage" eval 'EV | tail -1 | grep -q "\"result\":\"usage\""'
+check "events: a bad year still starts first" eval 'EV | head -1 | grep -q "\"event\":\"start\""'
+reset; run "" install 2024 --frob --events "$T/ev"
+check "events: an unknown flag ends as usage" eval 'EV | tail -1 | grep -q "\"result\":\"usage\""'
+reset; fake_lock "install.sh 2025 rvt2025-a"; run "" install 2024 --events "$T/ev"
+check "events: a busy lock ends as busy" eval 'EV | tail -1 | grep -q "\"result\":\"busy\""'
+reset; printf '#!/bin/bash\nkill -9 $$\n' > "$R/install.sh"; run "" install 2024 --events "$T/ev"
+check "events: a killed child still gets one end, stopped" eval 'EV | tail -1 | grep -q "\"event\":\"end\".*\"result\":\"stopped\""'
+reset; printf '#!/bin/bash\nprintf "result=partial\\nfailed_steps=dynamo tlbpin\\nlog_dir=/l\\n" > "$REVIT_RUN_CTX/result"; exit 1\n' > "$R/install.sh"
+run "" install 2024 --events "$T/ev"
+check "events: end carries the child's result" eval 'EV | tail -1 | grep -qF "\"exit_code\":1,\"result\":\"partial\",\"failed_action\":\"\",\"failed_steps\":[\"dynamo\",\"tlbpin\"],\"log_dir\":\"/l\"}"'
+reset; mkdir -p "$T/ev"; : > "$T/ev/events.ndjson"; run "" install 2024 --events "$T/ev"
+expect "events: even an empty events file means a used folder" 1 "already holds a run"
+reset; mkdir -p "$T/ev"; echo '{"event":"start"}' > "$T/ev/events.ndjson"; run "" install 2024 --events "$T/ev"
+expect "events: a used folder is refused" 1 "already holds a run"
+check "events: the used folder is left alone" eval '[ "$(EV)" = "{\"event\":\"start\"}" ]'
+reset; run "" install 2024
+check "no --events: no events file" eval '! ls "$R"/logs/runs/*/events.ndjson >/dev/null 2>&1'
+
 # ---- end ----
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]

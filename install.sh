@@ -20,8 +20,8 @@ SFX="$(bottle_sfx "$BOTTLE" "$YEAR")"; B="$(bottle_path "$BOTTLE")"
 
 # ---- preflight: report every problem at once, with the fix ----
 missing=0
-need() { echo "  ✗ $1"; echo "      fix: $2"; missing=1; }
-warn() { echo "  ! $1"; echo "      $2"; }
+need() { echo "  ✗ $1"; echo "      fix: $2"; missing=1; emit message level "$(json_str error)" text "$(json_str "$1 — $2")"; }
+warn() { echo "  ! $1"; echo "      $2"; emit message level "$(json_str warn)" text "$(json_str "$1 — $2")"; }
 echo "Checking requirements for Revit $YEAR (bottle $BOTTLE)…"
 if [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" != 1 ]; then
   need "Apple Silicon Mac required" "this setup is tested on M-series Macs only"
@@ -95,7 +95,9 @@ for a in "${PLAN[@]}"; do
   stop_check
   action_argv "$a"; echo; echo "==> [$i/${#PLAN[@]}] ${A[*]}"; t=$SECONDS
   # the action's output also goes to action-<name>.log (new-bottle.sh and run-steps.sh write their own logs as well)
+  emit action id "$(json_str "$a")" state "$(json_str running)"
   run_child --log "$RUN_DIR/action-$a.log" "$ROOT/${A[0]}" "${A[@]:1}"; rc=$?
+  emit action id "$(json_str "$a")" state "$(json_str "$([ $rc = 0 ] && echo done || echo failed)")" exit "$rc"
   printf '   %-10s exit=%-5s %s\n' "$a" "$rc" "${A[*]} ($((SECONDS - t)) s; action-$a.log)" >> "$RUN_DIR/summary.txt"
   stop_check
   # a failed fix after Revit.exe is in place: go on, the list comes at the end; anything else stops the install,

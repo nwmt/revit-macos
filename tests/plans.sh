@@ -67,6 +67,9 @@ EOF
 $OUT"; fi
   grep -qF "make-apps 2024 rvt2024-t" "$T/calls" && ok "install.sh reaches make-apps" || fail "install.sh reaches make-apps" "$(cat "$T/calls")"
   grep -qF "RUN_DIR=$R/logs/rvt2024-t/" "$T/calls" && ok "install.sh passes its run folder" || fail "install.sh passes its run folder" "$(cat "$T/calls")"
+  prep; OUT="$(cd / && exec 7>"$T/ev" && "${INST_ENV[@]}" REVIT_EVENTS_FD=7 /bin/bash "$R/install.sh" 2024 rvt2024-t 2>&1)"
+  if grep -q '"event":"action","id":"shims","state":"running"' "$T/ev" && grep -q '"event":"action","id":"apps","state":"done","exit":0' "$T/ev"; then
+    ok "install.sh emits each action"; else fail "install.sh emits each action" "$(cat "$T/ev")"; fi
   prep; printf '#!/bin/bash\nexit 1\n' > "$R/scripts/get-shims.sh"; inst 2024 rvt2024-t
   if [ "$RC" = 1 ] && grep -qF "Step failed: scripts/get-shims.sh" <<<"$OUT"; then ok "a failed action stops install.sh"; else fail "a failed action stops install.sh" "$OUT"; fi
   grep -qE '^   shims +exit=1 ' "$R"/logs/rvt2024-t/*-install/summary.txt && ok "the failed action is in summary.txt" || fail "the failed action is in summary.txt" ""

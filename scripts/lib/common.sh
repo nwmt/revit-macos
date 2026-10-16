@@ -34,6 +34,26 @@ run_dir_new() { # $1 = folder under logs/ (a bottle name, or revit<year>), $2 = 
   echo "$d"
 }
 
+# ---- events for the app: one JSON object per line on fd 7, only when ./revit --events opened it ----
+json_str() { # $1 = text → a JSON string literal (through the system perl, like the lock)
+  /usr/bin/perl -e 'my $s = shift; $s =~ s/(["\\])/\\$1/g; $s =~ s/\n/\\n/g; $s =~ s/\r/\\r/g; $s =~ s/\t/\\t/g;
+    $s =~ s/([\x00-\x1f])/sprintf("\\u%04x", ord $1)/ge; print "\"$s\""' -- "$1"
+}
+emit() { # $1 = event, then key and JSON value pairs (strings through json_str, numbers as they are)
+  [ -n "${REVIT_EVENTS_FD:-}" ] && [ -e /dev/fd/7 ] || return 0
+  local line="{\"event\":$(json_str "$1")"; shift
+  while [ $# -ge 2 ]; do line+=",$(json_str "$1"):$2"; shift 2; done
+  printf '%s}\n' "$line" | emit_line ""
+}
+emit_line() { # stdin = one line; $1 = "end" for the last one. Every writer takes <ctx>/.events.lock (a file of its own:
+  # a flock on the shared fd 7 would be shared too) and checks .ended under it, so nothing lands after the end, not
+  # even from a helper that outlived its parent (a progress poller); "end" writes the line and .ended under the lock
+  /usr/bin/perl -MFcntl=:flock -e 'my ($ctx, $end) = @ARGV; my $l;
+    if ($ctx ne "") { open($l, ">>", "$ctx/.events.lock") or exit 0; flock($l, LOCK_EX) or exit 0; exit 0 if -e "$ctx/.ended" }
+    open(my $o, ">>&=", 7) or exit 0; local $/; print $o <STDIN>; close $o;
+    if ($ctx ne "" && $end) { open(my $m, ">", "$ctx/.ended"); close $m }' "${REVIT_RUN_CTX:-}" "$1"
+}
+
 result_set() { # $1 = key, $2 = value: the run's result for ./revit (and the app); nothing without a run context
   [ -n "${REVIT_RUN_CTX:-}" ] && [ -d "$REVIT_RUN_CTX" ] || return 0
   local f="$REVIT_RUN_CTX/result"

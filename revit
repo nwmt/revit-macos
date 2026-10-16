@@ -6,7 +6,19 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"; . "$ROOT/scripts/lib/common.sh"
 YES=0; JSON=0; EVENTS_DIR=""; ONLY=""; EULA=""; REUSE_X=0; REEXTRACT=0; FLAG_ERR=""; SIG_GOT=""; END_DONE=0
 RESULT_HINT=usage   # what an exit before the child means: usage until the arguments check out (Task 5 reads it)
-sup_end() { :; }    # the one end event (Task 5)
+sup_end() { # $1 = exit status: the one end event, from the child's result file or from what an early exit means
+  [ "$END_DONE" = 0 ] || return 0; END_DONE=1
+  [ -n "${REVIT_EVENTS_FD:-}" ] || return 0
+  local f="$REVIT_RUN_CTX/result" r fa fs ld steps="" s
+  r="$(sed -n 's/^result=//p' "$f" 2>/dev/null)"; fa="$(sed -n 's/^failed_action=//p' "$f" 2>/dev/null)"
+  fs="$(sed -n 's/^failed_steps=//p' "$f" 2>/dev/null)"; ld="$(sed -n 's/^log_dir=//p' "$f" 2>/dev/null)"
+  if [ -z "$r" ]; then
+    if [ "$1" -gt 128 ]; then r=stopped; elif [ "$1" = 0 ]; then r=ok; else r="$RESULT_HINT"; fi
+  fi
+  for s in $fs; do steps+="${steps:+,}$(json_str "$s")"; done
+  printf '{"event":"end","exit_code":%s,"result":%s,"failed_action":%s,"failed_steps":[%s],"log_dir":%s}\n' \
+    "$1" "$(json_str "$r")" "$(json_str "$fa")" "$steps" "$(json_str "$ld")" | emit_line end
+}
 run_ctx_new() { # the run context: the result (and the events, Task 5) of this command, in $DATA/logs/runs/<run_id>/
   [ -n "${REVIT_RUN_CTX:-}" ] && return 0   # --events gave one
   REVIT_RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"; REVIT_RUN_CTX="$DATA/logs/runs/$REVIT_RUN_ID"
@@ -21,6 +33,9 @@ supervise() { # <command…>: runs it in the foreground of this process group (C
   fi
   # bash reports a foreground child killed by TERM/HUP ("Terminated: 15") on its own stderr; exec'ing, it did not:
   # the child keeps the real stderr (fd 8), this shell's goes to /dev/null while it waits
+  case "$CMD" in install|rebuild|addins)   # no sleep while it works; ends with this process, holds no lock or events fd
+    command -v caffeinate >/dev/null && caffeinate -i -w $$ </dev/null >/dev/null 2>&1 7>&- 9>&- & ;;
+  esac
   exec 8>&2 2>/dev/null
   "$@" 2>&8 8>&-; rc=$?
   exec 2>&8 8>&-
@@ -80,7 +95,22 @@ sup_traps() { # signals noted, not ignored (an ignored signal would be inherited
 # Until then bash's default stays: Ctrl-C ends ./revit at once, also at the typed confirmation, as before. With
 # --events (the app, which passes --yes) a supervised command notes signals from the start, so even an early
 # cancel ends with one end event (Task 5)
-# (Task 5 opens the event channel here)
+if [ -n "$EVENTS_DIR" ]; then
+  mkdir -p "$EVENTS_DIR" 2>/dev/null || die "Cannot create $EVENTS_DIR"
+  # one folder, one run: the events file is created here or the folder is refused (atomic: O_EXCL)
+  /usr/bin/perl -MFcntl -e 'sysopen(my $f, $ARGV[0], O_WRONLY | O_CREAT | O_EXCL) or exit 1' "$EVENTS_DIR/events.ndjson" \
+    || die "$EVENTS_DIR already holds a run. Give each run a new folder."
+  REVIT_RUN_CTX="$(cd "$EVENTS_DIR" && pwd)"; REVIT_RUN_ID="$(basename "$REVIT_RUN_CTX")"; export REVIT_RUN_ID REVIT_RUN_CTX
+  rm -f "$REVIT_RUN_CTX/result" "$REVIT_RUN_CTX/.ended"
+  exec 7>>"$REVIT_RUN_CTX/events.ndjson" || die "Cannot write $REVIT_RUN_CTX/events.ndjson"
+  [ "$SUPERVISED" = 0 ] || sup_traps
+  export REVIT_EVENTS_FD=7
+  trap 'sup_end $?' EXIT
+  y=null; b=null   # the year as a number and the bottle with its default, when the arguments allow them
+  if [[ "$YEAR_ARG" =~ ^[0-9]{4}$ ]]; then y="$YEAR_ARG"; b="$(json_str "${NAME:-$(revit_bottle_default "$YEAR_ARG")}")"
+  elif [ -n "$NAME" ]; then b="$(json_str "$NAME")"; fi
+  emit start run_id "$(json_str "$REVIT_RUN_ID")" command "$(json_str "$CMD")" year "$y" bottle "$b" pid "$$"
+fi
 [ -z "$FLAG_ERR" ] || die "$FLAG_ERR"
 case "$CMD" in
   install|check|addins|stop|logs|debug|rebuild|remove) ;;

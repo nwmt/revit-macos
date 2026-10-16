@@ -50,11 +50,14 @@ failed=0
 for s in "${LIST[@]}"; do
   stop_check
   rm -f "$RUN_DIR/.detail" "$RUN_DIR/.skip"; t0=$SECONDS
+  emit step id "$(json_str "$s")" state "$(json_str running)"
   ( "step_$s" ) >>"$RUN_DIR/$s.log" 2>&1 </dev/null; rc=$?
   text="$(cat "$RUN_DIR/.detail" 2>/dev/null)"; code=$rc
   if [ $rc = 0 ] && [ -f "$RUN_DIR/.skip" ]; then code=skip; text="$(cat "$RUN_DIR/.skip")"; fi
   [ $rc = 0 ] || text="${text:+$text; }see $(tilde "$RUN_DIR/$s.log")"
   say "$s" "$code" "$text ($((SECONDS - t0)) s)"
+  case "$code" in 0) st=done ;; skip) st=skipped ;; *) st=failed ;; esac
+  emit step id "$(json_str "$s")" state "$(json_str "$st")" detail "$(json_str "$text")"
   [ $rc = 0 ] && continue
   echo "$s" >> "$RUN_DIR/failed.txt"; failed=1
   case " $CRITICAL " in *" $s "*) echo "!! Step $s failed, and the steps after it need it: stopped." >&2; top_result failed; exit 1 ;; esac

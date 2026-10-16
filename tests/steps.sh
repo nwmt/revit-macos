@@ -512,6 +512,29 @@ reset; mkdir -p "$R/installers/revit2025/update"; touch "$R/installers/revit2025
 python3 -I -c 'import sys, zipfile; z = zipfile.ZipFile(sys.argv[1], "w"); z.writestr("setup.xml", "<Setup/>"); z.close()' "$R/installers/revit2025/RVT_2025_NA_win_db_002_002.zip"
 in_repo 'revit_main_installer 2025'; expect "the main installer is not an update" 0 "RVT_2025_NA_win_db_002_002.zip"
 
+# ---- events ----
+reset; in_repo 'json_str "a\"b\\c	t
+n"'; expect "json_str escapes quotes, backslashes, tabs, newlines" 0 '"a\"b\\c\tt\nn"'
+reset; in_repo 'emit step id "$(json_str x)"; echo after'; expect "emit without the fd prints nothing" 0 "after"
+check "emit without the fd: no JSON" eval '! grep -q "{" <<<"$OUT"'
+reset; in_repo 'exec 7>"'"$T"'/ev"; export REVIT_EVENTS_FD=7; emit step id "$(json_str rvt)" state "$(json_str done)"'
+check "emit writes one JSON line on fd 7" grep -qx '{"event":"step","id":"rvt","state":"done"}' "$T/ev"
+reset; mkdir -p "$T/ctx"; touch "$T/ctx/.ended"
+in_repo 'exec 7>"'"$T"'/ev"; export REVIT_EVENTS_FD=7 REVIT_RUN_CTX="'"$T"'/ctx"; emit step id "$(json_str late)"'
+check "nothing is emitted after the end" test ! -s "$T/ev"
+reset; mkdir -p "$T/ctx"; exec 7>"$T/ev"
+( export REVIT_EVENTS_FD=7 REVIT_RUN_CTX="$T/ctx" ROOT="$R"; . "$R/scripts/lib/common.sh"
+  ( for i in $(seq 1 200); do emit progress done "$i"; done ) &
+  sleep 0.3; printf '{"event":"end"}\n' | emit_line end; wait )
+exec 7>&-
+check "a writer racing the end never writes after it" eval 'tail -1 "$T/ev" | grep -qx "{\"event\":\"end\"}"' 
+reset; mkbottle rvt2024-t 2024 2024; teststeps
+OUT="$(cd / && exec 7>"$T/ev" && "${SANDBOX_ENV[@]}" REVIT_EVENTS_FD=7 /bin/bash "$R/scripts/run-steps.sh" 2024 rvt2024-t t_ok t_skip t_fail 2>&1)"; RC=$?
+check "steps emit running and a result each" eval '[ "$(grep -c "\"event\":\"step\"" "$T/ev")" = 6 ]'
+check "a skipped step is skipped" grep -q '"id":"t_skip","state":"skipped"' "$T/ev"
+check "a failed step is failed" grep -q '"id":"t_fail","state":"failed"' "$T/ev"
+check "no event reaches the terminal" eval '! grep -q "\"event\"" <<<"$OUT"'
+
 # ---- data folder ----
 reset; in_repo 'echo "$DATA"'; expect "DATA defaults to ROOT" 0 "$R"
 reset; OUT="$(cd / && "${SANDBOX_ENV[@]}" ROOT="$R" REVIT_DATA="$T/data" /bin/bash -c '. "$ROOT/scripts/lib/common.sh"
