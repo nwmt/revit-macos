@@ -41,7 +41,7 @@ fast Windows PC ([benchmarks](docs/benchmarks.md)).
 2. Install [Homebrew](https://brew.sh): paste the command from its page. It asks for your Mac login password
    (nothing appears while you type) and ends with "Next steps": run the commands listed there. Then:
    ```bash
-   brew install sevenzip winetricks cabextract ghostscript python3
+   brew install sevenzip winetricks cabextract python3
    ```
 3. Download this project into your home folder:
    ```bash
@@ -78,11 +78,16 @@ Run them in Terminal, in the project folder. In a new Terminal window, first typ
 | `./revit install 2025` | Install Revit 2025 |
 | `./revit check 2025` | Check what the install needs, change nothing |
 | `./revit addins 2025` | Add RevitLookup and pyRevit, with the fixes add-ins need (2020, 2023–2026) |
+| `./revit addins 2025 --only pdfprinter` | Add only the add-ins named (comma-separated), here the **Revit PDF** printer. It needs Ghostscript: `brew install ghostscript` |
+| `./revit addins list 2025` | List the add-ins for Revit 2025 |
 | `./revit stop 2025` | Quit a Revit that hangs |
 | `./revit logs 2025` | List the newest logs |
 | `./revit debug 2025` | Start Revit and record a log |
 | `./revit rebuild 2025` | Delete the bottle and install Revit again |
 | `./revit remove 2025` | Delete Revit, its bottle and its apps |
+| `./revit status` | List the Revit bottles on this Mac |
+| `./revit find-installer ~/Downloads/Revit` | Say which Revit installer a folder holds |
+| `./revit link-installer 2025 ~/Downloads/Revit` | Install Revit 2025 from that folder instead of `installers/revit2025/` |
 
 `rebuild` and `remove` show what they delete and ask you to type the year first.
 

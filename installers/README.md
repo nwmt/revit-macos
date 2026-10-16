@@ -34,8 +34,9 @@ Keep the file names as Autodesk gives them. Only the versions you install need t
 
 ## Add-ins (optional)
 
-For `./revit addins`. RevitLookup comes from github.com/lookup-foundation/RevitLookup, pyRevit from
-github.com/pyrevitlabs/pyRevit.
+For `./revit addins`. It downloads RevitLookup (github.com/lookup-foundation/RevitLookup) and pyRevit
+(github.com/pyrevitlabs/pyRevit) into these folders itself and checks them. Enscape you bring yourself:
+`./revit addins import enscape <file>` copies it to its place.
 
 | Add-in | Revit | File | Put it in |
 |---|---|---|---|
@@ -50,8 +51,8 @@ github.com/pyrevitlabs/pyRevit.
 | Enscape 4.18 LTS | 2027 | `Enscape-4.18.2.1657-lts.exe` | `installers/addins/enscape/` |
 | System.ValueTuple 4.5.0, for Enscape | 2020 | `system.valuetuple.4.5.0.nupkg` | `installers/redist/nuget/` |
 
-`./revit addins` does not install Enscape; [Revit 2020](../versions/2020.md) and [Revit 2027](../versions/2027.md)
-say how. Enscape comes from your Chaos account, System.ValueTuple from nuget.org.
+`./revit addins` installs Enscape only when you name it: `./revit addins <year> --only enscape --accept-eula enscape`
+(the Enscape installer accepts the Enscape EULA). Enscape comes from your Chaos account, System.ValueTuple from nuget.org.
 
 ## Disk space
 
@@ -70,9 +71,9 @@ Approximate sizes:
 `installers/extracted/revit<year>` (the unpacked files). `./revit rebuild` then
 unpacks them again from the download; `./revit remove` deletes them for you.
 
-To keep the files on another disk, move the folders there and leave links in `installers/`, for example
-`ln -s /Volumes/<disk>/revit2025 installers/revit2025`. Keep `README.md` and `CHECKSUMS.txt` here. The disk must be
-connected while you install.
+To keep the installer anywhere else, for example on another disk, use `./revit link-installer 2025 <folder>`. That
+folder is only read: what the install downloads goes to `installers/revit2025-dl/`. The disk must be connected while you
+install.
 
 ## Checksums
 

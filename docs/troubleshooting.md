@@ -109,8 +109,8 @@ Revit 2027
 
 Revit 2020, 2023, 2024, 2025
 
-**Solution:** Use the **Revit PDF** printer. `./revit install` adds it; PDFs go to `~/Documents/Revit-PDF`. It needs
-Ghostscript: `brew install ghostscript`.
+**Solution:** Use the **Revit PDF** printer: `brew install ghostscript`, then `./revit addins 2025 --only pdfprinter`.
+PDFs go to `~/Documents/Revit-PDF`.
 
 ### "Revit PDF cannot be used with … print settings"
 

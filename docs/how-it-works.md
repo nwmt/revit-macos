@@ -56,7 +56,7 @@ In install order. Normal install steps have "—" in What breaks.
 | `gdoff` | Generative Design error on start | Turn the add-in off | 2023+ |
 | `rvtfix` | Start screen blank or white; 2026+: the browser uses about 60% CPU and the view is slow; crash when opening a view (a Windows function Wine lacks) | Browser draws inside Revit, with flags that make it draw; the missing function answered in memory | 2023+ (2020: for `warpshim`) |
 | `wv2fix` | The built-in browser (WebView2) crashes on clicks and resizes | Own `version.dll` in the browser process | 2024+ |
-| `pdfprinter` | No printer, so Print and Page Setup do not open | **Revit PDF** printer: PostScript → Ghostscript → PDF in `~/Documents/Revit-PDF` | 2020, 2023–2025 |
+| `pdfprinter` (an add-in: `./revit addins <year> --only pdfprinter`) | No printer, so Print and Page Setup do not open | **Revit PDF** printer: PostScript → Ghostscript → PDF in `~/Documents/Revit-PDF` | 2020, 2023–2025 (2026: not tested) |
 | `dynamo` | Dynamo's 3D preview draws black squares, lags or crashes | Dynamo without hardware acceleration and background preview | 2020, 2023–2025 |
 | `urlhandler` | macOS does not know the link that returns from the browser to Revit: "Opening product" and nothing happens | The **Autodesk Sign-In** app passes the link into the bottle | 2024+ |
 
@@ -80,7 +80,9 @@ apply to them.
 
 ## Add-ins
 
-`./revit addins` installs RevitLookup and pyRevit, then:
+`./revit addins` installs RevitLookup and pyRevit, then the steps below. Each add-in is a file in `scripts/addins/`
+(name, the files per year with their URL and SHA-256, the step that installs it, its EULA); `--only` picks add-ins from
+there and adds the steps they need.
 
 | Step | What breaks | What we do |
 |---|---|---|
@@ -89,6 +91,14 @@ apply to them.
 | `enscape` (not by default; 2020) | Pressing Start in Enscape 3.4.4 crashes Revit; once past that, black models, a hang when its window is resized, and keys and mouse that do not move the view | Install Enscape with a `System.ValueTuple` that fits .NET 4.7; `tools/shims/vkshim` as `vulkan-1.dll` in `system32`, loaded by Revit.exe only; Metal argument buffers and synchronous queue submits in MoltenVK, set in the bottle's environment |
 | `enscape` (not by default; 2027) | Enscape 4.18 turns down the Mac GPU, and its license check cannot read the computer ID (no `wminet_utils.dll`); then its menus hang it, Asset Library stays blank, and the Chaos sign-in and Asset Library services do not start | Install Enscape without its UI; `wminet_utils.dll` (for the computer ID) from the .NET 4.8 installer Enscape ships; for `Enscape.RendererHost.exe`: `tools/shims/vkshim` as `vulkan-1.dll`, no `d3d11` (its interface draws in software), `tools/shims/wv2fix` loading `tools/shims/rvtfix` for its browser; the MoltenVK settings as for 2020; the two Chaos services through `tools/shims/svcshim` |
 | `enscape-off` (not by default) | — | Remove the Enscape manifest so Enscape does not load; `enscape-on` restores it |
+
+## For the menu bar app
+
+`./revit` is also the engine of the menu bar app. One lock, in `~/Library/Application Support/revit-macos/`, keeps two
+tasks from changing the same bottles at once, from any copy of the project and from the app. `REVIT_DATA` moves
+installers, unpacked files and logs out of the project folder. With `--events <folder>` a command writes its progress as
+JSON lines to `<folder>/events.ndjson`, ending with one `end` line that carries the result. `./revit status --json`,
+`./revit find-installer <folder> --json` and `./revit addins list <year> --json` answer the app's questions.
 
 ## Our shims in tools/
 
