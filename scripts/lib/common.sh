@@ -243,14 +243,14 @@ is_smoke_clone() { # $1 = bottle path: a copy made by ./revit test (its marker, 
   # status, other_bottle_of_year and bottle_guard leave such copies out
   [ -f "$1/$SMOKE_MARK" ] && [ ! -L "$1/$SMOKE_MARK" ] && [ ! -L "$1/revit-macos" ]
 }
-bottle_activity() { # $1 = bottle path → stopped | active | unknown. Active: a Wine process (wineserver, a Windows
-  # program, a launcher) has the bottle's folder itself open (wineserver keeps its working directory there) or a file
+bottle_activity() { # $1 = bottle path → stopped | active | unknown. Active: a Wine process of this user (wineserver,
+  # a Windows program, a launcher) has the bottle's folder itself open (wineserver keeps its working directory there) or a file
   # inside. The licensing services run for hours without Revit, so this is not revit_running. lsof failing for a process
   # that still runs is unknown: callers refuse then. -n -P: no name lookups for network connections (seconds each).
   # Output goes through variables, as in revit_running
   local rb pids p out o
   rb="$(cd "$1" 2>/dev/null && pwd -P)" || { echo unknown; return 0; }   # lsof prints real paths
-  pids="$(pgrep -i -f 'wine|\.exe' 2>/dev/null | grep -vx "$$" | tr '\n' ',')"; pids="${pids%,}"
+  pids="$(pgrep -U "$(id -u)" -i -f 'wine|\.exe' 2>/dev/null | grep -vx "$$" | tr '\n' ',')"; pids="${pids%,}"
   [ -n "$pids" ] || { echo stopped; return 0; }
   if ! out="$(lsof -w -n -P -p "$pids" -Fn 2>/dev/null)"; then   # one that ended meanwhile fails the call: ask each
     out=""
