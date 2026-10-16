@@ -2,7 +2,7 @@
 """Unit tests for tools/report.py. Run: python3 -I -m unittest discover -s tests -p 'test_*.py'
 Every input is generated here; the identity is made of pieces at run time (never this Mac's), except in the one test
 of collect_identity, which checks its shape and prints nothing it learned."""
-import builtins, importlib.util, json, os, pwd, re, subprocess, sys, tempfile, time, unittest, zipfile
+import builtins, importlib.util, json, os, pwd, re, subprocess, sys, tempfile, time, unicodedata, unittest, zipfile
 
 TOOLS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools")
 REPO = os.path.dirname(os.path.abspath(TOOLS))
@@ -212,12 +212,33 @@ class Redact(unittest.TestCase):
         self.assertTrue(rp.gate("x 00:11:22:33:44:55", None, "x"))
 
     def test_emails_volumes_bottle_names(self):
-        s = ("mail bob" + AT + "corp.test, git ana.lima" + AT + "example.org, noreply" + AT + "github.com\n"
+        s = ("mail bob" + AT + "corp.test, git ana.lima" + AT + "example.org, docs x" + AT + "example.net\n"
              "/Volumes/Work Disk/projects/a.txt and /Volumes/Macintosh HD/x\nbottle client-x; Ana Lima\n")
         out = self.red(s)
-        self.assertEqual(out, "mail <EMAIL>, git <EMAIL>, noreply" + AT + "github.com\n"
+        self.assertEqual(out, "mail <EMAIL>, git <EMAIL>, docs x" + AT + "example.net\n"
                               "/Volumes/<VOLUME-1>/projects/a.txt and /Volumes/<VOLUME-2>/x\nbottle <BOTTLE>; <NAME>\n")
         self.assertEqual(rp.gate(out, self.ident, "x"), [])
+
+    def test_email_exempt_only_at_the_documentation_domains(self):
+        ident = rp.learn_identity({})
+        replaced = ["noreply" + AT + "github.com", "no-reply" + AT + "corp.test",
+                    "12345+someone" + AT + "users.noreply.github.com", "x" + AT + "example.com.evil.test",
+                    "x" + AT + "sub.example.org", "x" + AT + "example.community", "j\u00f6rg" + AT + "corp.test"]
+        for a in replaced:
+            out = rp.redact("from " + a + ".", ident)[0]
+            self.assertEqual(out, "from <EMAIL>.", a[:6])
+            self.assertTrue(rp.gate("from " + a, None, "x"), a[:6])
+            self.assertEqual(rp.gate(out, None, "x"), [], a[:6])
+        kept = ["x" + AT + "example.com", "first.last" + AT + "example.org", "a_b+c" + AT + "example.net",
+                "email=x" + AT + "example.com", "'x" + AT + "example.org'"]
+        for a in kept:
+            self.assertEqual(rp.redact(a, ident)[0], a, a[:6])
+            self.assertEqual(rp.gate(a, None, "x"), [], a[:6])
+
+    def test_gate_email_is_stricter_than_the_redaction(self):
+        for a in ("bob!x" + AT + "corp.test", "b\u00f6b" + AT + "corp.test", "%62ob" + AT + "corp.test",
+                  "bob%40corp.test", "b\\u00f6b" + AT + "corp.test"):
+            self.assertTrue([h for h in rp.gate(a, None, "x") if h["rule"] == "email"], a[:4])
 
     def test_autodesk_serial(self):
         out = self.red("Serial number: 123-45678901; serial: 000-00000000; ADLM_PRODKEY 829R1")
@@ -234,7 +255,8 @@ class Redact(unittest.TestCase):
     def test_second_run_changes_nothing(self):
         s = ("see " + U + "design/Work Files/revit-macos/logs/x.log on Anas-Studio as design; "
              "C:\\users\\crossover\\Documents\\Client\\Tower.rvt; /Volumes/Work Disk/a; eyJabcdefghij.eyJabcdefghij.abcd\n"
-             'Jrn.Directive "Username" , "alima42"; mail bob' + AT + "corp.test; ~/Secret/x\n")
+             'Jrn.Directive "Username" , "alima42"; mail bob' + AT + "corp.test; ~/Secret/x\n"
+             "connect to 10.0.0.5:443 and host 2001:db8::1\n")
         once, _ = rp.redact(s, self.ident)
         twice, counts = rp.redact(once, self.ident)
         self.assertEqual(once, twice)
@@ -282,6 +304,167 @@ class Gate(unittest.TestCase):
         ident = rp.learn_identity({"login": "zorblax"})
         hits = rp.gate("one\ntwo zorblax\n", ident, "a.txt")
         self.assertEqual([rp.hit_line(h) for h in hits], ["learned\ta.txt\t2\tuser\t7"])
+
+
+class UnicodeForms(unittest.TestCase):
+    """Learned values and text in NFC or NFD and in any case: the redaction and the gate see one form."""
+
+    def nfd(self, s):
+        return unicodedata.normalize("NFD", s)
+
+    def test_nfd_text_and_nfc_values(self):
+        login, name = "jos\u00e9", "Jos\u00e9 Mu\u00f1oz"
+        ident = rp.learn_identity({"login": login, "gecos": name, "home": U + login})
+        text = "by %s (%s) at %s/Library/x" % (self.nfd(login), self.nfd(name), U + self.nfd(login))
+        self.assertNotEqual(text, unicodedata.normalize("NFC", text))
+        out = rp.redact(text, ident)[0]
+        self.assertEqual(out, "by <USER> (<NAME>) at ~/Library/x")
+        self.assertEqual(rp.gate(out, ident, "x"), [])
+        hits = rp.gate(text, ident, "x")   # planted past the redaction, in NFD: caught
+        self.assertEqual(sorted({h["class"] for h in hits if h["rule"] == "learned"}), ["home", "name", "user"])
+        for data in (text.encode("utf-8"), text.encode("utf-16-le"), json.dumps(text).encode("ascii")):
+            self.assertTrue([h for h in rp.gate(data, ident, "x") if h["rule"] == "learned"], data[:6])
+
+    def test_nfd_values_and_nfc_text(self):
+        ident = rp.learn_identity({"login": self.nfd("jos\u00e9"), "adsk_user": self.nfd("Ren\u00e9e")})
+        self.assertEqual(rp.redact("jos\u00e9 and REN\u00c9E", ident)[0], "<USER> and <ADSK-USER>")
+        self.assertTrue(rp.gate("by ren\u00e9e", ident, "x"))
+        self.assertEqual(rp.redact("jose", ident)[0], "jose")   # without the accent: another word
+        self.assertEqual(rp.gate("jose", ident, "x"), [])
+
+    def test_case_that_changes_length(self):
+        ident = rp.learn_identity({"gecos": "Stra\u00dfe Lima"})
+        self.assertEqual(rp.redact("STRASSE, strasse and Stra\u00dfe", ident)[0], "<NAME>, <NAME> and <NAME>")
+        self.assertTrue(rp.gate("by STRASSE", ident, "x"))
+        self.assertTrue(rp.gate("by stra\u00dfe", ident, "x"))
+
+    def test_percent_escapes_are_decoded_in_full(self):
+        ident = rp.learn_identity({"login": "jos\u00e9", "home": U + "jos\u00e9"})
+        for s in ("file://" + U + "jos%C3%A9/x", "by jos%25C3%25A9", "%2FUsers%2Fjos%C3%A9", "jos%c3%a9%0Aon"):
+            self.assertTrue([h for h in rp.gate(s, ident, "x") if h["rule"] == "learned"], s[:8])
+        self.assertEqual([h["line"] for h in rp.gate("one\ntwo jos%C3%A9%0A\nthree", ident, "x")], [2])
+
+
+class Network(unittest.TestCase):
+    def test_ip_addresses_in_a_network_context_are_replaced(self):
+        cases = [
+            ("' 0:< Additional IP address/name found for host <HOST>: 10.20.30.40 <HOST>",
+             "' 0:< Additional IP address/name found for host <HOST>: <IP-1> <HOST>"),
+            ("connect to 192.168.1.20:443 failed", "connect to <IP-1>:443 failed"),
+            ("GET http://10.1.2.3/path?x=1", "GET http://<IP-1>/path?x=<VALUE>"),
+            ("copy \\\\172.16.0.9\\share", "copy \\\\<IP-1>\\share"),
+            ("ssh admin" + AT + "172.16.0.4", "ssh admin" + AT + "<IP-1>"),
+            ("url http://[fe80::1c2:3ff:fe4a:5b6c]:8080/x", "url http://[<IP-1>]:8080/x"),
+            ("socket bound to 2001:db8::8a2e:370:7334.", "socket bound to <IP-1>."),
+            ("server 10.0.0.5, again 10.0.0.5 and 10.0.0.6", "server <IP-1>, again <IP-1> and <IP-2>"),
+            ("proxy ::ffff:10.0.0.5 up", "proxy <IP-1> up"),
+            ('{"u": "http:\\/\\/10.0.0.5\\/x"}', '{"u": "http:\\/\\/<IP-1>\\/x"}'),
+            ('L"\\\\\\\\10.0.0.5\\\\share" open', 'L"\\\\\\\\<IP-1>\\\\share" open'),
+        ]
+        for raw, want in cases:
+            out, counts = rp.redact(raw, rp.learn_identity({}))
+            self.assertEqual(out, want)
+            self.assertTrue(counts.get("ip"), raw[:12])
+            self.assertTrue([h for h in rp.gate(raw, None, "x") if h["rule"] == "ip-address"], raw[:12])
+            self.assertEqual(rp.gate(out, None, "x"), [], raw[:12])
+            self.assertEqual(rp.redact(out, rp.learn_identity({}))[0], out)
+
+    def test_versions_loopback_and_wine_lines_stay(self):
+        for s in ("Product version=26.3.0.39832", "Revit 27.3.0.28 build", "Property(S): ProductVersion = 27.3.0.28",
+                  "CrossOver 24.3.60.12", "server version 24.3.60.12", "UA CrossOver/24.3.60.12 (http)",
+                  "host 127.0.0.1, ::1 and 0.0.0.0 here", "localhost 127.0.0.1:8080", "connect 127.0.1.1",
+                  "540731.357:04a8:02d8:trace:module:load_dll host", "[15:08:20:123] connect", "01.02.03.04 host",
+                  "address 1.2.3.4.5", "http 999.1.1.1", "ADocumentUpgrade::docUpgrade url", "socket 26.3.0.39832",
+                  'trace:module:load L"C:\\\\Program Files\\\\Autodesk\\\\AdskLicensing\\\\15.0.0.12\\\\x.exe" host',
+                  "Rvt.Attr.AddInVersion: 1.2.3.4 Rvt.Attr.VendorDescription: https://www.autodesk.com",
+                  "VersionBuild: 24.2.10.64 host", "C:\\Program Files\\Autodesk\\Manager\\4.1.2.3\\x connect"):
+            self.assertEqual(rp.redact(s, rp.learn_identity({}))[0], s, s)
+            self.assertEqual(rp.gate(s, None, "x"), [], s)
+        self.assertEqual(rp._summary({}, self.numbered(3)), "Replaced: 3 IP addresses")
+
+    def numbered(self, n):
+        ident = rp.learn_identity({})
+        for i in range(n):
+            ident.number("ip", "10.0.0.%d" % i)
+        return ident
+
+
+class GateRev3(unittest.TestCase):
+    def test_users_and_volumes_exemptions_are_whole_segments(self):
+        hits = [U + "PublicAlice/Desktop/notes.txt", U + "shared-x/y", U + "Public.bob/y", U + "Public Alice/Desktop",
+                U + "Shared folder/x", U + "<USER>x/Desktop", U + "crossovers/x", "/Volumes/<VOLUME-1>x/y",
+                "/Volumes/Work Disk/x", "C:\\Users\\PublicAlice\\x", "%2FUsers%2FPublicAlice%2Fx", "%252FUsers%252Fbob"]
+        for s in hits:
+            self.assertTrue([h for h in rp.gate(s, None, "x") if h["rule"] in ("users-path", "volumes-path")], s)
+        for s in (U + "Shared/x", U + "Shared", U + "Public", '"' + U + 'Public"', U + "<USER>/Desktop", U + "<USER>",
+                  U + "crossover/x", U + "Shared and /tmp/x", "/Volumes/<VOLUME-1>/x", "/Volumes/<VOLUME-2>",
+                  "C:\\Users\\Public\\Documents", "Z:\\Users\\<USER>\\x", "C:\\users\\crossover\\AppData",
+                  "Z:\\Users\\<USER>\r\nnext", "/Volumes/<VOLUME-1>\r\n", "see " + U + "Shared. Then", U + "Public:"):
+            self.assertEqual(rp.gate(s, None, "x"), [], s)
+
+    def test_json_string_values(self):
+        ident = rp.learn_identity({"login": "zo\u00eb", "adsk_user": "J\u00fcrgen42", "gecos": "\U0001d49cna Lima"})
+        doc = json.dumps({"checks": [{"id": "a", "title": "ok"}, {"id": "b", "title": "for J\u00fcrgen42"}]}, indent=1)
+        self.assertNotIn("J\u00fcrgen", doc)   # only as \u00fc: no literal search finds it
+        hits = rp.gate(doc.encode("ascii"), ident, "doctor.json")
+        self.assertEqual({(h["rule"], h["class"]) for h in hits}, {("learned", "adsk_user")})
+        self.assertEqual({h["line"] for h in hits}, {n for n, s in enumerate(doc.split("\n"), 1) if "J\\u00fc" in s})
+        nd = "\n".join(json.dumps({"n": i, "who": "zo\u00eb" if i == 3 else "x"}) for i in range(5))
+        self.assertEqual({(h["rule"], h["line"], h["class"]) for h in rp.gate(nd, ident, "runs.ndjson")},
+                         {("learned", 4, "user")})
+        pair = json.dumps({"by": "\U0001d49cna Lima"})   # a surrogate pair in the escape
+        self.assertIn("\\ud835", pair)
+        self.assertTrue([h for h in rp.gate(pair, ident, "x") if h["class"] == "name"])
+        self.assertTrue(rp.gate('log line {"p": "\\/Users\\/bob"} end', None, "x"))
+        self.assertEqual(rp.gate(json.dumps({"a": "banana", "b": ["analysis"]}), rp.learn_identity({"login": "ana"}),
+                                 "x"), [])
+
+    def test_anchored_fields_agree_with_the_redaction(self):
+        ident = rp.learn_identity({"login": "jo"})
+        raw = {"user-key": "Property(S): USERNAME = Someone Else", "host-key": "ComputerName=STUDIO7",
+               "host-found": "found for host STUDIO7: x", "attr-username": "Rvt.Attr.Username: someone7",
+               "owner": "RegOwner = Big Client Ltd", "consent-id": "ADPSDK\\UserConsent\\ABCDEF123456.json",
+               "learned": "USER=jo LOGNAME: jo"}
+        for rule, s in raw.items():
+            self.assertIn(rule, [h["rule"] for h in rp.gate(s, ident, "x")], rule)
+            out = rp.redact(s, ident)[0]
+            self.assertNotEqual(out, s, rule)
+            self.assertEqual(rp.gate(out, ident, "x"), [], rule)
+        for s in ("LogonUser = crossover", "Property(S): USERNAME=SYSTEM", "USER=joe", "user jo", "ComputerName=<HOST>",
+                  "Rvt.Attr.Username: <ADSK-USER>"):
+            self.assertEqual(rp.gate(s, ident, "x"), [], s)
+            self.assertEqual(rp.redact(s, ident)[0], s, s)
+
+
+class ShortLogin(Tmp):
+    def test_login_ana_keeps_longer_words_and_the_archive_passes_the_gate(self):
+        home = self.path("home")
+        data = os.path.join(home, "revit-macos")
+        inst = os.path.join(data, "logs", "rvt2027-a", "20261014-145128-install")
+        os.makedirs(inst)
+        for name, text in (("summary.txt", "   licensing  exit=1     banana analysis (56 s)\n"),
+                           ("failed.txt", "licensing\n"),
+                           ("licensing.log", "!! banana and analysis failed\n!! for ana in %s/Library\n"
+                                             "Error 1603 by ana; Ana's analysis\n" % home)):
+            with open(os.path.join(inst, name), "w") as f:
+                f.write(text)
+        ident = rp.learn_identity({"login": "ana", "home": home, "data": data})
+        r = rp.build(REPO, data, self.path("none"), os.path.join(data, "logs", "rvt2027-a", "20261016-120000-report"),
+                     year="2027", bottle="rvt2027-a", identity=ident, now=NOW)
+        self.assertIsNone(r["refused"])
+        self.assertEqual(r["left_out"], [])
+        with zipfile.ZipFile(r["report_zip"]) as z:
+            members = {n: z.read(n) for n in z.namelist()}
+        self.assertEqual(members["install/licensing-errors.txt"].decode(),
+                         "line 1: !! banana and analysis failed\nline 2: !! for <USER> in ~/Library\n"
+                         "line 3: Error 1603 by <USER>; <USER>'s analysis")
+        self.assertIn("banana analysis", members["install/summary.txt"].decode())
+        for n, b in members.items():
+            self.assertEqual(rp.gate(b, ident, n), [], n)
+        self.assertEqual(rp._gate_file(r["report_zip"], ident, "report.zip"), [])
+        self.assertEqual(rp.gate(slurp(r["report_txt"], "rb"), ident, "report.txt"), [])
+        for planted in ("by ana", "Ana's", U + "ana/x", "Z:\\Users\\ana\\x", "USER=ana"):
+            self.assertTrue(rp.gate(planted, ident, "x"), planted)
 
 
 class Extracts(unittest.TestCase):
@@ -351,18 +534,66 @@ class Extracts(unittest.TestCase):
                   "Property(S): ADLM_PRODKEY = 829S1", "Property(C): LogonUser = crossover"]
         return lines
 
-    def test_msi_windows_and_properties(self):
-        out = rp.msi_extract(self.msi_log())
+    def test_msi_error_lines_and_properties(self):
+        log = self.msi_log() + ["Property(S): TRANSFORMS = " + win(U + "design/x.mst")]
+        out = rp.msi_extract(log)
         text = "\n".join(out)
-        self.assertEqual(text.count('lines before "Return value 3"'), 10)
-        self.assertIn("Error 1722", text)
-        self.assertIn("returned actual error code 1603", text)
+        errors = [s for s in out if s.startswith("line ")]
+        self.assertEqual(len(errors), 36)   # 12 x (Error 1722, returned actual error code, Return value 3)
+        for s in errors:
+            n, line = re.match(r"^line (\d+): (.*)$", s).groups()
+            self.assertEqual(log[int(n) - 1], line)
         self.assertIn("Property(S): ProductVersion = 27.3.0.28", text)
         self.assertIn("Property(S): ADLM_PRODKEY = 829S1", text)
-        for gone in ("ComputerName", "USERNAME", "SourceDir", "LogonUser", "not a tail", "Step0."):
+        self.assertIn("Property(S): TRANSFORMS = (not shown)", text)
+        for gone in ("ComputerName", "USERNAME", "SourceDir", "LogonUser", "not a tail", "Action start", "Step0.",
+                     "Verbose logging", "Return value 1", "design"):
             self.assertNotIn(gone, text)
-        self.assertLessEqual(max(len(re.findall(r"Action start", text)), 0), 10 * 40)
         self.assertEqual(rp.msi_extract(["Action ended 1: X. Return value 1.", "Property(S): ProductVersion = 1"]), [])
+
+    def test_error_lines_only_and_capped(self):
+        lines = []
+        for i in range(300):
+            lines += ["plain line %d about the client project" % i, "  !! step %d failed" % i]
+        lines += ["   fonts      exit=1     winetricks (76 s)", "   rvt        exit=0     RVT.msi (8 s)",
+                  "   apps       exit=skip  (0 s)", "it exit=1 here, not a summary line", "Exception occurred in OGS",
+                  "Error 12 is short", "unrecoverable error", "0024:err:eventlog:ReportEventW (x)", "a captureTryCrash",
+                  "Assertion failed: x", "wine: Unhandled page fault on read access", "Return value 3."]
+        out = rp.error_extract(lines)
+        self.assertEqual(len(out), rp.ERROR_LINES + 1)
+        self.assertEqual(out[0], "line 2:   !! step 0 failed")
+        self.assertEqual(out[rp.ERROR_LINES // 2], "\u2026 208 more error lines not kept")
+        self.assertEqual(out[-1], "line 612: Return value 3.")
+        tail = "\n".join(out[-10:])
+        for keep in ("fonts      exit=1", "Exception occurred", "unrecoverable error", "ReportEventW", "captureTryCrash",
+                     "Assertion failed", "Unhandled page fault"):
+            self.assertIn(keep, tail)
+        for gone in ("plain line", "exit=0", "exit=skip", "not a summary", "Error 12"):
+            self.assertNotIn(gone, "\n".join(out))
+        self.assertEqual(rp.error_extract(["fine", "all good"]), [])
+
+    def test_error_file_big_log_in_blocks(self):
+        old = rp.SCAN_BLOCK
+        rp.SCAN_BLOCK = 4096   # many blocks, lines across block ends
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                lines = ["body %d %s" % (i, "y" * (i % 97)) for i in range(5000)]
+                for n in (17, 2999, 4999):
+                    lines[n] = "!! failure at %d" % n
+                lines[1000] = "z" * 20000   # longer than four blocks: line numbers after it stay right
+                lines[3000] = "x" * 3000 + " Error 1603 at the end of a long line"
+                p = os.path.join(d, "big.log")
+                with open(p, "w") as f:
+                    f.write("\n".join(lines))   # no line end at the end
+                out = rp.error_file(p)
+                with open(p, "wb") as f:
+                    f.write(b"\xff\xfe" + "one\r\n!! two\r\n".encode("utf-16-le"))
+                self.assertEqual(rp.error_file(p), ["line 2: !! two"])
+        finally:
+            rp.SCAN_BLOCK = old
+        self.assertEqual([s.split(":")[0] for s in out], ["line 18", "line 3000", "line 3001", "line 5000"])
+        self.assertEqual(out[0], "line 18: !! failure at 17")
+        self.assertTrue(out[2].startswith("line 3001: xxx") and len(out[2]) <= rp.LINE_MAX)
 
     def cx_header(self, when):
         return ["***** %s" % when,
@@ -376,22 +607,56 @@ class Extracts(unittest.TestCase):
                 '  CX_DEBUGMSG = "err,+seh"', '  WINEDEBUG = "err,+seh"', "Command:",
                 "/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wineloader x", ""]
 
-    def test_cxlog_header_fields_and_tail(self):
+    def cxlog(self):
         lines = self.cx_header("Wed Oct 14 15:08:19 2026")
+        lines[1] += " 'C:\\x\\Error 1234 Tower.rvt'"   # an error word in the header: the header never goes out
         lines += ["540731.357:04a8:02d8:trace:module:load %d" % i for i in range(300)]
-        lines += self.cx_header("Wed Oct 14 16:00:00 2026")
+        lines += ["** Wed Oct 14 15:08:21 2026",   # the short header of the launch that follows the full one
+                  "Starting '/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wineloader' "
+                  "'C:\\users\\crossover\\Documents\\Tower.rvt'", ""]
         lines += ["0024:err:module:import_dll Library not found %d" % i for i in range(20)]
+        lines += ["wine: Unhandled page fault on read access to 0000000000000000 at address 00006FFFFF (thread 0024)",
+                  "0024:err:eventlog:ReportEventW L\"Application: Revit.exe\"", "Assertion failed: (0), function x",
+                  "0024:trace:seh:dispatch_exception code=c0000005 flags=0"]
+        return lines
+
+    def test_cxlog_header_fields_and_error_lines(self):
+        lines = self.cxlog()
         out = rp.cxlog_extract(lines)
         text = "\n".join(out)
         for gone in ("Environment", "CXConfig", "Starting", "Command:", "WINEPREFIX", "/Volumes", "Tower", "client-x",
-                     "Grabbing", "/usr/bin"):
+                     "Grabbing", "/usr/bin", "Library not found", "load 299", "dispatch_exception", "Error 1234"):
             self.assertNotIn(gone, text)
-        for keep in ("2 sessions", "Product version: 26.3.0.39832", "Mode: private", "PATH: 4 entries",
-                     "CX_DEBUGMSG: err,+seh", "backend: default", "Library not found 19", "load 299"):
+        for keep in ("2 headers; their fields:", "Product version: 26.3.0.39832", "Mode: private", "PATH: 4 entries",
+                     "CX_DEBUGMSG: err,+seh", "backend: default", "Error lines: 3"):
             self.assertIn(keep, text)
-        self.assertNotIn("load 120", text)
-        self.assertTrue(any("header lines left out" in s for s in out))
-        self.assertLessEqual(len([s for s in out if s.startswith(("5407", "0024"))]), rp.TAIL)
+        errors = [s for s in out if s.startswith("line ")]
+        self.assertEqual([int(s.split(":")[0][5:]) for s in errors], [len(lines) - 3, len(lines) - 2, len(lines) - 1])
+        self.assertTrue(errors[0].endswith("wine: Unhandled page fault on read access to 0000000000000000 at address "
+                                           "00006FFFFF (thread 0024)"))
+
+    def test_cxlog_file_big_and_small(self):
+        lines = self.cxlog()
+        small = rp.cxlog_extract(lines)
+        big = lines[:-4] + ["540731.357:04a8:02d8:trace:module:load %s" % ("y" * 200)] * 6000 + lines[-4:]
+        old = rp.SCAN_BLOCK
+        rp.SCAN_BLOCK = 8192
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                p = os.path.join(d, "wine.cxlog")
+                with open(p, "w") as f:
+                    f.write("\n".join(lines) + "\n")
+                self.assertEqual(rp.cxlog_file(p), small)
+                with open(p, "w") as f:
+                    f.write("\n".join(big) + "\n")
+                self.assertGreater(os.path.getsize(p), 1 << 20)
+                out = rp.cxlog_file(p)
+        finally:
+            rp.SCAN_BLOCK = old
+        self.assertEqual(out[:8], small[:8])   # the header fields
+        self.assertEqual([s.split(":")[0] for s in out if s.startswith("line ")],
+                         ["line %d" % n for n in (len(big) - 3, len(big) - 2, len(big) - 1)])
+        self.assertNotIn("Error 1234", "\n".join(out))
 
 
 class Build(Tmp):
@@ -428,9 +693,11 @@ class Build(Tmp):
                    "   steps      exit=1     scripts/run-steps.sh 2027 client-x (282 s; action-steps.log)\n"
                    % (run[len(self.home):] if run.startswith(self.home) else run, win(self.data)))
         self.write(inst + "/failed.txt", "licensing\n../../etc/passwd\n")
-        self.write(inst + "/licensing.log", "installing for design on Anas-Studio\n%s\\x\n/Volumes/Work Disk/a\n"
+        self.write(inst + "/licensing.log", "installing for design on Anas-Studio, client Falcon Tower\n"
+                   "!! the licensing installer returned 1603 for design on Anas-Studio\n"
+                   "Error 1920 in %s\\x\n!! copied from /Volumes/Work Disk/a\nplain line: the Falcon project\n"
                    % win(self.home + "/Desktop"))
-        self.write(inst + "/action-steps.log", "steps failed\n")
+        self.write(inst + "/action-steps.log", "running fonts for the Falcon project\n  !! steps failed: fonts\n")
         msi = ["Property(S): ComputerName = ANAS-STUDIO", "Action start 1: A.", "MSI (s): Error 1722. problem",
                "Action ended 1: A. Return value 3.", "Property(S): ProductVersion = 27.3.0.28"]
         self.write(inst + "/rvt.msi.log", "\r\n".join(msi) + "\r\n")
@@ -442,8 +709,10 @@ class Build(Tmp):
             self.write(inst + "/" + f, b"MZ\x00\x00 design " + bytes(64))
         dbg = "home/Work Files/revit-macos/logs/client-x/20261001-101010-debug"
         cx = Extracts().cx_header("Thu Oct  1 10:10:10 2026") + ["0024:err:x %d on Anas-Studio" % i for i in range(250)]
+        cx += ["wine: Unhandled page fault on read access to 0000000000000000 at address 0000000140001000 (thread 0024),"
+               " starting debugger... on Anas-Studio"]
         self.write(dbg + "/wine.cxlog", "\n".join(cx) + "\n")
-        self.write(dbg + "/stdout.log", "started\n")
+        self.write(dbg + "/stdout.log", "started for the Falcon project\nAssertion failed: x, as design\n")
         self.write(dbg + "/pid", "123\n")
         self.write("home/Work Files/revit-macos/logs/client-x/20261015-090000-test/result.json",
                    json.dumps({"verdict": "pass", "bottle": "client-x", "dialog_id": None}))
@@ -468,10 +737,10 @@ class Build(Tmp):
         rt = slurp(r["report_txt"])
         members = self.zip_members(r["report_zip"])
         names = sorted(members)
-        for n in ("install/summary.txt", "install/failed.txt", "install/licensing.log", "install/action-steps.log",
-                  "install/rvt-errors.txt", "debug/wine-cxlog.txt", "debug/stdout.log", "test/result.json",
-                  "bottle/runs.ndjson", "bottle/revit-ini.txt", "bottle/journal-extract.txt", "manifest.txt"):
-            self.assertIn(n, names)
+        self.assertEqual(names, ["bottle/journal-extract.txt", "bottle/revit-ini.txt", "bottle/runs.ndjson",
+                                 "debug/stdout-errors.txt", "debug/wine-cxlog.txt", "install/action-steps-errors.txt",
+                                 "install/failed.txt", "install/licensing-errors.txt", "install/rvt-msi-errors.txt",
+                                 "install/summary.txt", "manifest.txt", "test/result.json"])
         for n in names:
             self.assertIsNone(rp.REFUSE_RX.search(n), n)
         everything = rt + "\n".join(n + "\n" + b.decode("utf-8") for n, b in members.items())
@@ -479,6 +748,19 @@ class Build(Tmp):
         self.assertEqual(rp.gate(rt, self.ident, "report.txt"), [])
         for n, b in members.items():
             self.assertEqual(rp.gate(b, self.ident, n), [], n)
+        self.assertNotIn("Falcon", everything)   # a log's other lines never go out
+        lic = members["install/licensing-errors.txt"].decode().split("\n")
+        self.assertEqual(lic, ["line 2: !! the licensing installer returned 1603 for <USER> on <HOST>",
+                               "line 3: Error 1920 in ~\\Desktop\\<DIR-1>",
+                               "line 4: !! copied from /Volumes/<VOLUME-1>/a"])
+        self.assertEqual(members["install/action-steps-errors.txt"].decode(), "line 2:   !! steps failed: fonts")
+        self.assertEqual(members["install/rvt-msi-errors.txt"].decode().split("\n"),
+                         ["line 3: MSI (s): Error 1722. problem", "line 4: Action ended 1: A. Return value 3.",
+                          "--- properties ---", "Property(S): ProductVersion = 27.3.0.28"])
+        self.assertEqual(members["debug/stdout-errors.txt"].decode(), "line 2: Assertion failed: x, as <USER>")
+        cx = members["debug/wine-cxlog.txt"].decode()
+        self.assertIn("Error lines: 1\nline 267: wine: Unhandled page fault on read access", cx)
+        self.assertTrue(cx.endswith("starting debugger... on <HOST>"))
         summary = members["install/summary.txt"].decode()
         self.assertIn("see licensing.log", summary)
         self.assertIn("<DATA>\\installers\\extracted", summary)
@@ -532,18 +814,39 @@ class Build(Tmp):
         self.assertEqual(sorted(new), sorted([self.out, r["report_txt"], r["report_zip"]]))
 
     def test_member_with_a_leak_is_left_out(self):
-        with open(os.path.join(self.data, "logs/client-x/20261014-145128-install/licensing.log"), "a") as f:
-            f.write("copied from %sbob/Desktop\n" % U)
+        with open(os.path.join(self.data, "logs/client-x/20261014-145128-install/summary.txt"), "a") as f:
+            f.write("   extra      exit=0     copied from %sbob/Desktop\n" % U)
         r = self.build()
         self.assertIsNone(r["refused"])
         members = self.zip_members(r["report_zip"])
-        self.assertNotIn("install/licensing.log", members)
-        self.assertEqual([x["member"] for x in r["left_out"]], ["install/licensing.log"])
+        self.assertNotIn("install/summary.txt", members)
+        self.assertEqual([x["member"] for x in r["left_out"]], ["install/summary.txt"])
         self.assertTrue(all(h["rule"] == "users-path" for h in r["left_out"][0]["hits"]))
         rt = slurp(r["report_txt"])
-        self.assertIn("Left out: tail of licensing.log \u2014 it holds personal data that could not be removed.", rt)
-        self.assertIn("install/licensing.log \u2014 tail of licensing.log: it holds personal data", members["manifest.txt"].decode())
+        self.assertIn("Left out: summary.txt of the install log \u2014 it holds personal data that could not be "
+                      "removed.", rt)
+        self.assertIn("install/summary.txt \u2014 summary.txt of the install log: it holds personal data",
+                      members["manifest.txt"].decode())
         self.assertNotIn("bob", rt + members["manifest.txt"].decode())
+
+    def test_error_line_with_a_leak_is_left_out_alone(self):
+        with open(os.path.join(self.data, "logs/client-x/20261014-145128-install/licensing.log"), "a") as f:
+            f.write("!! copied from %sbob/Desktop\nError 1603 after it\n" % U)
+        r = self.build()
+        self.assertIsNone(r["refused"])
+        self.assertEqual(r["left_out"], [])
+        members = self.zip_members(r["report_zip"])
+        lic = members["install/licensing-errors.txt"].decode().split("\n")
+        self.assertEqual(lic[-2:], ["line 7: Error 1603 after it",
+                                    "\u2026 1 line left out: personal data that could not be removed"])
+        self.assertEqual(len(lic), 5)
+        rt = slurp(r["report_txt"])
+        self.assertIn("Left out: 1 line of the error lines of licensing.log \u2014 personal data that could not be "
+                      "removed.", rt)
+        manifest = members["manifest.txt"].decode()
+        self.assertIn("install/licensing-errors.txt \u2014 error lines of licensing.log (from ", manifest)
+        self.assertIn("; 1 line left out\n", manifest)
+        self.assertNotIn("bob", rt + "".join(b.decode() for b in members.values()))
 
     def test_leak_in_report_txt_means_no_report(self):
         doc = self.path("doctor.json")
@@ -571,14 +874,14 @@ class Build(Tmp):
 
     def test_exclude(self):
         r = self.build(exclude=["licensing.log"])
-        self.assertNotIn("install/licensing.log", self.zip_members(r["report_zip"]))
+        self.assertNotIn("install/licensing-errors.txt", self.zip_members(r["report_zip"]))
         self.assertIn("left out on request", self.zip_members(r["report_zip"])["manifest.txt"].decode())
 
     def test_size_caps(self):
         inst = os.path.join(self.data, "logs/client-x/20261014-145128-install")
         with open(os.path.join(inst, "licensing.log"), "w") as f:
             for i in range(4000):
-                f.write("line %d %s\n" % (i, "x" * 3000))
+                f.write("!! line %d %s\n" % (i, "x" * 3000))
         doc = self.path("doctor.json")
         with open(doc, "w") as f:
             json.dump({"checks": [{"id": "c%d" % i, "status": "warn", "title": "t" * 250, "fix": "f" * 250}
@@ -602,11 +905,27 @@ class Build(Tmp):
         self.assertTrue(any(x["reason"] == "the report would be over 5 MB" for x in r["left_out"]))
 
     def test_binary_member_is_left_out(self):
-        with open(os.path.join(self.data, "logs/client-x/20261001-101010-debug/stdout.log"), "wb") as f:
+        with open(os.path.join(self.data, "logs/client-x/20261015-090000-test/result.json"), "wb") as f:
             f.write(b"\x00" * 3000 + b"\nend\n")
         r = self.build()
-        self.assertIn({"member": "debug/stdout.log", "what": "tail of stdout.log", "reason": "it is not a text file",
-                       "hits": []}, r["left_out"])
+        self.assertIn({"member": "test/result.json", "what": "result of the test run",
+                       "reason": "it is not a text file", "hits": []}, r["left_out"])
+
+    def test_logs_without_error_lines_add_nothing(self):
+        dbg = os.path.join(self.data, "logs/client-x/20261001-101010-debug")
+        inst = os.path.join(self.data, "logs/client-x/20261014-145128-install")
+        for p, text in ((os.path.join(dbg, "stdout.log"), "started\nall fine\n"),
+                        (os.path.join(inst, "licensing.log"), "the licensing service started\n")):
+            with open(p, "w") as f:
+                f.write(text)
+        members = self.zip_members(self.build()["report_zip"])
+        self.assertNotIn("debug/stdout-errors.txt", members)
+        self.assertNotIn("install/licensing-errors.txt", members)
+        manifest = members["manifest.txt"].decode()
+        self.assertIn("20261001-101010-debug/stdout.log \u2014 stdout.log without an error line: nothing to add",
+                      manifest)
+        self.assertIn("20261014-145128-install/licensing.log \u2014 a failed step's log without an error line",
+                      manifest)
 
     def test_run_context(self):
         ctx = self.path("home", "Work Files", "revit-macos", "logs", "runs", "20261014-145128-999")

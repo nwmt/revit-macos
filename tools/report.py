@@ -8,20 +8,23 @@
 
 build takes files by type and only the parts that help (never a whole log, nothing from sign-in, licensing or a
 browser), puts placeholders such as <USER> where personal data was, then checks every part again with a gate that does
-not trust the replacing. A part that fails the gate is left out and report.txt says so; when report.txt itself fails,
-there is no report (exit 1). The parts are made in a private temporary folder; only what passed is moved to DIR.
+not trust the replacing. Of a log (a failed step's or action's, an MSI log, stdout.log, wine.cxlog) it takes only the
+lines that report an error or a crash, each checked on its own, and the fields of a CrossOver header; of a Revit
+journal, its allowed lines. A part that fails the gate is left out and report.txt says so; when report.txt itself
+fails, there is no report (exit 1). The parts are made in a private temporary folder; only what passed is moved to DIR.
 --json prints {report_txt, report_zip, left_out[], summary, refused, hits}.
 
-gate checks finished files (a zip member by member): each hit as rule, file, line, value class and length, never the
-value; exit 1 on any hit.
+gate checks finished files (a zip member by member; JSON by its string values too): each hit as rule, file, line,
+value class and length, never the value; exit 1 on any hit.
 
 What it learns about this Mac and the bottle (user name, computer name, serial number, the Autodesk user name and ID)
 stays in memory: it is never written or printed. Nothing is sent anywhere. A library too: learn_identity, redact,
-gate, journal_extract, msi_extract, cxlog_extract, build. Run with python3 -I -B.
+gate, journal_extract, error_extract, msi_extract, cxlog_extract, build. Run with python3 -I -B.
 """
 import argparse
 import bisect
 import collections
+import ipaddress
 import itertools
 import json
 import os
@@ -35,6 +38,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
+import urllib.parse
 import zipfile
 
 sys.dont_write_bytecode = True
@@ -45,10 +50,11 @@ REPORT_MAX = 20 * 1024          # report.txt: well inside a GitHub issue body (~
 ZIP_MAX = 5 * 1024 * 1024
 MEMBER_MAX = 256 * 1024
 LINE_MAX = 2000
-TAIL = 200                      # lines of a cxlog, a failed step's log, a failed action's log
-MSI_BEFORE, MSI_WINDOWS = 40, 10
+ERROR_LINES = 100               # error lines kept of one log: the first and the last half when there are more
 JOURNAL_MAX = 1000              # kept journal lines
 NUL_MAX = 0.01
+SCAN_BLOCK, SCAN_MAX = 16 << 20, 4 << 30   # a big log is searched in blocks, up to its length when opened
+CX_HEAD_LINES = 600             # the start of a cxlog read line by line: its header
 
 # ---- placeholders: class -> (token, what the summary calls it). {} in a token is a number (same value, same number)
 LABELS = {
@@ -57,18 +63,18 @@ LABELS = {
     "host": ("<HOST>", "Mac name"), "adsk_user": ("<ADSK-USER>", "Autodesk user name"),
     "adsk_id": ("<ADSK-ID>", "Autodesk ID"), "serial": ("<MAC-SERIAL>", "Mac serial number"),
     "hw_uuid": ("<HW-UUID>", "hardware UUID"), "mac": ("<MAC-ADDR>", "network address"),
-    "email": ("<EMAIL>", "email address"), "bottle": ("<BOTTLE>", "bottle name"),
+    "ip": ("<IP-{}>", "IP address"), "email": ("<EMAIL>", "email address"), "bottle": ("<BOTTLE>", "bottle name"),
     "private": ("<PRIVATE>", "word from your list"), "volume": ("<VOLUME-{}>", "volume name"),
     "model": ("<MODEL-{}>", "model name"), "dir": ("<DIR-{}>", "folder name"),
     "secret": ("<SECRET>", "sign-in token"), "query": ("<VALUE>", "web address value"),
     "adsk_serial": ("<SERIAL>", "Autodesk serial number"), "tmpdir": ("<TMPDIR>", "temporary folder path"),
 }
-ORDER = ("user", "name", "home", "data", "repo", "host", "adsk_user", "adsk_id", "serial", "hw_uuid", "mac", "email",
-         "bottle", "private", "volume", "model", "dir", "secret", "query", "adsk_serial", "tmpdir")
-NUMBERED = ("volume", "model", "dir")
+ORDER = ("user", "name", "home", "data", "repo", "host", "adsk_user", "adsk_id", "serial", "hw_uuid", "mac", "ip",
+         "email", "bottle", "private", "volume", "model", "dir", "secret", "query", "adsk_serial", "tmpdir")
+NUMBERED = ("ip", "volume", "model", "dir")
 PHASE = {"adsk_user": 1, "adsk_id": 1, "host": 2}   # Autodesk identity, then the host, then the other words (3)
 TOKEN = re.compile(r"<(?:DATA|REPO|USER|NAME|HOST|ADSK-USER|ADSK-ID|MAC-SERIAL|HW-UUID|MAC-ADDR|EMAIL|BOTTLE|PRIVATE|"
-                   r"TMPDIR|SECRET|JWT|CALLBACK|VALUE|SERIAL|(?:VOLUME|MODEL|DIR)-\d+)>", re.I)
+                   r"TMPDIR|SECRET|JWT|CALLBACK|VALUE|SERIAL|(?:IP|VOLUME|MODEL|DIR)-\d+)>", re.I)
 
 # While redacting, a replaced span is a run of private-use characters: later rules cannot match inside it
 S_OPEN, S_CLOSE, S_HOME = "\ue000", "\ue001", "\ue002"
@@ -90,9 +96,22 @@ KEYSECRET_RX = re.compile(r"(?i)\b(access_token|refresh_token|id_token|client_se
                           r"([\"']?\s{0,2}[=:]\s{0,2}[\"']?)([^\s\"'&,;<>" + S_ANY + r"]{6,})")
 URL_RX = re.compile(r"(?i)(\bhttps?:(?://|" + SEP + r")[^\s?#\"']+)([?#][^\s\"']*)")
 QPAIR_RX = re.compile(r"([?#&;][^=&;?#]*)=([^&;#?]*)")
-EMAIL_RX = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
-EMAIL_OK = re.compile(r"(?i)noreply|no-reply|@example\.(?:com|org|net)$")
+EMAIL_RX = re.compile(r"[\w.%+-]{1,64}@[\w-]+(?:\.[\w-]+)*\.[^\W\d_]{2,}")
+# the documentation domains only, as the whole address: a noreply address still names its owner
+EMAIL_OK = re.compile(r"(?i)[a-z0-9_.%+-]+@example\.(?:com|org|net)")   # fullmatch
 MAC_RX = re.compile(r"(?<![0-9A-Fa-f:-])(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}(?![0-9A-Fa-f:-])")
+# IP addresses: only in a network context, so version and build numbers (27.3.0.28) stay
+IP4_RX = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?!\w|\.\d)")
+IP6_RX = re.compile(r"(?<![\w:.])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?:(?:\.\d{1,3}){3})?(?![\w:]|\.\d)")
+NET_WORDS = re.compile(r"(?i)(?<![^\W_])(?:ip|ipv[46]|address(?:es)?|addr|host(?:name)?s?|connect\w*|socket\w*|url|"
+                       r"uri|https?|server|tcp|udp|dns|proxy)(?![^\W_])")
+# right before: http://, a //host or \\host that starts a path (not the doubled \\ of a path in a Wine log), :\/\/ of
+# JSON, user@; right after: :port
+NET_BEFORE = re.compile(r"(?:(?:(?<![\w.\\/-])|:)//|:\\/\\/|(?<![\w.\\/$-])(?:\\\\)+|@)\[?$")
+NET_PORT = re.compile(r"\]?:\d{1,5}(?!\d)")
+# on a line with a network word, still a version: AddInVersion: 1.2.3.4, CrossOver/24.3.60.12, a folder ...\1.2.3.4
+VERSION_BEFORE = re.compile(r"(?i)(?:(?:version|build|release|revision)|(?<![^\W_])(?:ver|v))[\s=:\"'(]*$|"
+                            r"(?<![^\s(\"'])[a-z][\w.-]*/$|[\\/]$")
 ADSK_SERIAL_RX = re.compile(r"(?i)(serial(?:[ _]?(?:number|no))?|csn|sn|adlm_serial\w*)(\W{1,4})(?!000-00000000)"
                             r"(\d{3}-\d{8})(?!\d)")
 VOL_RX = re.compile(r"(?i)(" + SEP + r"Volumes" + SEP + r")((?:" + _NOSEP + r"[^\\/\r\n\"'<>|*?:\t" + S_ANY + r"])+)")
@@ -153,19 +172,38 @@ REFUSE_WHY = (("dll exe msi msp cab 7z", "a program or installer file: never inc
               ("rvt rfa rte rft rvg", "a Revit model, family or template: never included"),
               ("dmp", "a crash dump: never included"), ("reg", "a registry file: never included"),
               ("lic dat data", "a license or data file: never included"),
-              ("cxlog", "a whole Wine log: only a debug session's tail goes into a report"))
+              ("cxlog", "a whole Wine log: only a debug session's error lines go into a report"))
 
 
 # ---------------------------------------------------------------------------------------------------------------
 # Identity: learned at run time, kept in memory
 # ---------------------------------------------------------------------------------------------------------------
+def _nfc(s):
+    return unicodedata.normalize("NFC", s or "")
+
+
+def _key(s):
+    """The form values are compared in without case: NFC, casefolded (Stra\u00dfe and STRASSE are one), NFC again."""
+    return unicodedata.normalize("NFC", _nfc(s).casefold())
+
+
+def _ci(s):
+    """A regex for s in any case (with re.I), also where case changes its length: Stra\u00dfe, STRASSE, strasse."""
+    forms = {}
+    for f in (_nfc(s), _nfc(s.upper()), _key(s)):
+        forms.setdefault(f.lower(), f)   # re.I matches forms that only differ in simple case
+    alts = sorted(forms.values(), key=lambda f: (-len(f), f))
+    return re.escape(alts[0]) if len(alts) == 1 else "(?:" + "|".join(re.escape(f) for f in alts) + ")"
+
+
 class Identity:
-    """The personal values report.py removes. They live in this object only: repr() shows counts, never a value."""
+    """The personal values report.py removes. They live in this object only: repr() shows counts, never a value.
+    Every value is kept in NFC, as the text it is looked for in."""
 
     def __init__(self):
         self.paths, self.words, self.homes = [], [], []
         self.login = None
-        self.numbers = {k: {} for k in NUMBERED}   # value (lower case) -> number, in order of first appearance
+        self.numbers = {k: {} for k in NUMBERED}   # value (caseless) -> number, in order of first appearance
         self.used = {k: set() for k in NUMBERED}
         self._rx = self._gate = None
 
@@ -175,7 +213,7 @@ class Identity:
     __str__ = __repr__
 
     def add_path(self, cls, p):
-        p = os.path.normpath(p).rstrip("/") if p else ""
+        p = os.path.normpath(_nfc(p)).rstrip("/") if p else ""
         if len(p) >= 4 and p.startswith("/") and (cls, p) not in self.paths:
             self.paths.append((cls, p))
             if cls == "home" and p not in self.homes:
@@ -183,16 +221,16 @@ class Identity:
             self._rx = self._gate = None
 
     def add_word(self, cls, v):
-        v = (v or "").strip()
-        if not v or v.lower() == "crossover" or any(w.lower() == v.lower() for _, w in self.words):
+        v = _nfc(v).strip()
+        if not v or _key(v) == "crossover" or any(_key(w) == _key(v) for _, w in self.words):
             return
         self.words.append((cls, v))
         if cls in NUMBERED:
-            self.numbers[cls].setdefault(v.lower(), len(self.numbers[cls]) + 1)
+            self.numbers[cls].setdefault(_key(v), len(self.numbers[cls]) + 1)
         self._rx = self._gate = None
 
     def number(self, kind, name):
-        n = self.numbers[kind].setdefault(name.strip().lower(), len(self.numbers[kind]) + 1)
+        n = self.numbers[kind].setdefault(_key(name.strip()), len(self.numbers[kind]) + 1)
         self.used[kind].add(n)
         return n
 
@@ -201,7 +239,8 @@ class Identity:
         return t.format(self.number(cls, value)) if cls in NUMBERED else t
 
     def gate_values(self):
-        """[(normalized value, class, 'path'|'word')] for the gate: paths in every root form, words of 3+ characters."""
+        """[(normalized value, class, 'path'|'word'|'login')] for the gate: paths in every root form, words of 3+
+        characters (whole words, as the redaction replaces them), a shorter login in its anchored fields only."""
         out = []
         for cls, p in self.paths:
             out.append((_normalize(p), cls, "path"))
@@ -212,13 +251,21 @@ class Identity:
         for cls, v in self.words:
             if len(v) >= 3:
                 out.append((_normalize(v), cls, "word"))
+        if self.login and len(self.login) < 3:
+            out.append((_normalize(self.login), "user", "login"))
         return out
 
     def gate_rx(self):
         if self._gate is None:
-            self._gate = [(v, cls, kind, re.compile(re.escape(v) + END if kind == "path" else
-                                                    r"(?<![^\W_])" + re.escape(v) + r"(?![^\W_])"))
-                          for v, cls, kind in self.gate_values()]
+            self._gate = []
+            for v, cls, kind in self.gate_values():
+                if kind == "path":
+                    rx = re.escape(v) + END
+                elif kind == "word":
+                    rx = r"(?<![^\W_])" + re.escape(v) + r"(?![^\W_])"
+                else:   # USER=jo, LOGNAME: jo (a path with it is the users-path rule's)
+                    rx = r"\b(?:user|logname)[ \t]*[=:][ \t]*\"?" + re.escape(v) + r"(?=[\s\",;]|\Z)"
+                self._gate.append((v, cls, kind, re.compile(rx)))
         return self._gate
 
     def _compiled(self):
@@ -230,11 +277,12 @@ class Identity:
             phases = {}
             for cls, v in self.words:
                 if len(v) >= 3:
-                    phases.setdefault(PHASE.get(cls, 3), {}).setdefault(v.lower(), cls)
-            words = {p: (_word_rx(list(d)), d) for p, d in phases.items()}
+                    phases.setdefault(PHASE.get(cls, 3), {}).setdefault(_key(v), (cls, v))
+            words = {p: (_word_rx([v for _, v in d.values()]), {k: c for k, (c, _) in d.items()})
+                     for p, d in phases.items()}
             login = None
             if self.login:
-                login = re.compile(r"(?i)(" + SEP + r"Users" + SEP + r")(" + re.escape(self.login) + r")" + END)
+                login = re.compile(r"(?i)(" + SEP + r"Users" + SEP + r")(" + _ci(self.login) + r")" + END)
             self._rx = (paths, words, login)
         return self._rx
 
@@ -242,17 +290,17 @@ class Identity:
 def _path_forms(p, homes):
     """Regexes for a POSIX path in every form a log gives it: Z:\\..., \\\\, \\/, %2F, file://, any case; under the home
     also as ~/... and CrossOver's Y:\\..."""
-    body = "".join(SEP + re.escape(x) for x in p.split("/") if x)
+    body = "".join(SEP + _ci(x) for x in p.split("/") if x)
     forms = [DRIVE + body + END]
     for h in homes:
         if p != h and p.startswith(h + "/"):
-            tail = "".join(SEP + re.escape(x) for x in p[len(h):].split("/") if x)
+            tail = "".join(SEP + _ci(x) for x in p[len(h):].split("/") if x)
             forms += [r"(?<![\w~])~" + tail + END, r"(?<![^\W_])[Yy]:" + tail + END]
     return forms
 
 
 def _word_rx(values):
-    alts = "|".join(re.escape(v) for v in sorted(values, key=lambda v: (-len(v), v)))
+    alts = "|".join(_ci(v) for v in sorted(values, key=lambda v: (-len(v), v)))
     return re.compile(r"(?<![^\W_])(?:" + alts + r")(?![^\W_])", re.I)
 
 
@@ -264,7 +312,7 @@ DEFAULT_BOTTLE_RX = re.compile(r"^rvt\d{4}-[a-z0-9]{1,4}$", re.I)
 def _as_list(v):
     if v is None:
         return []
-    return [v] if isinstance(v, str) else [x for x in v if x]
+    return [_nfc(v)] if isinstance(v, str) else [_nfc(x) for x in v if x]
 
 
 def _parts(v, min_len=3):
@@ -274,17 +322,17 @@ def _parts(v, min_len=3):
 def learn_identity(facts):
     """facts (dict, every key optional) -> Identity. Keys: login, gecos, home, data, root (a path or a list of
     paths), hosts (ComputerName, LocalHostName, HostName, hostname...), volumes, adsk_user, adsk_id, journal_user,
-    serial, hw_uuid, macs, git_name, git_email, bottle, denylist."""
+    serial, hw_uuid, macs, git_name, git_email, bottle, denylist. Values in any Unicode form: they are kept in NFC."""
     ident = Identity()
     for cls, key in (("data", "data"), ("repo", "root"), ("home", "home")):
         for p in _as_list(facts.get(key)):
             ident.add_path(cls, p)
-    login = (facts.get("login") or "").strip()
+    login = _nfc(facts.get("login")).strip()
     if login:
         ident.login = login
         ident.add_word("user", login)
-    gecos = (facts.get("gecos") or "").strip()
-    if gecos and gecos.lower() != login.lower():
+    gecos = _nfc(facts.get("gecos")).strip()
+    if gecos and _key(gecos) != _key(login):
         ident.add_word("name", gecos)
         for p in _parts(gecos):
             ident.add_word("name", p)
@@ -292,7 +340,7 @@ def learn_identity(facts):
         h = re.sub(r"(?i)\.local\.?$", "", h.strip())
         short = h.split(".")[0]
         for v in (h, short, short.upper()[:15]):   # Wine's ComputerName: upper case, the first 15 characters
-            if v and v.lower() not in STOCK_HOSTS:
+            if v and _key(v) not in STOCK_HOSTS:
                 ident.add_word("host", v)
     for v in _as_list(facts.get("volumes")):
         ident.add_word("volume", v)
@@ -317,7 +365,7 @@ def learn_identity(facts):
         ident.add_word("email", v)
         for p in _parts(v.split("@")[0]):
             ident.add_word("name", p)
-    b = (facts.get("bottle") or "").strip()
+    b = _nfc(facts.get("bottle")).strip()
     if b and not DEFAULT_BOTTLE_RX.match(b):
         ident.add_word("bottle", b)
     for v in _as_list(facts.get("denylist")):
@@ -452,7 +500,7 @@ def collect_identity(root, data, bottle_dir=None, year=None, bottle=None):
 class _Text:
     def __init__(self, text):
         self.tokens, self.counts = [], collections.Counter()
-        text = re.sub("[" + S_ANY + "]", "\ufffd", text)
+        text = re.sub("[" + S_ANY + "]", "\ufffd", _nfc(text))   # NFC, as the learned values and the gate
         self.text = TOKEN.sub(lambda m: self.tok(m.group(0)), text)   # placeholders already there: kept, not counted
 
     def tok(self, token, cls=None):
@@ -541,9 +589,53 @@ def _words(t, ident, rx, classes):
             i = bisect.bisect_right(starts, m.start()) - 1
             if i >= 0 and m.start() < spans[i][1]:
                 return v
-        cls = classes.get(v.lower()) or next(iter(classes.values()))
+        cls = classes.get(_key(v)) or next(iter(classes.values()))
         return t.tok(ident.token(cls, v), cls)
     t.sub(rx, fn)
+
+
+def _ip_ok(v):
+    """A real address that is not loopback or unspecified; an IPv4 without leading zeros (01.02 is a date or a
+    version), an IPv6 with :: or all eight groups."""
+    try:
+        a = ipaddress.ip_address(v)
+    except ValueError:
+        return False
+    if a.version == 4 and any(len(o) > 1 and o[0] == "0" for o in v.split(".")):
+        return False
+    if a.version == 6 and "::" not in v and v.count(":") != (6 if "." in v else 7):
+        return False
+    return not (a.is_loopback or a.is_unspecified or v == "255.255.255.255")
+
+
+def _ip_spans(text):
+    """(start, end) of each IP address in a network context: right after // or @, right before :port, or on a line
+    that names the network (ip, address, host, connect, socket, url, http, server...) and not right after a version
+    word. Loopback stays, and so does a version or build number (26.3.0.39832, 27.3.0.28) outside such a context."""
+    out = []
+    for rx in (IP4_RX, IP6_RX):
+        for m in rx.finditer(text):
+            s, e = m.span()
+            if not _ip_ok(m.group(0)):
+                continue
+            if NET_BEFORE.search(text[max(0, s - 12):s]) or NET_PORT.match(text, e):
+                out.append((s, e))
+                continue
+            ls = text.rfind("\n", 0, s) + 1
+            le = text.find("\n", e)
+            if NET_WORDS.search(text, ls, len(text) if le < 0 else le) and \
+                    not VERSION_BEFORE.search(text[max(ls, s - 60):s]):
+                out.append((s, e))
+    return sorted(out)
+
+
+def _ips(t, ident):
+    text, out, pos = t.text, [], 0
+    for s, e in _ip_spans(text):
+        if s >= pos:
+            out += [text[pos:s], t.tok(ident.token("ip", text[s:e]), "ip")]
+            pos = e
+    t.text = "".join(out) + text[pos:]
 
 
 def _rel_forms(rel, ident):
@@ -572,8 +664,9 @@ def redact(text, identity, rel=None):
     t.sub(KEYSECRET_RX, lambda m: m.group(1) + m.group(2) + t.tok("<SECRET>", "secret"))
     t.sub(URL_RX, lambda m: m.group(1) + QPAIR_RX.sub(
         lambda q: q.group(1) + "=" + (t.tok("<VALUE>", "query") if _real(q.group(2)) else q.group(2)), m.group(2)))
-    t.sub(EMAIL_RX, lambda m: m.group(0) if EMAIL_OK.search(m.group(0)) else t.tok("<EMAIL>", "email"))
+    t.sub(EMAIL_RX, lambda m: m.group(0) if EMAIL_OK.fullmatch(m.group(0)) else t.tok("<EMAIL>", "email"))
     t.sub(MAC_RX, lambda m: t.tok("<MAC-ADDR>", "mac"))
+    _ips(t, ident)
     t.sub(ADSK_SERIAL_RX, lambda m: m.group(1) + m.group(2) + t.tok("<SERIAL>", "adsk_serial"))
     t.sub(VOL_RX, lambda m: m.group(1) + t.tok(ident.token("volume", m.group(2)), "volume"))
     t.sub(MODEL_RX, lambda m: _model(t, ident, m))
@@ -595,12 +688,13 @@ def redact(text, identity, rel=None):
 
     def user_key(m):   # USERNAME = First Last: the whole value; USER=login more: the login only
         v, key = m.group(3), m.group(1).lower()
-        if key in ("logonuser", "username") and v.lower() not in BENIGN_USERS and _real(v):
+        if key in ("logonuser", "username") and _key(v) not in BENIGN_USERS and _real(v):
             return m.group(1) + m.group(2) + t.tok("<USER>", "user")
         first = v.split()[0]
-        if ident.login and first.lower() == ident.login.lower():
-            return m.group(1) + m.group(2) + t.tok("<USER>", "user") + v[len(first):]
-        return m.group(0)
+        rest = USER_KEY_RX.sub(user_key, v[len(first):])   # USER=jo LOGNAME=jo: the next key too
+        if ident.login and _key(first) == _key(ident.login):
+            return m.group(1) + m.group(2) + t.tok("<USER>", "user") + rest
+        return m.group(1) + m.group(2) + first + rest
     t.sub(USER_KEY_RX, user_key)
     t.sub(OWNER_RX, lambda m: m.group(1) + m.group(2) + t.tok("<NAME>", "name"))
     if 3 in words:
@@ -611,29 +705,131 @@ def redact(text, identity, rel=None):
 # ---------------------------------------------------------------------------------------------------------------
 # The gate: independent of the redaction, fails closed
 # ---------------------------------------------------------------------------------------------------------------
-def _normalize(s):
-    """Lower case; \\, \\\\, \\/ (JSON), %2F, %5C, file://, \\??\\ and \\\\?\\ all become one /."""
-    s = s.lower().replace("file://", "/")
-    s = re.sub(r"%2f|%5c", "/", s)
+PCT_RX = re.compile(r"%[0-9A-Fa-f]{2}")
+PCT_EOL = re.compile(r"%0[AaDd]")
+JSON_U = re.compile(r"\\u([0-9A-Fa-f]{4})(?:\\u([0-9A-Fa-f]{4}))?")
+
+
+def _light(s):
+    """What the gate reads before it folds separators: percent escapes decoded in full (%2F, %C3%A9, %252F: at most
+    three rounds; a decoded line break becomes a space, so lines keep their numbers), then NFC and casefolded."""
+    for _ in range(3):
+        if not PCT_RX.search(s):
+            break
+        d = urllib.parse.unquote(PCT_EOL.sub(" ", s), errors="replace")
+        if d == s:
+            break
+        s = d
+    return _key(s)
+
+
+def _fold(s):
+    """\\, \\\\, \\/ (JSON), file://, \\??\\ and \\\\?\\ all become one /."""
+    s = s.replace("file://", "/")
     s = re.sub(r"\\+", "/", s)
     s = re.sub(r"/+\?\?/|/+\?/", "/", s)
     return re.sub(r"/{2,}", "/", s)
 
 
-GATE_RULES = (
-    ("users-path", "path", re.compile(r"/users/(?!<|shared(?!\w)|public(?!\w)|crossover(?!\w))[^/\s\"'<>|]+")),
-    ("volumes-path", "path", re.compile(r"/volumes/(?!<volume-\d+>)[^/\s\"'<>|]+")),
+def _normalize(s):
+    return _fold(_light(s))
+
+
+def _json_char(n):
+    return " " if n < 0x20 else "\ufffd" if 0xD800 <= n < 0xE000 else chr(n)   # a control character: a space
+
+
+def _json_u(m):
+    a, b = int(m.group(1), 16), int(m.group(2), 16) if m.group(2) else None
+    if b is not None and 0xD800 <= a < 0xDC00 and 0xDC00 <= b < 0xE000:   # a surrogate pair: one character
+        return chr(0x10000 + ((a - 0xD800) << 10) + (b - 0xDC00))
+    return _json_char(a) + ("" if b is None else _json_char(b))
+
+
+def _unescape_json(s):
+    """\\uXXXX (and a surrogate pair) as the character it stands for, in place: a JSON string that hides a value."""
+    return JSON_U.sub(_json_u, s)
+
+
+def _json_walk(x, out):
+    if isinstance(x, str):
+        out.append(x)
+    elif isinstance(x, dict):
+        for k, v in x.items():
+            out.append(k)
+            _json_walk(v, out)
+    elif isinstance(x, list):
+        for v in x:
+            _json_walk(v, out)
+
+
+def _json_strings(text):
+    """[(line, string)] of every string (keys too) in the JSON of a text: the whole text when it is one JSON document,
+    else each line that is a JSON object (NDJSON); [] when there is none."""
+    out, s = [], text.strip()
+    if s[:1] in "{[" and s[-1:] in "}]":
+        try:
+            doc = json.loads(s)
+        except (ValueError, RecursionError):
+            doc = None
+        if doc is not None:
+            found, pos, line = [], 0, 1
+            _json_walk(doc, found)
+            for v in found:   # the line of a string: where its JSON form is, after the one before it
+                for form in (json.dumps(v, ensure_ascii=False)[1:-1], json.dumps(v)[1:-1]):
+                    i = text.find(form, pos) if form else -1
+                    if i >= 0:
+                        line += text.count("\n", pos, i)
+                        pos = i
+                        break
+                out.append((line, v))
+            return out
+    for n, ln in enumerate(text.split("\n"), 1):
+        ln = ln.strip()
+        if ln[:1] == "{" and ln[-1:] == "}" and len(ln) <= 1 << 20:
+            try:
+                found = []
+                _json_walk(json.loads(ln), found)
+            except (ValueError, RecursionError):
+                continue
+            out += [(n, v) for v in found]
+    return out
+
+
+# A /Users/ or /Volumes/ exemption holds only as a whole path segment: /Users/Shared/ and /Users/<USER> are not hits,
+# a folder in Users named PublicAlice, shared-x or "Public Alice" is. A segment ends at /, at a character no path
+# segment here has, at a full stop before a space, or at a space when what follows is not a path going on (no / before
+# the next space).
+_SEG_END = r"[\"'<>|*?\t\r\n\[\]:,;)]"
+SEG_DONE = (r"(?:/|(?=" + _SEG_END + r"|\Z)|(?=\.(?:\s|" + _SEG_END + r"|\Z))|(?=[ ]+[^\s/\"'<>|*?\[\]:,;)]*(?:\s|" +
+            _SEG_END + r"|\Z)))")
+GATE_RULES = (   # (rule, value class, a regex over the folded text or a function over the unfolded one)
+    ("users-path", "path", re.compile(r"/users/(?!(?:<[^/<>\s]+>|shared|public|crossover)" + SEG_DONE +
+                                      r")[^/\s\"'|]+")),
+    ("volumes-path", "path", re.compile(r"/volumes/(?!<volume-\d+>" + SEG_DONE + r")[^/\s\"'|]+")),
     ("jwt", "token", re.compile(r"eyj[a-z0-9_-]{8,}\.eyj[a-z0-9_-]{8,}\.[a-z0-9_-]{4,}")),
     ("bearer", "token", re.compile(r"\bbearer\s+(?!<)[a-z0-9._~+/=-]{8,}")),
     ("callback", "token", re.compile(r"adskidmgr:[^\s]*code=")),
     ("secret", "token", re.compile(r"\b(?:access_token|refresh_token|id_token|client_secret|code_verifier|password|"
                                    r"passwd)[\"']?\s{0,2}[=:]\s{0,2}[\"']?(?!<)[^\s\"'&,;<>]{6,}")),
     ("mac-address", "address", re.compile(r"(?<![0-9a-f:-])(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}(?![0-9a-f:-])")),
+    ("ip-address", "address", _ip_spans),   # the same network contexts as the redaction, on the unfolded text
     ("serial", "serial", re.compile(r"(?:serial|csn)\W{1,4}(?!000-00000000)\d{3}-\d{8}")),
+    # the anchored fields of the redaction: their value is personal whatever it is
     ("journal-username", "adsk_user", re.compile(r'"username"[\s_]*,[\s_]*"(?!<adsk-user>"|")')),
     ("ini-user", "adsk_user", re.compile(r"(?m)^[ \t]*user(?:name|id)[ \t]*=[ \t]*(?!<|crossover\b)[^\s]")),
+    ("attr-username", "adsk_user", re.compile(r"rvt\.attr\.username:[ \t]*(?!<|rvt\.)[^\s]")),
+    ("consent-id", "adsk_id", re.compile(r"userconsent/(?!<)[a-z0-9]{6,}\.json")),
+    ("host-key", "host", re.compile(r"\b(?:computername|hostname)[ \t]*[=:][ \t]*\"?(?!<)[^\s\",;]")),
+    ("host-found", "host", re.compile(r"found for host[ \t]+(?!<)[^\s:]")),
+    ("user-key", "user", re.compile(r"\b(?:logonuser|username)[ \t]*[=:][ \t]*\"?(?!<|(?:" + "|".join(BENIGN_USERS) +
+                                    r")(?![^\s\",;]))[^\s\",;]")),
+    ("owner", "name", re.compile(r"\b(?:regowner|regcompany|companyname|registeredowner|registeredorganization)"
+                                 r"[ \t]*[=:][ \t]*\"?(?!<)[^\s\"]")),
 )
-GATE_EMAIL = re.compile(r"[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}")
+# Stricter than the redaction: any local part; the documentation domains are exempt only for the plain address
+GATE_EMAIL = re.compile(r"[^\s@<>()\[\],;:\"'/\\]{1,64}@[\w-]+(?:\.[\w-]+)*\.[^\W\d_]{2,}")
+GATE_EMAIL_OK = re.compile(r"[a-z0-9_.%+-]+@example\.(?:com|org|net)")   # fullmatch
 GATE_URL = re.compile(r"\bhttps?:/+[^\s?#\"']+([?#][^\s\"']*)")
 GATE_MODEL = re.compile(r"\.(?:" + MODEL_EXT + r")(?![a-z0-9])")
 GATE_STEM = re.compile(r"[^/\[\]\"'=<>|\t:*?\r\n]*$")
@@ -642,18 +838,34 @@ GATE_SEG = re.compile(r"[^/\r\n\"'<>|*?\t\[\]:]+")
 GATE_EXEMPT = re.compile(r"(?:program files(?: \(x86\))?/autodesk/|/fonts/)[^\r\n\"'<>|\t;,=()\[\]]*")
 
 
-def _gate_text(norm, ident, name):
+def _email_ok(a):
+    """The address the redaction keeps: its plain part (what follows the last character a plain address cannot
+    have) at example.com, .org or .net."""
+    local, dom = a.rsplit("@", 1)
+    plain = re.search(r"[a-z0-9_.%+-]*$", local).group(0)
+    return bool(plain) and bool(GATE_EMAIL_OK.fullmatch(plain + "@" + dom))
+
+
+def _gate_text(norm, light, ident, name):
+    """Hits in one text: norm is folded (_normalize), light only decoded (_light), for rules that need // and \\\\."""
     nl = [m.start() for m in re.finditer("\n", norm)]
+    lnl = None
     hits = []
 
     def hit(rule, cls, pos, length):
         hits.append({"rule": rule, "file": name, "line": bisect.bisect_left(nl, pos) + 1, "class": cls,
                      "length": length})
     for rule, cls, rx in GATE_RULES:
+        if callable(rx):
+            for s, e in rx(light):
+                lnl = lnl if lnl is not None else [m.start() for m in re.finditer("\n", light)]
+                hits.append({"rule": rule, "file": name, "line": bisect.bisect_left(lnl, s) + 1, "class": cls,
+                             "length": e - s})
+            continue
         for m in rx.finditer(norm):
             hit(rule, cls, m.start(), len(m.group(0)))
     for m in GATE_EMAIL.finditer(norm):
-        if not EMAIL_OK.search(m.group(0)):
+        if not _email_ok(m.group(0)):
             hit("email", "email", m.start(), len(m.group(0)))
     for m in GATE_URL.finditer(norm):
         for q in QPAIR_RX.finditer(m.group(1)):
@@ -710,17 +922,28 @@ def _gate_text(norm, ident, name):
 def gate(data, identity=None, name=""):
     """Hits of the independent check in one text or file content: learned values in any form, and rules that need no
     learned value. data: bytes (read as UTF-8 and as UTF-16LE) or str -> [{rule, file, line, class, length}].
-    A hit never holds the value or any part of it."""
+    Each view is read as it is, with its \\uXXXX escapes decoded, and by the string values of its JSON; percent
+    escapes are decoded, Unicode is compared in NFC without case. A hit never holds the value or any part of it."""
     views = [data] if isinstance(data, str) else [data.decode("utf-8", "replace")]
     if isinstance(data, bytes) and len(data) >= 2:
         views += [data.decode("utf-16-le", "ignore"), data[1:].decode("utf-16-le", "ignore")]
     seen, out = set(), []
     for v in views:
-        for h in _gate_text(_normalize(v), identity, name):
-            k = (h["rule"], h["line"], h["class"], h["length"])
-            if k not in seen:
-                seen.add(k)
-                out.append(h)
+        texts = [(v, None)]
+        if JSON_U.search(v):
+            texts.append((_unescape_json(v), None))
+        strings = _json_strings(v)
+        if strings:   # one string a line; lines[i] is the line of the text it came from
+            texts.append(("\n".join(re.sub(r"[\r\n]", " ", s) for _, s in strings), [n for n, _ in strings]))
+        for t, lines in texts:
+            light = _light(t)
+            for h in _gate_text(_fold(light), light, identity, name):
+                if lines:
+                    h["line"] = lines[min(h["line"], len(lines)) - 1]
+                k = (h["rule"], h["line"], h["class"], h["length"])
+                if k not in seen:
+                    seen.add(k)
+                    out.append(h)
     return out
 
 
@@ -849,40 +1072,74 @@ def journal_extract(lines, keep=None):
     return out
 
 
-MSI_FAIL = re.compile(r"Return value 3\b")
-MSI_ERR = re.compile(r"\bError \d{4}\b|returned actual error code")
-MSI_PROP = re.compile(r"^\s*Property\(([A-Z])\):\s*([A-Za-z_][A-Za-z0-9_.]*)\s*=")
+# The lines of a log that may go into a report: those that report an error or a crash. (a literal every match holds:
+# the fast search through a big log; the pattern that decides, on the whole line, or None for the literal itself)
+ERROR_LINE = (
+    ("Return value 3", r"Return value 3\b"),              # MSI: an action failed
+    ("Error ", r"\bError \d{4}\b"),                       # MSI and Windows Installer error codes
+    ("returned actual error code", None),                 # MSI: a custom action failed
+    ("!!", r"^\s*!!"),                                    # our scripts' own failure lines
+    ("exit=", r"^\s+\S+\s+exit=(?!0(?!\S)|skip(?!\S))\S"),   # a summary line of a step that did not end with 0
+    ("wine: Unhandled ", r"wine: Unhandled (?:page fault|exception)"),
+    ("err:eventlog:ReportEventW", None),                  # a .NET fatal error or unhandled exception
+    ("unrecoverable error", None),
+    ("captureTryCrash", None),
+    ("Exception occurred", None),
+    ("Assertion failed", None),
+)
+ERROR_RX = re.compile("|".join(p or re.escape(lit) for lit, p in ERROR_LINE))
+ERROR_LITS = tuple(lit.encode() for lit, _ in ERROR_LINE)
+
+
+def _numbered(lines):
+    n = 0
+    for x in lines:
+        if isinstance(x, tuple):
+            n, x = x
+        else:
+            n += 1
+        yield n, x
+
+
+def error_extract(lines, limit=ERROR_LINES):
+    """The lines that report an error or a crash (ERROR_LINE), each as 'line N: text' and nothing around it: no
+    context, no tail. At most `limit`: the first and the last half when there are more. lines: str or (number, str)."""
+    head, tail, n = [], collections.deque(maxlen=limit - limit // 2), 0
+    for i, line in _numbered(lines):
+        if ERROR_RX.search(line):
+            n += 1
+            s = "line %d: %s" % (i, line.rstrip("\r\n")[:LINE_MAX - 20])
+            if len(head) < limit // 2:
+                head.append(s)
+            else:
+                tail.append(s)
+    more = n - len(head) - len(tail)
+    return head + (["\u2026 %d more error line%s not kept" % (more, "" if more == 1 else "s")] if more else []) + \
+        list(tail)
+
+
+MSI_PROP = re.compile(r"^\s*Property\(([A-Z])\):\s*([A-Za-z_][A-Za-z0-9_.]*)\s*=\s*(.*?)\s*$")
 MSI_KEEP = ("productversion", "productcode", "adlm_prodkey", "revitlanguage", "transforms")
+MSI_VALUE = re.compile(r"[A-Za-z0-9_.{}:;@ -]{0,120}")
 
 
-def msi_extract(lines, before=MSI_BEFORE, windows=MSI_WINDOWS):
-    """An MSI log, never its tail: the lines before each 'Return value 3' (at most `windows` windows), lines with an
-    error code, and the allowed properties. Every other Property(S|C) line is dropped. [] when nothing failed."""
-    out, props, buf, n_win, n_err, last = [], collections.OrderedDict(), collections.deque(maxlen=before), 0, 0, 0
-    for i, line in enumerate(lines, 1):
-        m = MSI_PROP.match(line)
-        if m:
-            if m.group(2).lower() in MSI_KEEP:
-                props.setdefault(m.group(2).lower(), line.strip())
-            continue
-        if MSI_FAIL.search(line) and n_win < windows:
-            n_win += 1
-            shown = [ln for j, ln in buf if j > last]
-            out.append('--- %d lines before "Return value 3" (line %d) ---' % (len(shown), i))
-            out += shown + [line]
-            last = i
-            buf.clear()
-            continue
-        if MSI_ERR.search(line) and n_err < 50:
-            n_err += 1
-            out.append(line)
-            last = i
-        buf.append((i, line))
-    if not out:
-        return []
-    if props:
-        out.append("--- properties ---")
-        out += list(props.values())
+def msi_extract(lines, limit=ERROR_LINES):
+    """An MSI log: its error lines (Return value 3, Error NNNN, returned actual error code...) and the allowed
+    properties as fields, a value that is not a plain one shown as '(not shown)'. Every other line, Property(S|C)
+    lines too, stays out. [] when nothing failed."""
+    props = collections.OrderedDict()
+
+    def rest():
+        for i, line in enumerate(lines, 1):
+            m = MSI_PROP.match(line)
+            if not m:
+                yield i, line
+            elif m.group(2).lower() in MSI_KEEP and m.group(2).lower() not in props:
+                v = m.group(3) if MSI_VALUE.fullmatch(m.group(3)) else "(not shown)"
+                props[m.group(2).lower()] = "Property(%s): %s = %s" % (m.group(1), m.group(2), v)
+    out = error_extract(rest(), limit)
+    if out and props:
+        out += ["--- properties ---"] + list(props.values())
     return out
 
 
@@ -897,54 +1154,52 @@ CX_FIELDS = (("Product version", re.compile(r"^Product version\s*=\s*([0-9.]+)\s
              ("CX_DEBUGMSG", re.compile(r'^\s+CX_DEBUGMSG\s*=\s*"([A-Za-z0-9_+\-,.:]*)"\s*$')),
              ("WINEDEBUG", re.compile(r'^\s+WINEDEBUG\s*=\s*"([A-Za-z0-9_+\-,.:]*)"\s*$')))
 CX_PATH = re.compile(r'^\s+PATH\s*=\s*"(.*)"\s*$')
-GAP = object()   # cxlog_file: the lines between the head and the tail were not read
+GAP = object()   # cxlog_file: from here on, only the lines the fast search found
 
 
-def cxlog_extract(lines, tail=TAIL):
-    """A CrossOver log: never its header (Environment, CXConfig->read, Starting/Command), only fields of the newest
-    header (CrossOver version, mode, backend, debug channels, PATH as a count), then the last `tail` lines without
-    header lines."""
-    fields, sessions, state, buf = {}, 0, "start", collections.deque(maxlen=tail)
-    for line in lines:
-        if line is GAP:
-            state = "unknown"
-            buf.append((False, None))
-            continue
-        if CX_HEADER.match(line) or (state == "start" and CX_HEADERISH.match(line)):
-            state, fields = "header", {}
-            sessions += 1
-        elif state == "header" and CX_WINE.match(line):
-            state = "body"
-        elif state == "start":
-            state = "body"
-        is_head = state == "header" or (state == "unknown" and bool(CX_HEADERISH.match(line)))
-        if state == "header":
-            for k, rx in CX_FIELDS:
-                m = rx.match(line)
+def cxlog_extract(lines, limit=ERROR_LINES):
+    """A CrossOver log: never its header (Environment, CXConfig->read, Starting/Command); only its fields (CrossOver
+    version, mode, backend, debug channels, PATH as a count), each from the newest header that has it (a launch writes
+    a full header and then a short one), then its error lines (wine: Unhandled ..., err:eventlog:ReportEventW,
+    Assertion failed...) with their line numbers. lines: str or (number, str); after GAP a line that looks like a
+    header line is taken for one."""
+    st = {"fields": {}, "sessions": 0, "state": "start"}
+
+    def body():
+        n = 0
+        for x in lines:
+            if x is GAP:
+                st["state"] = "unknown"
+                continue
+            n, line = x if isinstance(x, tuple) else (n + 1, x)
+            state = st["state"]
+            if CX_HEADER.match(line) or (state == "start" and CX_HEADERISH.match(line)):
+                state = "header"
+                st["sessions"] += 1
+            elif state == "header" and CX_WINE.match(line):
+                state = "body"
+            elif state == "start":
+                state = "body"
+            st["state"] = state
+            if state == "header":
+                for k, rx in CX_FIELDS:
+                    m = rx.match(line)
+                    if m:
+                        st["fields"][k] = m.group(1)
+                m = CX_PATH.match(line)
                 if m:
-                    fields[k] = m.group(1)
-            m = CX_PATH.match(line)
-            if m:
-                fields["PATH"] = "%d entries" % len([p for p in m.group(1).split(":") if p])
-        buf.append((is_head, line))
-    out = ["wine.cxlog: %d session%s; header fields of the newest:" % (sessions, "" if sessions == 1 else "s")]
+                    st["fields"]["PATH"] = "%d entries" % len([p for p in m.group(1).split(":") if p])
+            elif not (state == "unknown" and CX_HEADERISH.match(line)):
+                yield n, line
+    errors = error_extract(body(), limit)
+    fields, sessions = st["fields"], st["sessions"]
+    out = ["wine.cxlog: %d header%s; their fields:" % (sessions, "" if sessions == 1 else "s")]
     fields.setdefault("backend", "default")
     for k in ("Product version", "Mode", "backend", "CX_DEBUGMSG", "WINEDEBUG", "PATH"):
         if k in fields:
             out.append("  %s: %s" % (k, fields[k]))
-    out.append("Last %d lines (header lines left out):" % tail)
-    skipped = 0
-    for is_head, line in buf:
-        if is_head:
-            skipped += 1
-            continue
-        if skipped:
-            out.append("\u2026 %d header lines left out" % skipped)
-            skipped = 0
-        out.append("\u2026" if line is None else line)
-    if skipped:
-        out.append("\u2026 %d header lines left out" % skipped)
-    return out
+    out.append("Error lines: %s" % ("none" if not errors else "%d" % len([e for e in errors if e.startswith("line ")])))
+    return out + errors
 
 
 # ---- reading logs: UTF-8 or UTF-16, binary-safe, bounded ----
@@ -1002,16 +1257,77 @@ def _tail(path, n):
     return out, start > 0 or len(lines) > n
 
 
-def cxlog_file(path, tail=TAIL):
-    """cxlog_extract for a file: a big log is read at its start (the header) and its end only."""
+def _scan(path, start=0, first=1, lits=ERROR_LITS):
+    """(number, line) of each line from byte `start` (line `first`) on that holds one of the literals: a big log
+    searched in blocks (bytes.find, fast), read up to the size it had when opened; error_extract decides on each."""
     try:
-        size = os.path.getsize(path)
+        f = open(path, "rb")
+    except OSError:
+        return
+    with f:
+        left = min(os.fstat(f.fileno()).st_size, SCAN_MAX) - start
+        f.seek(start)
+        n, carry = first, b""
+        while left > 0 or carry:
+            block = f.read(min(SCAN_BLOCK, left)) if left > 0 else b""
+            left -= len(block)
+            buf = carry + block
+            cut = buf.rfind(b"\n") + 1 if left > 0 and block else len(buf)
+            if cut == 0 and len(buf) < 4 * SCAN_BLOCK:
+                carry = buf   # no line end yet: read on
+                continue
+            data, carry = buf[:cut or len(buf)], buf[cut or len(buf):]
+            starts = set()
+            for lit in lits:
+                i = data.find(lit)
+                while i >= 0:
+                    starts.add(data.rfind(b"\n", 0, i) + 1)
+                    e = data.find(b"\n", i)
+                    i = data.find(lit, e) if e >= 0 else -1
+            pos = 0
+            for s in sorted(starts):
+                n += data.count(b"\n", pos, s)
+                pos = s
+                e = data.find(b"\n", s)
+                yield n, data[s:(len(data) if e < 0 else e)][:16000].decode("utf-8", "replace").rstrip("\r")[:4000]
+            n += data.count(b"\n", pos)
+            if not block:
+                break
+
+
+def _utf16(path):
+    try:
+        with open(path, "rb") as f:
+            return _is_utf16(f.read(4096))
+    except OSError:
+        return False
+
+
+def error_file(path, limit=ERROR_LINES):
+    """error_extract for a log file of any size."""
+    return error_extract(_utf16_lines(path) if _utf16(path) else _scan(path), limit)
+
+
+def cxlog_file(path, limit=ERROR_LINES):
+    """cxlog_extract for a file of any size: its first lines (the header) one by one, then the lines the fast search
+    finds."""
+    if _utf16(path):
+        return cxlog_extract(_utf16_lines(path), limit)
+    try:
+        with open(path, "rb") as f:
+            raw = f.read(1 << 20)
     except OSError:
         return []
-    if size <= 8 << 20:
-        return cxlog_extract(_lines(path), tail)
-    end, _ = _tail(path, tail + 60)
-    return cxlog_extract(itertools.chain(itertools.islice(_lines(path), 600), [GAP], end), tail)
+    parts = raw.split(b"\n")
+    if len(parts) > CX_HEAD_LINES or (len(raw) == 1 << 20 and len(parts) > 1):
+        parts = parts[:min(CX_HEAD_LINES, len(parts) - 1)]   # whole lines only
+        off = sum(len(p) + 1 for p in parts)
+    else:
+        off = len(raw)
+    head = [(i, p.decode("utf-8", "replace").rstrip("\r")[:4000]) for i, p in enumerate(parts, 1)]
+    if off >= len(raw) and len(raw) < 1 << 20:
+        return cxlog_extract(head, limit)
+    return cxlog_extract(itertools.chain(head, [GAP], _scan(path, off, len(parts) + 1)), limit)
 
 
 def _text(path, keep="head", limit=MEMBER_MAX * 2):
@@ -1109,9 +1425,10 @@ class _Collect:
         a, b = os.path.abspath(p), os.path.abspath(self.data)
         return os.path.relpath(a, b) if a.startswith(b + "/") else os.path.basename(a)
 
-    def add(self, name, what, text, src=None, keep="tail", rel=None, cut=None, age=None):
+    def add(self, name, what, text, src=None, keep="tail", rel=None, cut=None, age=None, per_line=False):
+        """per_line: the gate checks each line on its own and a line that fails it is left out, not the member."""
         self.items.append({"name": name, "what": what, "text": text, "src": src, "keep": keep, "rel": rel,
-                           "cut": cut, "age": age})
+                           "cut": cut, "age": age, "per_line": per_line})
 
 
 def _failed_steps(d):
@@ -1140,9 +1457,17 @@ def _take_run(c, d, kind):
     used, label = set(), KIND_LABEL.get(kind, "log")
     age = (label, _folder_time(d))
 
-    def take(fname, name, what, text, keep="tail", cut=None):
+    def take(fname, name, what, text, keep="tail", cut=None, per_line=False):
         used.add(fname)
-        c.add(name, what, text, src=c.label(os.path.join(d, fname)), keep=keep, rel=d, cut=cut, age=age)
+        c.add(name, what, text, src=c.label(os.path.join(d, fname)), keep=keep, rel=d, cut=cut, age=age,
+              per_line=per_line)
+
+    def errors(fname, name, ex, what, none):   # a log's error lines, or why nothing of it is in the report
+        if ex:
+            take(fname, name, what, "\n".join(ex), keep="head", per_line=True)
+        else:
+            used.add(fname)
+            c.skipped.append((c.label(os.path.join(d, fname)), none))
     if kind in ("install", "steps", "addins"):
         for f in ("summary.txt", "failed.txt"):
             if _regular(os.path.join(d, f)):
@@ -1152,28 +1477,22 @@ def _take_run(c, d, kind):
         for s in failed + ["action-" + a for a in _failed_actions(d)]:
             f = s + ".log"
             if _regular(os.path.join(d, f)):
-                lines, cut = _tail(os.path.join(d, f), TAIL)
-                take(f, "%s/%s" % (kind, f), "tail of %s" % f, "\n".join(lines),
-                     cut="to its last %d lines" % TAIL if cut else None)
+                errors(f, "%s/%s-errors.txt" % (kind, s), error_file(os.path.join(d, f)), "error lines of %s" % f,
+                       "a failed step's log without an error line: nothing to add")
         for f in _listdir(d):
             if f.endswith(".msi.log") and SAFE_NAME.match(f) and _regular(os.path.join(d, f)):
-                ex = msi_extract(_lines(os.path.join(d, f)))
-                if ex:
-                    take(f, "%s/%s-errors.txt" % (kind, f[:-len(".msi.log")]), "error windows of %s" % f,
-                         "\n".join(ex), cut="to its error windows")
-                else:
-                    used.add(f)
-                    c.skipped.append((c.label(os.path.join(d, f)), "an MSI log without a failure: nothing to add"))
+                errors(f, "%s/%s-msi-errors.txt" % (kind, f[:-len(".msi.log")]),
+                       msi_extract(_lines(os.path.join(d, f))), "error lines of %s" % f,
+                       "an MSI log without a failure: nothing to add")
     elif kind == "debug":
         p = os.path.join(d, "wine.cxlog")
         if _regular(p):
-            take("wine.cxlog", "debug/wine-cxlog.txt", "header fields and tail of wine.cxlog",
-                 "\n".join(cxlog_file(p)), cut="to its header fields and last %d lines" % TAIL)
+            take("wine.cxlog", "debug/wine-cxlog.txt", "header fields and error lines of wine.cxlog",
+                 "\n".join(cxlog_file(p)), keep="head", per_line=True)
         p = os.path.join(d, "stdout.log")
         if _regular(p):
-            lines, cut = _tail(p, 100)
-            take("stdout.log", "debug/stdout.log", "tail of stdout.log", "\n".join(lines),
-                 cut="to its last 100 lines" if cut else None)
+            errors("stdout.log", "debug/stdout-errors.txt", error_file(p), "error lines of stdout.log",
+                   "stdout.log without an error line: nothing to add")
     elif kind == "test":
         p = os.path.join(d, "result.json")
         if _regular(p):
@@ -1308,7 +1627,8 @@ def _summary(counts, ident):
         if cls in NUMBERED:
             n = len(ident.used[cls])
             if n:
-                parts.append("%d %s%s" % (n, LABELS[cls][1], "" if n == 1 else "s"))
+                word = LABELS[cls][1]
+                parts.append("%d %s%s" % (n, word, "" if n == 1 else "es" if word.endswith("s") else "s"))
         elif counts.get(cls):
             parts.append("%s %s\u00d7" % (LABELS[cls][1], "{:,}".format(counts[cls])))
     return "Replaced: " + (", ".join(parts) if parts else "nothing")
@@ -1394,6 +1714,10 @@ def _report_text(c, root, year, bottle, kept, left, counts, ident, now, manifest
     cuts = ["%s %s" % (it["what"], it["cut"]) for it in kept if it.get("cut")]
     if cuts:
         out.append("Cut: " + "; ".join(cuts))
+    for it in kept:
+        if it.get("dropped"):
+            out.append("Left out: %d line%s of the %s \u2014 personal data that could not be removed."
+                       % (it["dropped"], "" if it["dropped"] == 1 else "s", it["what"]))
     for x in left:
         out.append("Left out: %s \u2014 %s." % (x["what"], x["reason"]))
     if manifest_left:
@@ -1414,7 +1738,10 @@ def _manifest_text(c, kept, left, now):
            "Included:"]
     for it in kept:
         src = " (from %s)" % it["src"] if it.get("src") else ""
-        out.append("  %s \u2014 %s%s%s" % (it["name"], it["what"], src, "; cut " + it["cut"] if it.get("cut") else ""))
+        cut = "; cut " + it["cut"] if it.get("cut") else ""
+        dropped = "; %d line%s left out" % (it["dropped"], "" if it["dropped"] == 1 else "s") \
+            if it.get("dropped") else ""
+        out.append("  %s \u2014 %s%s%s%s" % (it["name"], it["what"], src, cut, dropped))
     if left:
         out += ["", "Left out:"] + ["  %s \u2014 %s: %s" % (x["member"], x["what"], x["reason"]) for x in left]
     if c.skipped:
@@ -1458,6 +1785,14 @@ def build(root, data, bottles, out_dir, year=None, bottle=None, run=None, doctor
             c.skipped.append((it.get("src") or it["name"], "left out on request (--exclude)"))
             continue
         text, n = redact(it["text"], identity, rel=it.get("rel"))
+        if it.get("per_line"):   # a log's lines: each one passes the gate on its own or is left out
+            lines = text.split("\n")
+            ok = [ln for ln in lines if not gate(ln.encode("utf-8"), identity, it["name"])]
+            it["dropped"] = len(lines) - len(ok)
+            if it["dropped"]:
+                ok.append("\u2026 %d line%s left out: personal data that could not be removed"
+                          % (it["dropped"], "" if it["dropped"] == 1 else "s"))
+            text = "\n".join(ok)
         body, cut = _caps(text, it["keep"])
         if cut:
             it["cut"] = ", ".join(x for x in (it.get("cut"), cut) if x)
