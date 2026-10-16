@@ -1,12 +1,14 @@
 name: App
 
 # Push a tag like app-v0.1.0 to build the menu bar app (app/build.sh) and publish its DMG as a pre-release.
-# A pull request that touches the app builds it too and keeps the DMG as a build artifact, to test before any tag.
+# A pull request that touches the app builds it too and keeps the DMG as a build artifact, to test before any tag;
+# so does a manual run (Actions → App → Run workflow).
 on:
   push:
     tags: ['app-v*.*.*']   # release.yml takes v*.*.*: a tag filter matches from the first character, so they never overlap
   pull_request:
     paths: ['app/**', 'scripts/check-bundle.sh', 'scripts/lib/common.sh', 'tests/app.sh', '.github/workflows/app.yml']
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -29,8 +31,8 @@ jobs:
           if [ "$GITHUB_REF_TYPE" = tag ]; then echo "VER=${GITHUB_REF_NAME#app-v}" >> "$GITHUB_ENV"; else echo "VER=0.0.0" >> "$GITHUB_ENV"; fi
       - name: Build, sign, smoke test, DMG
         run: app/build.sh "$VER"
-      - name: Keep the DMG and its sources (pull request)
-        if: github.event_name == 'pull_request'
+      - name: Keep the DMG and its sources (pull request, manual run)
+        if: github.ref_type != 'tag'
         uses: actions/upload-artifact@v4
         with:
           name: app-dmg
