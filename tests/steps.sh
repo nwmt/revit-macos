@@ -458,6 +458,7 @@ lic_rule 1 2020; release_rule 0x70805; sc_running
 rule "rvt.cmd" 0 "mkdir -p '$RV20/Samples'; touch '$RV20/Revit.exe' '$RV20/Samples/rac_basic_sample_project.rvt' '$RV20/Samples/rac_basic_sample_family.rfa'"
 STEP_ENV=(PATH="$T/bin:$PATH"); run_steps 2020 rvt2020-t
 expect "the whole 2020 profile runs" 0 "samples"; miss=""
+check "a run without failed steps prints no file error" eval '! grep -q "No such file" <<<"$OUT"' 
 for s in netfx vc fonts licensing svcshim adsso rcl rvt ret materials register ncryptshim ssoenv wbemshim richedit dynamo \
   d3d9dxvk warpshim rvtfix tlbpin samples; do grep -qE "^   $s +exit=0 " "$RUN/summary.txt" || miss+=" $s"; done
 check "2020: every step done (missing:$miss)" test -z "$miss"
@@ -677,5 +678,19 @@ check "no poller outlives the downloader" eval '! pgrep -f "sand box/repo/script
 reset; mkdir -p "$R/installers/revit2025/update"; touch "$R/installers/revit2025/update/Revit_2025_5_0.exe"
 mkzip "$R/installers/revit2025/RVT_2025_NA_win_db_002_002.zip" "setup.xml=<Setup/>"
 in_repo 'revit_main_installer 2025'; expect "the main installer is not an update" 0 "RVT_2025_NA_win_db_002_002.zip"
+
+# ---- review fixes ----
+# Ctrl-C (events mode notes it) while json_str runs: the value stays, so no event gets an empty JSON value
+reset; /usr/bin/perl -0pi -e 's/(json_str\(\) \{.*?-e .)my \$s = shift;/$1select(undef, undef, undef, 1); my \$s = shift;/s' "$R/scripts/lib/common.sh"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" ROOT="$R" /usr/bin/perl -e 'setpgrp(0,0); my $p = fork; if (!$p) { exec @ARGV } $SIG{INT} = "IGNORE";
+  select(undef, undef, undef, 0.4); kill "INT", -getpgrp(); waitpid($p, 0)' /bin/bash -c '. "$ROOT/scripts/lib/common.sh"; trap "g=1" INT; v="$(json_str abc)"; echo "[$v]"' 2>&1)"
+check "json_str survives a Ctrl-C" grep -qx '\["abc"\]' <<<"$OUT"
+reset; in_repo 'exec 7>"'"$T"'/ev"; export REVIT_EVENTS_FD=7; emit step id "" state "$(json_str done)"'
+check "emit never writes an empty JSON value" eval '! grep -q ":," "$T/ev" && ! grep -q ":}" "$T/ev"'
+# an unpacked folder made before .source, a Create Installer that cannot be read: used as before
+reset; mkdir -p "$R/installers/revit2025" "$R/installers/extracted/revit2025"; echo '<Setup/>' > "$R/installers/extracted/revit2025/setup.xml"
+printf 'junk' > "$R/installers/revit2025/Create_Installer_RVT_2025_5_English_WIN64.exe"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" /bin/bash "$R/scripts/unpack-revit.sh" 2025 2>&1)"; RC=$?
+expect "an unrecorded unpacked folder with a broken Create Installer: used as before" 0 "ready"
 
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]

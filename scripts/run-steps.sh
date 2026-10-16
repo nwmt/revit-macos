@@ -14,7 +14,7 @@ for _f in "$ROOT"/scripts/steps/*.sh; do . "$_f"; done; unset _f
 . "$ROOT/scripts/lib/addins.sh"
 top_result() { # $1 = result: the run's result when this runner is ./revit's child (under install.sh, install.sh sets it)
   [ -n "${INSTALL_PARENT:-}" ] && return 0
-  result_set failed_steps "$(tr '\n' ' ' < "$RUN_DIR/failed.txt" 2>/dev/null | sed 's/ $//')"; result_set result "$1"
+  result_set failed_steps "$(tr '\n' ' ' 2>/dev/null < "$RUN_DIR/failed.txt" | sed 's/ $//')"; result_set result "$1"
 }
 CRITICAL="netfx vc dotnet licensing svcshim rvt"                              # the steps after these need them
 NEEDS_INSTALLER="vc netfx dotnet licensing idmgr adsso rvt rcl ret materials pkgs asc register" # these read the unpacked installer

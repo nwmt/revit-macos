@@ -143,5 +143,18 @@ $OUT"; fi
   else fail "a cut-short swap is settled before the decision" "$(cat "$T/out" "$T/calls")"; fi
   srcprep; rm -f "$R/installers/revit2024/"*; inst 2024 rvt2024-t
   grep -qF "Some steps failed" <<<"$OUT" && ok "unpacked files without installer files: used as before" || fail "unpacked without installer files" "$OUT"
+  badci() { printf 'junk' > "$R/installers/revit2024/Create_Installer_RVT_2024_3_6_English_WIN64.exe"; }
+  srcprep; badci; inst 2024 rvt2024-t
+  grep -qF "Some steps failed" <<<"$OUT" && ok "a broken Create Installer, an unrecorded unpacked folder: used as before" || fail "broken CI, unrecorded unpacked" "$OUT"
+  srcprep; srcrec ""; badci; OUT="$(cd / && "${INST_ENV[@]}" REVIT_REUSE_EXTRACTED=1 /bin/bash "$R/install.sh" 2024 rvt2024-t 2>&1)"
+  grep -qF "Some steps failed" <<<"$OUT" && ok "--reuse-extracted does not read a broken Create Installer" || fail "--reuse-extracted with a broken CI" "$OUT"
+  srcprep; srcrec ""; badci; inst 2024 rvt2024-t
+  if [ "$RC" = 1 ] && grep -qF "reuse-extracted" <<<"$OUT"; then ok "a broken Create Installer next to a recorded unpacked folder stops, with the way out"
+  else fail "broken CI, recorded unpacked" "rc=$RC
+$OUT"; fi
+  prep; printf '#!/bin/bash\nmkdir -p "%s/rvt2024-t/drive_c/Program Files/Autodesk/Revit 2024"; touch "%s/rvt2024-t/drive_c/Program Files/Autodesk/Revit 2024/Revit.exe"\n' "$BOTTLES" "$BOTTLES" > "$R/scripts/run-steps.sh"
+  inst 2024 rvt2024-t
+  if [ "$RC" = 0 ] && ! grep -q "No such file" <<<"$OUT"; then ok "a clean install prints no file error"; else fail "a clean install prints no file error" "rc=$RC
+$OUT"; fi
 
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]

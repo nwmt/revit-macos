@@ -25,6 +25,7 @@ run_ctx_new() { # the run context: the result (and the events, Task 5) of this c
   mkdir -p "$REVIT_RUN_CTX" || die "Cannot create a log folder in $(tilde "$DATA/logs")."
   export REVIT_RUN_ID REVIT_RUN_CTX
 }
+not_busy() { lock_free || { RESULT_HINT=busy; die "Another task is running: $(lock_owner). Wait until it finishes, then try again."; }; }
 supervise() { # <command…>: runs it in the foreground of this process group (Ctrl-C reaches it as when this script
   # exec'ed it) and ends as it did: the same exit code, or death by the same signal
   local rc sig=""
@@ -110,7 +111,7 @@ if [ -n "$EVENTS_DIR" ]; then
   export REVIT_EVENTS_FD=7
   trap 'sup_end $?' EXIT
   y=null; b=null   # the year as a number and the bottle with its default, when the arguments allow them
-  if [[ "$YEAR_ARG" =~ ^[0-9]{4}$ ]]; then y="$YEAR_ARG"; b="$(json_str "${NAME:-$(revit_bottle_default "$YEAR_ARG")}")"
+  if [[ "$YEAR_ARG" =~ ^[0-9]{4}$ ]]; then y="$((10#$YEAR_ARG))"; b="$(json_str "${NAME:-$(revit_bottle_default "$YEAR_ARG")}")"
   elif [ -n "$NAME" ]; then b="$(json_str "$NAME")"; fi
   emit start run_id "$(json_str "$REVIT_RUN_ID")" command "$(json_str "$CMD")" year "$y" bottle "$b" pid "$$"
 fi
@@ -207,7 +208,6 @@ need_crossover() {
   [ -x "$CX/bin/cxbottle" ] && [ -x "$CX/bin/wineserver" ] \
     || die "CrossOver not found in /Applications. Install it from https://www.codeweavers.com/crossover"
 }
-not_busy() { lock_free || { RESULT_HINT=busy; die "Another task is running: $(lock_owner). Wait until it finishes, then try again."; }; }
 confirm() { # typing the year is harder to do by accident than y/n
   [ "$YES" = 1 ] && return 0
   local a=""; printf 'Type %s to continue, anything else to cancel: ' "$YEAR"

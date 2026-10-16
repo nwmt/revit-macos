@@ -22,6 +22,11 @@ if [ -d "$DST" ] && [ "${REVIT_REUSE_EXTRACTED:-0}" = 1 ] && [ "${REVIT_UNPACK_A
   # used exactly as it is: no installer file is read, so a broken or conflicting one does not matter
   echo "== already unpacked: installers/extracted/revit$YEAR"; echo "== ready: installers/extracted/revit$YEAR"; exit 0
 fi
+if [ -d "$DST" ] && [ "${REVIT_UNPACK_AGAIN:-}" != 1 ] \
+   && ! /usr/bin/perl -MJSON::PP -0777 -e 'my $s = eval { decode_json(<STDIN>) }; exit($s && $s->{kind} ? 0 : 1)' < "$SL" 2>/dev/null; then
+  # no installer, or one that cannot be read: the unpacked folder is used as it is (install.sh already said if that matters)
+  echo "== already unpacked: installers/extracted/revit$YEAR"; echo "== ready: installers/extracted/revit$YEAR"; exit 0
+fi
 # every path below works on checked files: sums against the known ones, one copy per update name (two different
 # copies stop here), the warnings for unknown sums
 python3 -I "$ROOT/tools/installer_source.py" finalize "$SL" "$DATA/installers/.hashes" >/dev/null || die "!! the installer files do not check out"

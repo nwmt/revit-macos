@@ -35,13 +35,13 @@ for t in 7zz:sevenzip winetricks:winetricks cabextract:cabextract python3:python
 done
 SRC="$(revit_input "$YEAR")"; DST="$(revit_extracted "$YEAR")"; DLD="$(revit_downloads "$YEAR")"
 SL="$(mktemp "${TMPDIR:-/tmp}/revit-source.XXXXXX")"; trap 'rm -f "$SL"' EXIT
-kind=""; complete=0; GET=""; UNPACK_AGAIN=""; rrc=""
+kind=""; complete=0; GET=""; UNPACK_AGAIN=""; rrc=""; rerr=""
 if command -v 7zz >/dev/null && command -v python3 >/dev/null; then   # else the tools check above already said so
   resolved="$(python3 -I "$ROOT/tools/installer_source.py" resolve "$YEAR" "$SRC" "$DLD" "$ROOT/installers/CHECKSUMS.txt" "$SL" 2>"$SL.err")"; rrc=$?
   case $rrc in
     0) kind="$(sed -n 's/^kind=\([^ ]*\).*/\1/p' <<<"$resolved")"; complete="$(sed -n 's/.*complete=//p' <<<"$resolved")" ;;
     3) ;;   # nothing there
-    *) need "cannot read the Revit $YEAR installer: $(head -1 "$SL.err")" "download it again from your Autodesk Account" ;;
+    *) rerr="$(head -1 "$SL.err")"; [ -n "$rerr" ] || rerr="error $rrc" ;;   # decided below: it matters only if used
   esac
   rm -f "$SL.err"
 fi
@@ -52,7 +52,14 @@ if ls -d "$DST".old.* >/dev/null 2>&1; then
   if lock_fd_ours && lock_flock9; then extracted_recover "$DST"
   else need "an unpack of Revit $YEAR was cut short" "run ./revit install $YEAR$SFX (it puts the unpacked files back in order first)"; fi
 fi
-if [ -d "$DST" ]; then
+if [ -n "$rerr" ]; then   # an installer that cannot be read stops only an install that would read it
+  if [ ! -d "$DST" ] || [ "${REVIT_REEXTRACT:-0}" = 1 ]; then
+    need "cannot read the Revit $YEAR installer: $rerr" "download it again from your Autodesk Account"
+  elif [ "${REVIT_REUSE_EXTRACTED:-0}" != 1 ] && [ -f "$DST/.source" ]; then   # cannot tell whether it is the unpacked one
+    need "cannot read the Revit $YEAR installer: $rerr" \
+         "download it again from your Autodesk Account, or ./revit install $YEAR$SFX --reuse-extracted to use installers/extracted/revit$YEAR"
+  fi   # an unpacked folder made before .source: used as before
+elif [ -d "$DST" ]; then
   if [ "${REVIT_REEXTRACT:-0}" = 1 ]; then
     if o="$(other_bottle_of_year)"; then
       result_set result in_use
@@ -177,6 +184,6 @@ fi
 [ ${#ADDIN_STEPS[@]} -eq 0 ] || echo "Optional add-ins (RevitLookup, pyRevit): ./revit addins $YEAR$SFX"
 echo "PDF printer (needs Ghostscript: brew install ghostscript): ./revit addins $YEAR$SFX --only pdfprinter"
 echo "Everyday commands: ./revit"
-result_set failed_steps "$(tr '\n' ' ' < "$RUN_DIR/failed.txt" 2>/dev/null | sed 's/ $//')"
+result_set failed_steps "$(tr '\n' ' ' 2>/dev/null < "$RUN_DIR/failed.txt" | sed 's/ $//')"
 if [ -z "$problems" ]; then result_set result ok; exit 0; fi
 result_set result partial; exit 1

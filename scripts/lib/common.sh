@@ -35,23 +35,27 @@ run_dir_new() { # $1 = folder under logs/ (a bottle name, or revit<year>), $2 = 
 }
 
 # ---- events for the app: one JSON object per line on fd 7, only when ./revit --events opened it ----
-json_str() { # $1 = text → a JSON string literal (through the system perl, like the lock)
-  /usr/bin/perl -e 'my $s = shift; $s =~ s/(["\\])/\\$1/g; $s =~ s/\n/\\n/g; $s =~ s/\r/\\r/g; $s =~ s/\t/\\t/g;
-    $s =~ s/([\x00-\x1f])/sprintf("\\u%04x", ord $1)/ge; print "\"$s\""' -- "$1"
+json_str() { # $1 = text → a JSON string literal (through the system perl, like the lock). The perl ignores Ctrl-C:
+  # ./revit notes a Ctrl-C and ends the run itself, and a killed encoder would leave an empty value in an event
+  ( trap '' INT TERM HUP; exec /usr/bin/perl -e 'my $s = shift; $s =~ s/(["\\])/\\$1/g; $s =~ s/\n/\\n/g; $s =~ s/\r/\\r/g; $s =~ s/\t/\\t/g;
+    $s =~ s/([\x00-\x1f])/sprintf("\\u%04x", ord $1)/ge; print "\"$s\""' -- "$1" )
 }
 emit() { # $1 = event, then key and JSON value pairs (strings through json_str, numbers as they are)
   [ -n "${REVIT_EVENTS_FD:-}" ] && [ -e /dev/fd/7 ] || return 0
-  local line="{\"event\":$(json_str "$1")"; shift
-  while [ $# -ge 2 ]; do line+=",$(json_str "$1"):$2"; shift 2; done
+  local line="{\"event\":$(json_str "$1")" k; shift
+  while [ $# -ge 2 ]; do
+    k="$(json_str "$1")"; [ -n "$k" ] && [ -n "$2" ] || return 0   # an empty value is not JSON: the event is dropped
+    line+=",$k:$2"; shift 2
+  done
   printf '%s}\n' "$line" | emit_line ""
 }
 emit_line() { # stdin = one line; $1 = "end" for the last one. Every writer takes <ctx>/.events.lock (a file of its own:
   # a flock on the shared fd 7 would be shared too) and checks .ended under it, so nothing lands after the end, not
   # even from a helper that outlived its parent (a progress poller); "end" writes the line and .ended under the lock
-  /usr/bin/perl -MFcntl=:flock -e 'my ($ctx, $end) = @ARGV; my $l;
+  ( trap '' INT TERM HUP; exec /usr/bin/perl -MFcntl=:flock -e 'my ($ctx, $end) = @ARGV; my $l;
     if ($ctx ne "") { open($l, ">>", "$ctx/.events.lock") or exit 0; flock($l, LOCK_EX) or exit 0; exit 0 if -e "$ctx/.ended" }
     open(my $o, ">>&=", 7) or exit 0; local $/; print $o <STDIN>; close $o;
-    if ($ctx ne "" && $end) { open(my $m, ">", "$ctx/.ended"); close $m }' "${REVIT_RUN_CTX:-}" "$1"
+    if ($ctx ne "" && $end) { open(my $m, ">", "$ctx/.ended"); close $m }' "${REVIT_RUN_CTX:-}" "$1" )
 }
 
 result_set() { # $1 = key, $2 = value: the run's result for ./revit (and the app); nothing without a run context
@@ -86,13 +90,16 @@ lock_owner_write() { # $1 = command text. Through a temporary file and mv: a rea
     printf 'pgid=%s\nctx=%s\n' "$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')" "${REVIT_RUN_CTX:-}"; } > "$tmp" \
     && mv -f "$tmp" "$LOCK_FILE.owner"
 }
+lock_cancelled() { # ./revit noted a Ctrl-C (or TERM/HUP) while taking the lock: end as that signal, not as "busy"
+  [ -n "${SIG_GOT:-}" ] && declare -F supervise >/dev/null && supervise true; return 0
+}
 lock_take() { # [--no-trap] $* = what this script does (shown to whoever finds the lock busy). --no-trap: ./revit
   # supervising a child sets its own handlers
   local traps=1; [ "${1:-}" = --no-trap ] && { traps=0; shift; }
-  mkdir -p "$LOCK_DIR" || die "Cannot write to $(tilde "$LOCK_DIR")."
+  mkdir -p "$LOCK_DIR" || { lock_cancelled; die "Cannot write to $(tilde "$LOCK_DIR")."; }
   if ! { lock_fd_ours && lock_flock9; }; then   # not inherited: take it
     exec 9>>"$LOCK_FILE" || die "Cannot open $(tilde "$LOCK_FILE")."
-    lock_flock9 || { result_set result busy; die "Another task is running: $(lock_owner). Wait until it finishes, then try again."; }
+    lock_flock9 || { lock_cancelled; result_set result busy; die "Another task is running: $(lock_owner). Wait until it finishes, then try again."; }
     lock_owner_write "$*"
   fi
   # TERM/HUP/INT (Ctrl-C): let the running Wine program finish (bash runs the trap after the foreground command), pass

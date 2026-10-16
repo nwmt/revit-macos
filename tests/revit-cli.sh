@@ -387,5 +387,15 @@ check "status lists installed add-ins" grep -qF '"addins":["pyrevit"]' <<<"$OUT"
 mkdir -p "$BOTTLES/rvt2024-a/drive_c/ProgramData/Autodesk/Revit/Addins/2024"; touch "$BOTTLES/rvt2024-a/drive_c/ProgramData/Autodesk/Revit/Addins/2024/RevitLookup.addin"; run "" status --json
 check "status sees RevitLookup by its manifest" grep -qF '"revitlookup"' <<<"$OUT"
 
+# ---- review fixes ----
+reset; slow_stub "$R/install.sh"; /usr/bin/perl -pi -e "s/^(lock_flock9\(\) \{ \/usr\/bin\/perl -MFcntl=:flock -e ')/\\1sleep 2; /" "$R/scripts/lib/common.sh"
+grep -q "flock -e 'sleep 2; " "$R/scripts/lib/common.sh" || fail "the slow-flock edit did not apply" ""
+DELAY=1 group_int install 2024
+check "INT while taking the lock: death by SIGINT, as before" test "$HOW" = "exit=0 signal=2"
+check "INT while taking the lock: not reported as busy" eval '! grep -q "Another task" <<<"$OUT"'
+reset; touch "$T/Enscape-4.18.2.1657-lts.exe"; run "" addins import enscape "$T/Enscape-4.18.2.1657-lts.exe"
+check "import: no shell error" eval '! grep -q "command not found" <<<"$OUT"'
+reset; run "" check 0000 --events "$T/ev"
+check "events: a year like 0000 still gives valid JSON" eval 'test -s "$T/ev/events.ndjson" && valid_ndjson "$T/ev/events.ndjson"'
 # ---- end ----
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]
