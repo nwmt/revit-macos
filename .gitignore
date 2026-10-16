@@ -47,3 +47,6 @@ build/
 # ---- release packages (scripts/build-release.sh) ----
 dist/
 __pycache__/
+
+# ---- the app (SwiftPM build output) ----
+app/.build/

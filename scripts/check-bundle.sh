@@ -14,7 +14,8 @@ tool() { # $1 = name, rest = how to run it: found in the app and exits 0
     "$APP_RES"/*) ;;
     *) echo "FAIL $name: ${p:-not found} is not the app's"; bad=1; return ;;
   esac
-  if out="$("$@" 2>&1)"; then echo "ok   $name $(version_of "$(grep -m1 . <<<"$out")") ($p)"
+  # the version from the first line that is not winetricks' "Executing cd <folder>" (a folder may hold digits)
+  if out="$("$@" 2>&1)"; then echo "ok   $name $(version_of "$(grep -v '^Executing ' <<<"$out" | grep -m1 .)") ($p)"
   else echo "FAIL $name: $(tail -1 <<<"$out")"; bad=1; fi
 }
 tool 7zz 7zz i

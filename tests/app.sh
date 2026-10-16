@@ -128,7 +128,9 @@ fixture_tools() { # $1 = folder: what app/fetch-tools.sh makes, with fixture con
   local d="$1" s l
   rm -rf "$d"; mkdir -p "$d/python/lib/python3.99" "$d/sources"
   wrap_tool "$d/bin/7zz" "$HOST_7ZZ"; wrap_tool "$d/python/bin/python3" "$HOST_PY"
-  fake_tool "$d/bin" cabextract "cabextract version 1.11"; fake_tool "$d/bin" winetricks "20260125 - sha256sum: 0"
+  fake_tool "$d/bin" cabextract "cabextract version 1.11"
+  # as the real one: a line naming the folder (digits in it) before the version
+  printf '#!/bin/bash\necho "Executing cd /opt/Revit 2025/bin"\necho "20260125 - sha256sum: 0"\n' > "$d/bin/winetricks"; chmod +x "$d/bin/winetricks"
   echo 'X = 1' > "$d/python/lib/python3.99/m.py"
   for s in "${SHIMS[@]}"; do mkdir -p "$d/shims/$s"; echo "fake $s" > "$d/shims/$s/$s.dll"; done; echo MIT > "$d/shims/LICENSE"
   for l in 7-Zip cabextract winetricks Python; do mkdir -p "$d/licenses/$l"; echo "license of $l" > "$d/licenses/$l/LICENSE.txt"; done
@@ -184,6 +186,8 @@ fake_bundle "$A"; chmod -R a-w "$A"
 : > "$CALLS"; in_sandbox "$AE/scripts/check-bundle.sh"
 expect "read-only bundle: check-bundle passes" 0 ""
 check "check-bundle: five ok lines" [ "$(grep -c '^ok ' <<<"$OUT")" = 5 ]
+check "check-bundle: names each tool's version" eval 'grep -q "^ok   winetricks 20260125 (" <<<"$OUT" &&
+  grep -q "^ok   cabextract 1.11 (" <<<"$OUT" && grep -qE "^ok   python3 [0-9]+\.[0-9]+\.[0-9]+ \(" <<<"$OUT"'
 check "check-bundle: every tool from the bundle" eval 'for t in 7zz cabextract winetricks python3; do
   grep "^ok   $t " <<<"$OUT" | grep -qF "($A/Contents/Resources/" || exit 1; done'
 cp -R "$TOOLS" "$T/tools-nohash"

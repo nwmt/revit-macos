@@ -39,6 +39,7 @@ jobs:
           tests/plans.sh
           tests/steps.sh
           tests/shims.sh
+          tests/app.sh
       - name: Python helper tests
         run: python3 -I -m unittest discover -s tests -p 'test_*.py'
       - name: Build all shims, as a release does

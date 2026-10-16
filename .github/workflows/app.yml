@@ -1,0 +1,68 @@
+name: App
+
+# Push a tag like app-v0.1.0 to build the menu bar app (app/build.sh) and publish its DMG as a pre-release.
+# A pull request that touches the app builds it too and keeps the DMG as a build artifact, to test before any tag.
+on:
+  push:
+    tags: ['app-v*.*.*']   # release.yml takes v*.*.*: a tag filter matches from the first character, so they never overlap
+  pull_request:
+    paths: ['app/**', 'scripts/check-bundle.sh', 'scripts/lib/common.sh', 'tests/app.sh', '.github/workflows/app.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  app:
+    runs-on: macos-26   # arm64, Xcode 26: the SDK for the app's minimum macOS 26.0
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # the shim release tag: app/fetch-tools.sh checks the shim sources against it
+      - name: Repo rules
+        run: .githooks/check-tree
+      - name: 7-Zip for the tests (tests/app.sh reads a fake Create Installer with 7zz)
+        run: command -v 7zz >/dev/null || brew install sevenzip
+      - name: Bundle tests (/bin/bash 3.2)
+        run: tests/app.sh
+      - name: Version
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then echo "VER=${GITHUB_REF_NAME#app-v}" >> "$GITHUB_ENV"; else echo "VER=0.0.0" >> "$GITHUB_ENV"; fi
+      - name: Build, sign, smoke test, DMG
+        run: app/build.sh "$VER"
+      - name: Keep the DMG and its sources (pull request)
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-dmg
+          path: |
+            dist/app/*.dmg
+            dist/app/*.dmg.sha256
+            dist/app/sources/*
+      - name: Publish a pre-release (tag)
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          . app/app.conf; . app/tools.sh; . scripts/lib/shims.sh
+          DMG="dist/app/${APP_NAME// /-}-$VER.dmg"
+          SUM="$(cut -d' ' -f1 "$DMG.sha256")"
+          cat > notes.md <<NOTES
+          $APP_NAME for Autodesk® Revit® on Apple Silicon Macs. Pre-release: not yet checked on a clean Mac.
+
+          **Install:** open the DMG and drag $APP_NAME to Applications, then start it from there. It is not signed
+          with a Developer ID yet: the first time, macOS refuses it; open System Settings → Privacy & Security and
+          choose Open Anyway.
+
+          SHA-256 of \`$(basename "$DMG")\`: \`$SUM\`
+
+          Included: 7-Zip $SEVENZIP_VERSION (GNU LGPL with the unRAR restriction, BSD), cabextract $CABEXTRACT_VERSION
+          (GNU GPL 3.0 or later), winetricks $WINETRICKS_VERSION (GNU LGPL 2.1 or later), Python $PYTHON_VERSION
+          (PSF License and the licenses of its libraries), the revit-macos engine and shims v$SHIMS_VERSION (MIT).
+          The source code of 7-Zip and cabextract is attached to this release; the licenses are inside the app
+          (Contents/Resources/Licenses). No Autodesk files are included.
+
+          Not affiliated with or endorsed by Autodesk. Autodesk and Revit are registered trademarks or trademarks of
+          Autodesk, Inc., in the USA and other countries.
+          NOTES
+          gh release create "$GITHUB_REF_NAME" "$DMG" "$DMG.sha256" dist/app/sources/* --prerelease \
+            --title "$APP_NAME $VER" --notes-file notes.md
