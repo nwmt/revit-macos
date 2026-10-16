@@ -2,7 +2,7 @@
 """Unit tests for tools/doctor.py. Run: python3 -I -m unittest discover -s tests -p 'test_*.py'
 Facts, bottles, CrossOver and the Mac's commands are made here: no Autodesk or Microsoft file, no real bottle. Only
 test_cli runs doctor.py on this Mac, and checks nothing that depends on it."""
-import fcntl, glob, hashlib, importlib.util, json, os, re, struct, subprocess, sys, tempfile, time, unittest
+import fcntl, glob, hashlib, importlib.util, json, os, re, struct, subprocess, sys, tempfile, threading, time, unittest
 
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -540,6 +540,25 @@ class Logs(Sandbox):
         lg = self.logs_of(self.checks())
         self.assertEqual(sorted(lg), ["logs.read"])
         self.assertEqual(lg["logs.read"].title, "no logs of this bottle to read")
+
+    def test_a_log_that_grows_while_read(self):
+        d = self.session("20261017-120000", [LOADED] + [CRASH] + HEALTHY * 100000)
+        p, stop = os.path.join(d, "wine.cxlog"), threading.Event()
+
+        def grow():   # Revit still runs: lines, then half a line, go on arriving at the end
+            with open(p, "a") as f:
+                while not stop.is_set():
+                    f.write(HEALTHY[1] + "\n" + HEALTHY[2][:20])
+                    f.flush()
+        t = threading.Thread(target=grow)
+        t.start()
+        try:
+            cs = self.by_id(self.checks())
+        finally:
+            stop.set()
+            t.join()
+        self.assertEqual(cs["logs.wine-crash"].status, "warn")
+        self.assertEqual(cs["logs.wine-crash"].detail, "logs/%s/20261017-120000-debug/wine.cxlog: line 2" % self.name)
 
     def test_logs_are_read_and_not_written(self):
         self.session("20261017-120000", [CRASH])
