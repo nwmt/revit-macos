@@ -16,7 +16,8 @@ R="$T/repo"; H="$T/home"; CALLS="$T/calls"
 A="$H/Applications/Test App.app"       # where a user keeps the app
 HOST_7ZZ="$(command -v 7zz)"; HOST_PY="$(command -v python3)"
 BASEPATH="/usr/bin:/bin:/usr/sbin:/sbin"   # what an app started from Finder gets
-trap 'chmod -R u+w "$TOP" 2>/dev/null; rm -rf "$TOP"' EXIT
+unmount() { mount | grep -qF " on $T/mnt " || return 0; hdiutil detach "$T/mnt" -quiet 2>/dev/null || hdiutil detach -force "$T/mnt" -quiet 2>/dev/null; }
+trap 'unmount; chmod -R u+w "$TOP" 2>/dev/null; rm -rf "$TOP"' EXIT
 n=0; fails=0
 ok()   { n=$((n + 1)); echo "ok   $1"; }
 fail() { n=$((n + 1)); fails=$((fails + 1)); echo "FAIL $1"; printf '%s\n' "${2:-}" | sed 's/^/     /'; }
@@ -227,6 +228,61 @@ QB="$T/q/Test App.app"; fake_bundle "$QB"; xattr -w com.apple.quarantine '0081;0
 in_sandbox ROOT="$QB/Contents/Resources/engine" /bin/bash -c '. "$ROOT/scripts/lib/common.sh"; . "$ROOT/scripts/steps/fixes.sh"; pdf_port_script'
 check "PDF helper copy has not the app's quarantine" eval '[ "$OUT" = "$H/Library/Application Support/Test App/libexec/ps2pdf-port.sh" ] &&
   ! { xattr -p com.apple.quarantine "$OUT" 2>/dev/null | grep -q Safari; }'   # a quarantine-enabled caller stamps its own
+
+# ---- signing and the DMG (Task 4): real Mach-O files, no symlink out of the bundle ----
+echo 'int main(void) { return 0; }' > "$T/main.c"; echo 'int f(void) { return 1; }' > "$T/lib.c"
+cc_() { /usr/bin/cc -mmacosx-version-min="$1" "${@:2}" 2>/dev/null; }   # $1 = minimum macOS, rest = cc arguments
+sign_tools() { # $1 = folder, $2 = minimum macOS of _x.so, $3 = of 7zz's x86_64 slice (both default 14.0)
+  local d="$1" s l
+  rm -rf "$d"; mkdir -p "$d/bin" "$d/python/bin" "$d/python/lib/python3.99/lib-dynload" "$d/sources"
+  cc_ 14.0 -arch arm64 -o "$d/7zz-arm64" "$T/main.c" && cc_ "${3:-14.0}" -arch x86_64 -o "$d/7zz-x86_64" "$T/main.c" \
+    && lipo -create -output "$d/bin/7zz" "$d/7zz-arm64" "$d/7zz-x86_64" && rm "$d/7zz-arm64" "$d/7zz-x86_64" || return 1
+  cc_ 14.0 -arch arm64 -o "$d/python/bin/python3.99" "$T/main.c" && ln -s python3.99 "$d/python/bin/python3" || return 1
+  cc_ "${2:-14.0}" -arch arm64 -bundle -o "$d/python/lib/python3.99/lib-dynload/_x.so" "$T/lib.c" || return 1
+  cc_ 14.0 -arch arm64 -dynamiclib -o "$d/python/lib/libpython3.99.dylib" "$T/lib.c" || return 1
+  cc_ 14.0 -arch arm64 -c -o "$d/python/lib/x.o" "$T/lib.c" && ar rcs "$d/python/lib/libx.a" "$d/python/lib/x.o" 2>/dev/null || return 1
+  fake_tool "$d/bin" cabextract "cabextract version 1.11"; fake_tool "$d/bin" winetricks "20260125 - sha256sum: 0"
+  for s in "${SHIMS[@]}"; do mkdir -p "$d/shims/$s"; echo "fake $s" > "$d/shims/$s/$s.dll"; done; echo MIT > "$d/shims/LICENSE"
+  for l in 7-Zip cabextract winetricks Python; do mkdir -p "$d/licenses/$l"; echo "license of $l" > "$d/licenses/$l/LICENSE.txt"; done
+}
+cc_ 14.0 -arch arm64 -o "$T/stub-bin" "$T/main.c"
+sign_bundle() { # $1 = app path, $2 = tools folder: assembled with the Mach-O stub
+  chmod -R u+w "$1" 2>/dev/null; rm -rf "$1"
+  (cd / && env "${CLEAN_ENV[@]}" PATH="$BASEPATH" "$R/app/make-bundle.sh" "$1" "$T/stub-bin" "$2" 0.0.1 >/dev/null)
+}
+SB="$T/s/Test App.app"
+if sign_tools "$T/stools" && sign_bundle "$SB" "$T/stools"; then
+  in_sandbox "$R/app/sign.sh" "$SB" 26.0 "$T/inv.txt"
+  expect "sign: sign.sh signs the app" 0 ""
+  TAB=$'\t'
+  check "sign: the inventory holds the 5 images, not the archive or the object" eval '[ "$(wc -l < "$T/inv.txt" | tr -d " ")" = 5 ] &&
+    grep -q "^Contents/MacOS/Test App$TAB" "$T/inv.txt" && grep -qx "Contents/Resources/bin/7zz${TAB}x86_64 arm64" "$T/inv.txt" &&
+    grep -q "_x.so" "$T/inv.txt" && grep -q "libpython3.99.dylib" "$T/inv.txt" && grep -q "python3.99$TAB" "$T/inv.txt" &&
+    ! grep -q -e "x.o" -e "libx.a" "$T/inv.txt"'
+  adhoc=1; while IFS="$TAB" read -r p _; do d="$(codesign -dv "$SB/$p" 2>&1)"; grep -q "Signature=adhoc" <<<"$d" || adhoc=0; done < "$T/inv.txt"
+  check "sign: every image is signed ad hoc" eval '[ "$adhoc" = 1 ] && [ -s "$T/inv.txt" ]'
+  check "sign: the app verifies --deep --strict" codesign --verify --strict --deep "$SB"
+  ditto "$SB" "$T/s2/Test App.app"; printf '#' >> "$T/s2/Test App.app/Contents/Resources/engine/revit"
+  check "sign: a changed engine file breaks the seal" eval 'codesign --verify --strict --deep "$SB" 2>/dev/null && ! codesign --verify --strict --deep "$T/s2/Test App.app" 2>/dev/null'
+  sign_tools "$T/stools15" 15.0 && sign_bundle "$T/s3/Test App.app" "$T/stools15"
+  in_sandbox "$R/app/sign.sh" "$T/s3/Test App.app" 14.0
+  check "sign: a Mach-O newer than the minimum macOS is refused" eval '[ "$RC" = 1 ] && grep -q "_x.so" <<<"$OUT" &&
+    grep -q "15.0" <<<"$OUT" && grep -q "14.0" <<<"$OUT"'
+  sign_tools "$T/stools7" 14.0 15.0 && sign_bundle "$T/s4/Test App.app" "$T/stools7"
+  in_sandbox "$R/app/sign.sh" "$T/s4/Test App.app" 14.0
+  check "sign: a newer slice of a universal file is refused" eval '[ "$RC" = 1 ] && grep -q "7zz" <<<"$OUT" && grep -q "x86_64" <<<"$OUT"'
+
+  in_sandbox "$R/app/make-dmg.sh" "$SB" "$T/t.dmg"
+  expect "dmg: make-dmg.sh makes the DMG" 0 ""
+  mkdir -p "$T/mnt"
+  if hdiutil attach -readonly -nobrowse -noautoopen -mountpoint "$T/mnt" "$T/t.dmg" >/dev/null 2>&1; then
+    check "dmg: the app and an Applications link" eval '[ -d "$T/mnt/Test App.app" ] && [ "$(readlink "$T/mnt/Applications")" = /Applications ]'
+    check "dmg: the app on the DMG verifies" codesign --verify --strict --deep "$T/mnt/Test App.app"
+    check "dmg: it is read-only" eval '! touch "$T/mnt/x" 2>/dev/null'
+    unmount
+  else fail "dmg: hdiutil attach" "$(hdiutil attach -readonly -nobrowse -noautoopen -mountpoint "$T/mnt" "$T/t.dmg" 2>&1)"; fi
+  check "dmg: the .sha256 checks out" eval '(cd "$T" && shasum -a 256 -c t.dmg.sha256 >/dev/null)'
+else fail "sign: fixture" "cc, lipo, ar or make-bundle failed"; fi
 
 echo "$((n - fails))/$n passed"
 [ "$fails" = 0 ]
