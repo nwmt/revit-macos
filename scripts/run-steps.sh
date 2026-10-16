@@ -11,6 +11,10 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/scripts/lib/common.sh"; . "$ROOT/scripts/lib/wine.sh"; . "$ROOT/scripts/lib/shims.sh"
 for _f in "$ROOT"/scripts/steps/*.sh; do . "$_f"; done; unset _f
+top_result() { # $1 = result: the run's result when this runner is ./revit's child (under install.sh, install.sh sets it)
+  [ -n "${INSTALL_PARENT:-}" ] && return 0
+  result_set failed_steps "$(tr '\n' ' ' < "$RUN_DIR/failed.txt" 2>/dev/null | sed 's/ $//')"; result_set result "$1"
+}
 CRITICAL="netfx vc dotnet licensing svcshim rvt"                              # the steps after these need them
 NEEDS_INSTALLER="vc netfx dotnet licensing idmgr adsso rvt rcl ret materials pkgs asc register" # these read the unpacked installer
 
@@ -37,6 +41,7 @@ if [ -z "${RUN_DIR:-}" ] || [ ! -d "$RUN_DIR" ]; then
   RUN_DIR="$(run_dir_new "$NAME" "${RUN_KIND:-steps}")" || die "Cannot create a log folder in $(tilde "$DATA/logs")."
 fi
 export RUN_DIR
+[ -n "${INSTALL_PARENT:-}" ] || result_set log_dir "$RUN_DIR"
 # Wine's working folder is the script's: relative MSI paths (INSTALLDIR without Setup.exe) would land there
 cd "$B/drive_c" || die "Cannot enter $(tilde "$B/drive_c")."
 echo ">> Revit $YEAR → bottle $NAME, logs: $(tilde "$RUN_DIR")"
@@ -52,8 +57,8 @@ for s in "${LIST[@]}"; do
   say "$s" "$code" "$text ($((SECONDS - t0)) s)"
   [ $rc = 0 ] && continue
   echo "$s" >> "$RUN_DIR/failed.txt"; failed=1
-  case " $CRITICAL " in *" $s "*) echo "!! Step $s failed, and the steps after it need it: stopped." >&2; exit 1 ;; esac
+  case " $CRITICAL " in *" $s "*) echo "!! Step $s failed, and the steps after it need it: stopped." >&2; top_result failed; exit 1 ;; esac
 done
 rm -f "$RUN_DIR/.detail" "$RUN_DIR/.skip"
 stop_check
-exit $failed
+top_result "$([ $failed = 0 ] && echo ok || echo partial)"; exit $failed

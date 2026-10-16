@@ -79,7 +79,7 @@ action_argv() { # $1 = action → A=(script, arguments), the script relative to 
 echo; echo "Plan:"; i=1
 for a in "${PLAN[@]}"; do action_argv "$a"; echo "  $i. ${A[*]}"; i=$((i + 1)); done
 echo "Steps: ${STEPS[*]}"
-[ $missing -eq 0 ] || { echo; echo "Fix the items marked ✗ and run ./revit install $YEAR$SFX again."; exit 1; }
+[ $missing -eq 0 ] || { echo; echo "Fix the items marked ✗ and run ./revit install $YEAR$SFX again."; result_default failed; exit 1; }
 [ "${INSTALL_DRYRUN:-0}" = 1 ] && { echo "(dry run: nothing changed)"; exit 0; }
 
 # ---- run ----
@@ -88,6 +88,7 @@ bottle_guard allow_missing "$YEAR" "$BOTTLE"
 [ ! -d "$B" ] || [ "${CX_RECREATE:-0}" = 1 ] || die "Bottle $BOTTLE already exists. To rebuild it: ./revit rebuild $YEAR$SFX"
 RUN_DIR="$(run_dir_new "$BOTTLE" install)" || die "Cannot create a log folder in $(tilde "$DATA/logs")."
 export RUN_DIR
+result_set log_dir "$RUN_DIR"; export INSTALL_PARENT=1   # the runner leaves the final result to this script
 echo; echo "Logs: $(tilde "$RUN_DIR")"
 t0=$SECONDS; i=1
 for a in "${PLAN[@]}"; do
@@ -106,6 +107,7 @@ for a in "${PLAN[@]}"; do
     echo "Last log: $(tilde "$log")" >&2; tail -15 "$log" 2>/dev/null | sed 's/^/  | /' >&2
     again="./revit install $YEAR$SFX"; [ -d "$B" ] && again="./revit rebuild $YEAR$SFX"
     echo "See docs/troubleshooting.md. To start over: $again" >&2
+    result_set failed_action "$a"; result_set result failed
     exit 1
   fi
   i=$((i + 1))
@@ -114,6 +116,7 @@ done
 # installers report errors in their own way; check the result instead of trusting exit codes
 if [ ! -f "$(revit_dir_unix "$B" "$YEAR")/Revit.exe" ]; then
   echo; echo "Install finished, but Revit.exe is not in the bottle. Logs: ./revit logs $YEAR$SFX. To start over: ./revit rebuild $YEAR$SFX" >&2
+  result_set result failed
   exit 1
 fi
 problems=""
@@ -135,4 +138,6 @@ fi
 [ ${#ADDIN_STEPS[@]} -eq 0 ] || echo "Optional add-ins (RevitLookup, pyRevit): ./revit addins $YEAR$SFX"
 echo "PDF printer (needs Ghostscript: brew install ghostscript): ./scripts/run-steps.sh $YEAR $BOTTLE pdfprinter"
 echo "Everyday commands: ./revit"
-[ -z "$problems" ]
+result_set failed_steps "$(tr '\n' ' ' < "$RUN_DIR/failed.txt" 2>/dev/null | sed 's/ $//')"
+if [ -z "$problems" ]; then result_set result ok; exit 0; fi
+result_set result partial; exit 1

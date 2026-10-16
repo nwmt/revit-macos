@@ -84,7 +84,17 @@ lock_free() { # 0 when nobody else holds the lock (for ./revit's checks before i
   [ -e "$LOCK_FILE" ] || return 0
   /usr/bin/perl -MFcntl=:flock -e 'open(my $f, ">>", $ARGV[0]) or exit 0; flock($f, LOCK_EX | LOCK_NB) or exit 1' "$LOCK_FILE"
 }
-stop_check() { [ "$STOP_REQUESTED" = 0 ] || { echo "Stopped." >&2; exit 1; }; }
+other_bottle_of_year() { # another bottle of this year still needs installers/extracted/revit<year>
+  local b ys
+  for b in "$BOTTLES"/*/; do
+    b="${b%/}"
+    if [ "$b" = "$B" ] || [ -L "$b" ]; then continue; fi
+    ys="$(bottle_years "$b")"   # a variable, not a pipe into grep -q: see revit_running
+    grep -qx "$YEAR" <<<"$ys" && { basename "$b"; return 0; }
+  done
+  return 1
+}
+stop_check() { [ "$STOP_REQUESTED" = 0 ] || { result_set result stopped; echo "Stopped." >&2; exit 1; }; }
 run_child() { # [--log <file>] <command…>: runs it in the background so that TERM/HUP/INT reach it as TERM (the
   # trap passes them on; a background child ignores INT itself), and waits until it has finished. With --log its output
   # also goes to <file> through tee, which runs without the lock's fd and gets up to 2 s to finish writing (a process

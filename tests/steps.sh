@@ -326,6 +326,16 @@ check "Ctrl-C during netfx: the installer finished" test -f "$T/net47-done"
 check "Ctrl-C during netfx: Windows 10 again" test "$(grep -o 'winecfg\] \[-v\] \[[a-z0-9]*' "$CALLS" | tail -1)" = "winecfg] [-v] [win10"
 check "Ctrl-C during netfx: vc did not run" not_called "vc10x86"
 # a failure while the bottle is Windows XP x64: the step fails and still puts Windows 10 back
+reset; cp "$REPO/revit" "$REPO/install.sh" "$R/"; mkbottle rvt2020-t 2020 2020; mkdist2020; mkdir -p "$R/installers/redist"
+touch "$R/installers/redist/dotNetFx40_Full_x86_x64.exe"; sed -i '' 's|^ADDIN_STEPS=.*|ADDIN_STEPS=(netfx vc)|' "$R/scripts/profiles/2020.sh"
+rule "dotNetFx47.exe" 0 "sleep 2; touch '$T/net47-done'"; release_rule 0x70805
+(cd / && exec "${SANDBOX_ENV[@]}" /usr/bin/perl -e '$SIG{INT}="DEFAULT"; setpgrp(0,0); exec @ARGV' \
+  /bin/bash "$R/revit" addins 2020 rvt2020-t) > "$T/out" 2>&1 &
+rs=$!; sleep 1; kill -INT -- "-$rs"; wait "$rs"; RC=$?; OUT="$(cat "$T/out")"
+expect "supervised Ctrl-C during netfx stops the run" 1 "Stopped."
+check "supervised Ctrl-C during netfx: the installer finished" test -f "$T/net47-done"
+check "supervised Ctrl-C during netfx: Windows 10 again" test "$(grep -o 'winecfg\] \[-v\] \[[a-z0-9]*' "$CALLS" | tail -1)" = "winecfg] [-v] [win10"
+check "supervised Ctrl-C during netfx: vc did not run" not_called "vc10x86"
 reset; mkbottle rvt2020-t 2020 2020; mkdist2020; mkdir -p "$R/installers/redist"; touch "$R/installers/redist/dotNetFx40_Full_x86_x64.exe"
 rule "OnlyUseLatestCLR" 5; run_steps 2020 rvt2020-t netfx
 expect "netfx: a failed registry change as Windows XP fails the step" 1 "Step netfx failed"

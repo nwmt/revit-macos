@@ -4,6 +4,31 @@
 # asks before deleting anything. REVIT_CX (tests only) points at a fake CrossOver.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"; . "$ROOT/scripts/lib/common.sh"
+YES=0; JSON=0; EVENTS_DIR=""; ONLY=""; EULA=""; REUSE_X=0; REEXTRACT=0; FLAG_ERR=""; SIG_GOT=""; END_DONE=0
+RESULT_HINT=usage   # what an exit before the child means: usage until the arguments check out (Task 5 reads it)
+sup_end() { :; }    # the one end event (Task 5)
+run_ctx_new() { # the run context: the result (and the events, Task 5) of this command, in $DATA/logs/runs/<run_id>/
+  [ -n "${REVIT_RUN_CTX:-}" ] && return 0   # --events gave one
+  REVIT_RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"; REVIT_RUN_CTX="$DATA/logs/runs/$REVIT_RUN_ID"
+  mkdir -p "$REVIT_RUN_CTX" || die "Cannot create a log folder in $(tilde "$DATA/logs")."
+  export REVIT_RUN_ID REVIT_RUN_CTX
+}
+supervise() { # <command…>: runs it in the foreground of this process group (Ctrl-C reaches it as when this script
+  # exec'ed it) and ends as it did: the same exit code, or death by the same signal
+  local rc sig=""
+  if [ -n "$SIG_GOT" ]; then   # a signal came before the child: do not start it
+    result_set result stopped; sup_end 1; trap - "$SIG_GOT"; kill -"$SIG_GOT" $$; exit 1
+  fi
+  # bash reports a foreground child killed by TERM/HUP ("Terminated: 15") on its own stderr; exec'ing, it did not:
+  # the child keeps the real stderr (fd 8), this shell's goes to /dev/null while it waits
+  exec 8>&2 2>/dev/null
+  "$@" 2>&8 8>&-; rc=$?
+  exec 2>&8 8>&-
+  [ "$rc" -gt 128 ] && sig="$(kill -l $((rc - 128)) 2>/dev/null)"
+  sup_end "$rc"
+  if [ -n "$sig" ]; then trap - "$sig"; kill -"$sig" $$; fi
+  exit "$rc"
+}
 
 usage() {
   cat <<'EOF'
@@ -30,7 +55,33 @@ cx_launchers() { # apps CrossOver makes for the bottle's Start Menu entries; del
 }
 size() { du -sh "$1" 2>/dev/null | cut -f1; }
 
-CMD="${1:-}"; YEAR_ARG="${2:-}"; NAME="${3:-}"
+POS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --yes) YES=1 ;;
+    --json) JSON=1 ;;
+    --reuse-extracted) REUSE_X=1 ;;
+    --reextract) REEXTRACT=1 ;;
+    --events|--only|--accept-eula)
+      if [ $# -lt 2 ]; then FLAG_ERR="$1 needs a value"
+      else case "$1" in --events) EVENTS_DIR="$2" ;; --only) ONLY="$2" ;; --accept-eula) EULA="$2" ;; esac; shift; fi ;;
+    -h|--help) POS+=(help) ;;
+    --*) FLAG_ERR="Unknown option: $1" ;;
+    *) POS+=("$1") ;;
+  esac
+  shift
+done
+CMD="${POS[0]:-}"; YEAR_ARG="${POS[1]:-}"; NAME="${POS[2]:-}"
+[ "$REUSE_X$REEXTRACT" != 11 ] || FLAG_ERR="Use --reuse-extracted or --reextract, not both."
+SUPERVISED=0; case "$CMD" in install|check|addins|rebuild) SUPERVISED=1 ;; esac
+sup_traps() { # signals noted, not ignored (an ignored signal would be inherited by the child), from here to the child
+  trap 'SIG_GOT=INT' INT; trap 'SIG_GOT=TERM' TERM; trap 'SIG_GOT=HUP' HUP
+}
+# Until then bash's default stays: Ctrl-C ends ./revit at once, also at the typed confirmation, as before. With
+# --events (the app, which passes --yes) a supervised command notes signals from the start, so even an early
+# cancel ends with one end event (Task 5)
+# (Task 5 opens the event channel here)
+[ -z "$FLAG_ERR" ] || die "$FLAG_ERR"
 case "$CMD" in
   install|check|addins|stop|logs|debug|rebuild|remove) ;;
   ""|help|-h|--help) usage; exit 0 ;;
@@ -43,16 +94,19 @@ if ! load_profile "$YEAR_ARG"; then
 fi
 DEFAULT="$(revit_bottle_default "$YEAR")"; NAME="${NAME:-$DEFAULT}"
 revit_bottle_name_ok "$NAME" || die "Bottle name may contain only letters, digits, - and _, and cannot be \"default\": \"$NAME\""
+RESULT_HINT=failed
 B="$(bottle_path "$NAME")"; SFX="$(bottle_sfx "$NAME" "$YEAR")"
 
 need_crossover() {
   [ -x "$CX/bin/cxbottle" ] && [ -x "$CX/bin/wineserver" ] \
     || die "CrossOver not found in /Applications. Install it from https://www.codeweavers.com/crossover"
 }
-not_busy() { lock_free || die "Another task is running: $(lock_owner). Wait until it finishes, then try again."; }
+not_busy() { lock_free || { RESULT_HINT=busy; die "Another task is running: $(lock_owner). Wait until it finishes, then try again."; }; }
 confirm() { # typing the year is harder to do by accident than y/n
+  [ "$YES" = 1 ] && return 0
   local a=""; printf 'Type %s to continue, anything else to cancel: ' "$YEAR"
   read -r a || a=""
+  [ -z "$SIG_GOT" ] || supervise true   # a signal noted while reading (events mode only) ends the run as stopped
   [ "$a" = "$YEAR" ] || { echo; echo "Cancelled. Nothing changed."; exit 1; }
 }
 docs_note() { # the bottle's Documents is normally a link to the Mac's Documents: deleting the bottle removes the link only
@@ -64,30 +118,21 @@ docs_note() { # the bottle's Documents is normally a link to the Mac's Documents
   fi
   echo "  Everything else on the bottle's C: drive is deleted."
 }
-other_bottle_of_year() { # another bottle of this year still needs installers/extracted/revit<year>
-  local b ys
-  for b in "$BOTTLES"/*/; do
-    b="${b%/}"
-    if [ "$b" = "$B" ] || [ -L "$b" ]; then continue; fi
-    ys="$(bottle_years "$b")"   # a variable, not a pipe into grep -q: see revit_running
-    grep -qx "$YEAR" <<<"$ys" && { basename "$b"; return 0; }
-  done
-  return 1
-}
 extracted_plan() { # sets X, DROP_X (1 = remove deletes the unpacked files) and KEEP_X (why they stay)
   X="$(revit_extracted "$YEAR")"; DROP_X=0; KEEP_X=""
   [ -d "$X" ] || return 0
   if o="$(other_bottle_of_year)"; then KEEP_X="bottle $o still uses it"; else DROP_X=1; fi
 }
 
+# ---- run the command ----
 case "$CMD" in
-  install) not_busy; exec "$ROOT/install.sh" "$YEAR" "$NAME" ;;
-  check)   export INSTALL_DRYRUN=1; exec "$ROOT/install.sh" "$YEAR" "$NAME" ;;
+  install) not_busy; run_ctx_new; sup_traps; lock_take --no-trap "install.sh $YEAR $NAME"; supervise "$ROOT/install.sh" "$YEAR" "$NAME" ;;
+  check)   export INSTALL_DRYRUN=1; run_ctx_new; sup_traps; supervise "$ROOT/install.sh" "$YEAR" "$NAME" ;;
   addins)
     [ ${#ADDIN_STEPS[@]} -gt 0 ] || die "The add-in script is not set up for Revit $YEAR yet."
     bottle_guard must_exist "$YEAR" "$NAME"; not_busy
-    lock_take "./revit addins $YEAR $NAME"; bottle_guard must_exist "$YEAR" "$NAME"
-    export RUN_KIND=addins; exec "$ROOT/scripts/run-steps.sh" "$YEAR" "$NAME" "${ADDIN_STEPS[@]}" ;;
+    run_ctx_new; sup_traps; lock_take --no-trap "./revit addins $YEAR $NAME"; bottle_guard must_exist "$YEAR" "$NAME"
+    export RUN_KIND=addins; supervise "$ROOT/scripts/run-steps.sh" "$YEAR" "$NAME" "${ADDIN_STEPS[@]}" ;;
   stop)
     need_crossover; bottle_guard running_ok "$YEAR" "$NAME"
     lock_take "./revit stop $YEAR $NAME"   # an install's Wine programs run in this bottle too: -k would end them
@@ -98,7 +143,7 @@ case "$CMD" in
   logs)
     found="$(ls -td "$DATA/logs/$NAME"/*/ 2>/dev/null | head -8)"
     if [ -z "$found" ]; then
-      ls -d "$ROOT"/logs/*-"$NAME"-[0-9]* >/dev/null 2>&1 \
+      ls -d "$DATA"/logs/*-"$NAME"-[0-9]* >/dev/null 2>&1 \
         && die "No logs for $NAME in logs/$NAME/ yet. Older logs are in logs/ directly: open \"$DATA/logs\""
       die "No logs for $NAME yet. ./revit install and ./revit debug write them to logs/$NAME/."
     fi
@@ -122,9 +167,9 @@ case "$CMD" in
     fi
     docs_note
     confirm
-    lock_take "./revit rebuild $YEAR $NAME"
+    run_ctx_new; sup_traps; lock_take --no-trap "./revit rebuild $YEAR $NAME"
     bottle_guard must_exist "$YEAR" "$NAME"   # again: the bottle may have changed, or Revit started, while the user read
-    export CX_RECREATE=1; exec "$ROOT/install.sh" "$YEAR" "$NAME" ;;
+    export CX_RECREATE=1; supervise "$ROOT/install.sh" "$YEAR" "$NAME" ;;
   remove)
     APPS=(); NA=0
     for a in "Revit $YEAR" "Revit Viewer $YEAR" "Autodesk Sign-In"; do

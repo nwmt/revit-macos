@@ -32,6 +32,29 @@ echo "\$(basename "\$0") \$* | REVIT_YEAR=\${REVIT_YEAR:-} INSTALL_DRYRUN=\${INS
 EOF
   chmod +x "$1"
 }
+slow_stub() { # $1 = path: records its start, works 3 s, turns INT/TERM into "stopped" and exit 1 (as install.sh does)
+  mkdir -p "$(dirname "$1")"
+  cat > "$1" <<EOF
+#!/bin/bash
+trap 'echo "\$(basename "\$0") got-signal" >> "$CALLS"; exit 1' INT TERM
+echo "\$(basename "\$0") started ctx=\${REVIT_RUN_CTX:-}" >> "$CALLS"
+sleep 3 & wait \$!
+echo "\$(basename "\$0") finished" >> "$CALLS"
+EOF
+  chmod +x "$1"
+}
+group_int() { # ./revit "$@" in a process group of its own; SIGINT to the group after $DELAY s (a terminal's Ctrl-C).
+  # Sets OUT and HOW ("exit=N signal=M", from perl's waitpid: a death by a signal is not an exit code)
+  : > "$CALLS"
+  local in=/dev/null   # GI_HOLD=1: stdin is a pipe that stays open 5 s (a prompt waits on it)
+  if [ -n "${GI_HOLD:-}" ]; then rm -f "$T/hold"; mkfifo "$T/hold"; ( sleep 5 > "$T/hold" ) & in="$T/hold"; fi
+  OUT="$(cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" D="${DELAY:-1}" /usr/bin/perl -e '
+    # the observer: a group of its own, INT ignored here only after fork (the child gets the default, as from a shell)
+    setpgrp(0,0); my $p = fork; if (!$p) { $SIG{INT} = "DEFAULT"; exec @ARGV } $SIG{INT} = "IGNORE";
+    if ($ENV{D}) { sleep $ENV{D}; kill "INT", -getpgrp() }
+    waitpid($p, 0); printf "HOW exit=%d signal=%d\n", $? >> 8, $? & 127' /bin/bash "$R/revit" "$@" < "$in" 2>&1)"
+  HOW="$(sed -n 's/^.*HOW \(exit=[0-9]* signal=[0-9]*\)$/\1/p' <<<"$OUT")"   # a prompt without a newline may come first
+}
 reset() { # a fresh sandbox for each test
   stop_fakes; chmod -R u+w "$T" 2>/dev/null; rm -rf "$T"
   mkdir -p "$R/scripts/lib" "$R/logs" "$R/installers/revit2024" "$H/Documents" "$H/Applications" "$BOTTLES" "$CXF/bin" \
@@ -245,6 +268,49 @@ expect "a bottle that appears during the prompt stops remove" 1 "Nothing was rem
 check "appeared bottle: not deleted" test -d "$BOTTLES/rvt2024-a"
 check "appeared bottle: apps kept" test -d "$H/Applications/Revit 2024 (rvt2024-a).app"
 reset; rm -rf "$CXF"; bottle rvt2024-a 2024 2024; run "2024" remove 2024; expect "remove without CrossOver" 1 "CrossOver not found"
+
+# ---- supervisor ----
+reset; run "" install 2024
+check "install still calls install.sh" called "install.sh 2024 rvt2024-a"
+check "the child gets a run context" eval 'ls -d "$R/logs/runs/"*/ >/dev/null 2>&1'
+reset; printf '#!/bin/bash\nexit 3\n' > "$R/install.sh"; run "" install 2024
+expect "revit exits with the child's code" 3 ""
+reset; printf '#!/bin/bash\necho to-out; echo to-err >&2\n' > "$R/install.sh"; run "" install 2024
+check "the child's stdout and stderr reach the terminal" eval 'grep -qx to-out <<<"$OUT" && grep -qx to-err <<<"$OUT"'
+reset; printf '#!/bin/bash\nkill -TERM $$\n' > "$R/install.sh"; DELAY=0 group_int install 2024
+check "a child that dies by TERM: revit dies by TERM" test "$HOW" = "exit=0 signal=15"
+check "a child that dies by TERM: no message from the supervisor" eval '! grep -q "Terminated" <<<"$OUT"'
+reset; slow_stub "$R/install.sh"; DELAY=1 group_int install 2024
+check "INT during the child: the child handled it" called "install.sh got-signal"
+check "INT during the child: revit exits as the child did" test "$HOW" = "exit=1 signal=0"
+check "INT during the child: nothing keeps running" eval 'sleep 3; ! grep -q "install.sh finished" "$CALLS"'
+reset; slow_stub "$R/scripts/run-steps.sh"; bottle rvt2024-a 2024 2024; DELAY=1 group_int addins 2024
+check "INT during addins: the runner handled it" called "run-steps.sh got-signal"
+check "INT during addins: exit 1" test "$HOW" = "exit=1 signal=0"
+reset; slow_stub "$R/install.sh"; DELAY=1 group_int check 2024
+check "INT during check: the child handled it" called "install.sh got-signal"
+check "INT during check: nothing keeps running" eval 'sleep 3; ! grep -q "install.sh finished" "$CALLS"'
+reset; slow_stub "$R/install.sh"
+sed -i '' 's|^# ---- run the command ----$|sleep 2  # test: a slow start\n&|' "$R/revit"
+grep -q '^sleep 2  # test' "$R/revit" || fail "the slow-start edit did not apply" ""
+DELAY=1 group_int install 2024
+check "INT before the child: the child never starts" not_called "install.sh started"
+check "INT before the child: revit dies by SIGINT" test "$HOW" = "exit=0 signal=2"
+reset; bottle rvt2024-a 2024 2024; slow_stub "$R/scripts/launch.sh"; sed -i '' 's|^# ---- run the command ----$|sleep 2  # test\n&|' "$R/revit"
+DELAY=1 group_int debug 2024
+check "INT before an unsupervised command: it dies by SIGINT as before" test "$HOW" = "exit=0 signal=2"
+check "INT before an unsupervised command: it never starts" not_called "launch.sh started"
+reset; bottle rvt2024-a 2024 2024; GI_HOLD=1 DELAY=1 group_int rebuild 2024
+check "INT at the typed confirmation: death by SIGINT at once, as before" test "$HOW" = "exit=0 signal=2"
+check "INT at the typed confirmation: nothing ran" not_called "install.sh"
+reset; bottle rvt2024-a 2024 2024; run "" rebuild 2024 --yes
+expect "--yes skips the typed confirmation" 0 ""
+check "--yes: install.sh ran as a rebuild" called "install.sh 2024 rvt2024-a | REVIT_YEAR= INSTALL_DRYRUN= CX_RECREATE=1"
+reset; run "" install 2024 --frob; expect "an unknown flag" 1 "Unknown option: --frob"
+reset; run "" --help; expect "--help still prints the help" 0 "Usage: ./revit <command> <year> [bottle]"
+reset; run "" -h;     expect "-h still prints the help" 0 "Usage: ./revit <command> <year> [bottle]"
+reset; printf '#!/bin/bash\nprintf "result=partial\\nlog_dir=/x\\n" > "$REVIT_RUN_CTX/result"; exit 1\n' > "$R/install.sh"
+run "" install 2024; check "the child's result file is kept in the run context" eval 'grep -qx "result=partial" "$R"/logs/runs/*/result'
 
 # ---- end ----
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]
