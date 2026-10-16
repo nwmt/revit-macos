@@ -161,7 +161,7 @@ other_bottle_of_year() { # another bottle of this year still needs installers/ex
   local b ys
   for b in "$BOTTLES"/*/; do
     b="${b%/}"
-    if [ "$b" = "$B" ] || [ -L "$b" ]; then continue; fi
+    if [ "$b" = "$B" ] || [ -L "$b" ] || is_smoke_clone "$b"; then continue; fi
     ys="$(bottle_years "$b")"   # a variable, not a pipe into grep -q: see revit_running
     grep -qx "$YEAR" <<<"$ys" && { basename "$b"; return 0; }
   done
@@ -223,6 +223,7 @@ bottle_guard() { # $1 = must_exist | running_ok (like must_exist, Revit may run:
   local mode="$1" year="$2" name="$3" b ys sfx
   b="$(bottle_path "$name")"; sfx="$(bottle_sfx "$name" "$year")"
   [ ! -L "$b" ] || die "Bottle $name is a link to another bottle. Use the real bottle name."
+  ! is_smoke_clone "$b" || die "Bottle $name is a temporary copy made by ./revit test, not a bottle to use."
   if [ ! -d "$b" ]; then
     [ "$mode" = allow_missing ] && return 0
     die "There is no bottle $name. To install Revit $year: ./revit install $year$sfx"
@@ -232,6 +233,80 @@ bottle_guard() { # $1 = must_exist | running_ok (like must_exist, Revit may run:
   [ "$ys" = "$year" ] || die "Bottle $name is for Revit $ys, not $year. Check the year and the bottle name."
   [ "$mode" = running_ok ] || ! revit_running "$b" "$year" \
     || die "Revit $year is running in $name. Save your work and quit Revit, then try again. If it hangs: ./revit stop $year$sfx"
+}
+
+# ---- the temporary copies of ./revit test (scripts/smoke.sh) and what runs in a bottle ----
+SMOKE_MARK="revit-macos/smoke-clone"   # in a copy: written before the copying starts, so even a cut-short copy has it
+smoke_clone_name() { echo "$1.test"; }   # $1 = bottle: its copy. revit_bottle_name_ok refuses the dot, so no
+                                         # install, rebuild or remove of the user ever picks that name
+is_smoke_clone() { # $1 = bottle path: a copy made by ./revit test (its marker, a file not reached through a link).
+  # status, other_bottle_of_year and bottle_guard leave such copies out
+  [ -f "$1/$SMOKE_MARK" ] && [ ! -L "$1/$SMOKE_MARK" ] && [ ! -L "$1/revit-macos" ]
+}
+bottle_activity() { # $1 = bottle path → stopped | active | unknown. Active: a Wine process (wineserver, a Windows
+  # program, a launcher) has the bottle's folder itself open (wineserver keeps its working directory there) or a file
+  # inside. The licensing services run for hours without Revit, so this is not revit_running. lsof failing for a process
+  # that still runs is unknown: callers refuse then. -n -P: no name lookups for network connections (seconds each).
+  # Output goes through variables, as in revit_running
+  local rb pids p out o
+  rb="$(cd "$1" 2>/dev/null && pwd -P)" || { echo unknown; return 0; }   # lsof prints real paths
+  pids="$(pgrep -i -f 'wine|\.exe' 2>/dev/null | grep -vx "$$" | tr '\n' ',')"; pids="${pids%,}"
+  [ -n "$pids" ] || { echo stopped; return 0; }
+  if ! out="$(lsof -w -n -P -p "$pids" -Fn 2>/dev/null)"; then   # one that ended meanwhile fails the call: ask each
+    out=""
+    for p in ${pids//,/ }; do
+      if o="$(lsof -w -n -P -p "$p" -Fn 2>/dev/null)"; then out+="$o"$'\n'
+      elif kill -0 "$p" 2>/dev/null; then echo unknown; return 0; fi
+    done
+  fi
+  if P="n$rb" awk 'index($0, ENVIRON["P"] "/") == 1 || $0 == ENVIRON["P"] { f = 1 } END { exit !f }' <<<"$out"
+  then echo active; else echo stopped; fi
+}
+cx_lock_dir() { # where CrossOver keeps its locks (CXUtils::cxlock: $TMPDIR/.wine-<uid>), with the TMPDIR that the apps
+  # in ~/Applications get from macOS. REVIT_CX_TMP (tests only) stands for it
+  local d="${REVIT_CX_TMP:-$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)}"
+  d="${d%/}"; echo "${d:-/tmp}/.wine-$(id -u)"
+}
+CX_LOCK_PID=""
+cx_bottle_lock() { # $1 = bottle path: holds CrossOver's own lock of that bottle (CXBottle::lock_bottle, the file
+  # bottle-<dev>-<ino>.lock) in a background process until cx_bottle_unlock or until this script ends. CrossOver's
+  # wine takes it at every start and cxbottle while it changes the bottle, so nothing starts in the bottle meanwhile:
+  # a launch from ~/Applications waits. 1 when it is not free within 30 s. Not in a command substitution: the holder
+  # would keep it open
+  local ready i
+  ready="$(mktemp "${TMPDIR:-/tmp}/revit-cxlock.XXXXXX")" || return 1
+  /usr/bin/perl -MFcntl=:flock -e 'my ($prefix, $dir, $parent, $ready) = @ARGV;
+    my ($dev, $ino) = (stat $prefix)[0, 1]; defined $ino or exit 3;
+    # the id as CXUtils::get_wine_dir_id writes it
+    my $id = ($dev > 0xffffffff ? sprintf("%lx%08lx-", $dev >> 32, $dev & 0xffffffff) : sprintf("%lx-", $dev))
+      . ($ino > 0xffffffff ? sprintf("%lx%08lx", $ino >> 32, $ino & 0xffffffff) : sprintf("%lx", $ino));
+    mkdir $dir, 0700 unless lstat $dir;   # as cxlock: our own folder, closed to others
+    my @d = lstat $dir; exit 4 unless @d && -d _ && $d[4] == $> && !($d[2] & 077);
+    my $path = "$dir/bottle-$id.lock"; exit 5 if -e $path && (-l $path || !-f $path);
+    open(my $l, ">", $path) or exit 5;
+    my $until = time + 30;
+    until (flock($l, LOCK_EX | LOCK_NB)) { exit 6 if time > $until || !kill(0, $parent); select(undef, undef, undef, 0.2) }
+    open(my $r, ">", $ready) or exit 7; print $r "locked\n"; close $r;
+    select(undef, undef, undef, 0.2) while kill(0, $parent);' "$1" "$(cx_lock_dir)" "$$" "$ready" \
+    </dev/null >/dev/null 2>&1 7>&- 9>&- &
+  CX_LOCK_PID=$!
+  for i in $(seq 1 700); do
+    if [ -s "$ready" ]; then rm -f "$ready"; return 0; fi
+    kill -0 "$CX_LOCK_PID" 2>/dev/null || break
+    sleep 0.05
+  done
+  rm -f "$ready"; cx_bottle_unlock; return 1
+}
+cx_bottle_unlock() { # ends the holder of cx_bottle_lock: the kernel drops the lock with it
+  [ -n "$CX_LOCK_PID" ] || return 0
+  kill "$CX_LOCK_PID" 2>/dev/null; wait "$CX_LOCK_PID" 2>/dev/null; CX_LOCK_PID=""; return 0
+}
+cx_menu_apps() { # $1 = bottle name: the apps CrossOver made for its Start Menu entries; deleting a bottle leaves them
+  local a
+  find "$HOME/Applications/CrossOver" -type d -name '*.app' -prune 2>/dev/null | while IFS= read -r a; do
+    [ "$(plutil -extract CXHelperAppBottleName raw -o - "$a/Contents/Info.plist" 2>/dev/null)" = "$1" ] && echo "$a"
+  done
+  return 0
 }
 
 # ---- the run record: what ran in a bottle and how it ended, <bottle>/revit-macos/runs.ndjson (tools/runlog.py) ----
