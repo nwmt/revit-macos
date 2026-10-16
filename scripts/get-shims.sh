@@ -18,13 +18,6 @@ from_source() { # without the marker build-shims.sh takes no release file, and n
   [ -z "$DL" ] || rm -rf "$DL"   # exec skips the EXIT trap
   exec "$ROOT/scripts/get-toolchain.sh"
 }
-release_complete() { # $1 = folder: a .dll or .exe in <folder>/<shim>/ for every shim of SHIMS
-  local s f found
-  for s in "${SHIMS[@]}"; do
-    found=""; for f in "$1/$s"/*.dll "$1/$s"/*.exe; do [ -f "$f" ] && found=1; done
-    [ -n "$found" ] || return 1
-  done
-}
 
 if [ "${REVIT_BUNDLED:-0}" = 1 ]; then # the app ships the pinned release: no git, no download, no compiler
   [ "$(cat "$(shim_dir)/.prebuilt" 2>/dev/null)" = "$SHIMS_VERSION" ] && release_complete "$(shim_dir)" \

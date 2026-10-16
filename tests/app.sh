@@ -103,5 +103,24 @@ check "status --json: an app outside Applications should move" [ "$(jget "$OUT" 
 in_sandbox "$R/revit" status --json
 check "status --json: a clone has no app block" eval '[ "$(jget "$OUT" app)" = UNDEF ] && [ "$(jget "$OUT" bottles)" = OBJ ]'
 
+# ---- fetching the pinned tools (Task 2): the refusals, offline ----
+echo "not an archive" > "$TOP/fake.tar.xz"
+FAKE_SUM="$(shasum -a 256 "$TOP/fake.tar.xz" | cut -d' ' -f1)"; ZEROS="$(printf '0%.0s' $(seq 1 64))"
+sed -e "s|^SEVENZIP_URL=.*|SEVENZIP_URL=file://$TOP/fake.tar.xz|" -e "s|^SEVENZIP_SHA256=.*|SEVENZIP_SHA256=$ZEROS|" \
+  "$R/app/tools.sh" > "$T/pins.sh" 2>/dev/null
+in_sandbox "$R/app/fetch-tools.sh" "$T/out" "$T/pins.sh"
+expect "fetch: a wrong checksum is refused" 1 "file://$TOP/fake.tar.xz"
+check "fetch: the refusal names both sums" eval 'grep -qF "$ZEROS" <<<"$OUT" && grep -qF "$FAKE_SUM" <<<"$OUT"'
+check "fetch: a refusal leaves no output and no .part" eval '[ ! -e "$T/out" ] && [ ! -e "$T/out.partial" ] &&
+  [ -z "$(find "$R/dist/app-cache" -name "*.part" 2>/dev/null)" ]'
+c="$(cd "$R" && git ls-files 'tools/shims/rvtfix/*.c' | head -1)"
+echo "/* changed */" >> "$R/$c"; git -C "$R" -c core.hooksPath=/dev/null -c user.name=test -c user.email=test commit -qam change
+rm -rf "$R/dist/app-cache"; in_sandbox "$R/app/fetch-tools.sh" "$T/out"
+expect "fetch: shim sources changed since the tag" 1 "shim sources changed since v$SHIMS_VERSION"
+check "fetch: nothing downloaded before the shim check" [ -z "$(find "$R/dist/app-cache" -type f 2>/dev/null)" ]
+repo_copy; git -C "$R" tag -d "v$SHIMS_VERSION" >/dev/null
+in_sandbox "$R/app/fetch-tools.sh" "$T/out"; expect "fetch: no shim tag" 1 "no tag v$SHIMS_VERSION"
+repo_copy
+
 echo "$((n - fails))/$n passed"
 [ "$fails" = 0 ]

@@ -20,3 +20,10 @@ ensure_shim() { # $1 = shim: build it from source, or take the prebuilt release 
   fi
   "$ROOT/scripts/build-shims.sh" "$1" || return 1
 }
+release_complete() { # $1 = folder: a .dll or .exe in <folder>/<shim>/ for every shim of SHIMS (get-shims.sh, the app's build)
+  local s f found
+  for s in "${SHIMS[@]}"; do
+    found=""; for f in "$1/$s"/*.dll "$1/$s"/*.exe; do [ -f "$f" ] && found=1; done
+    [ -n "$found" ] || return 1
+  done
+}
