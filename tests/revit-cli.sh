@@ -8,7 +8,8 @@ set -uo pipefail
 CLEAN_ENV=(-u REVIT_DATA -u REVIT_LOCK_DIR -u SHIMS_DIR -u REVIT_BUNDLED -u REVIT_EVENTS_FD -u REVIT_RUN_ID -u REVIT_RUN_CTX
   -u REVIT_ACCEPT_EULA -u REVIT_SOURCE_LIST -u REVIT_REUSE_EXTRACTED -u REVIT_REEXTRACT -u REVIT_UNPACK_AGAIN
   -u REVIT_FOR_BOTTLE -u INSTALL_PARENT -u W_CACHE -u SHIMS_FROM_SOURCE -u RUN_DIR -u RUN_KIND -u CX_RECREATE
-  -u INSTALL_DRYRUN -u REVIT_LANG -u ODIS_PKGS -u REVIT_THEME -u REVIT_YEAR)
+  -u INSTALL_DRYRUN -u REVIT_LANG -u ODIS_PKGS -u REVIT_THEME -u REVIT_YEAR -u SMOKE_TIMEOUT -u SMOKE_START_WAIT
+  -u SMOKE_STALL -u SMOKE_WORKER_WAIT -u SMOKE_POLL -u SMOKE_PREP_TIMEOUT -u REVIT_CX_TMP)
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)" && [ -d "$TMP" ] || { echo "mktemp failed" >&2; exit 1; }   # an empty TOP would be the current folder
 TOP="$(cd "$TMP" && pwd -P)" || exit 1   # /var → /private/var: lsof reports real paths
@@ -62,7 +63,7 @@ reset() { # a fresh sandbox for each test
   cp "$REPO/revit" "$R/"; cp -R "$REPO/tools" "$R/"; cp "$REPO/scripts/lib/common.sh" "$REPO/scripts/lib/versions.sh" "$R/scripts/lib/"
   mkdir -p "$R/scripts/profiles"; cp "$REPO"/scripts/profiles/*.sh "$R/scripts/profiles/"
   cp "$REPO/scripts/lib/addins.sh" "$R/scripts/lib/" 2>/dev/null; cp -R "$REPO/scripts/addins" "$REPO/scripts/steps" "$R/scripts/" 2>/dev/null
-  stub "$R/install.sh"; stub "$R/scripts/run-steps.sh"; stub "$R/scripts/launch.sh"
+  stub "$R/install.sh"; stub "$R/scripts/run-steps.sh"; stub "$R/scripts/launch.sh"; stub "$R/scripts/smoke.sh"
   cat > "$CXF/bin/wineserver" <<EOF
 #!/bin/bash
 echo "wineserver \$* | REVIT_YEAR=\${REVIT_YEAR:-} INSTALL_DRYRUN=\${INSTALL_DRYRUN:-} CX_RECREATE=\${CX_RECREATE:-} WINEPREFIX=\${WINEPREFIX:-}" >> "$CALLS"
@@ -423,6 +424,43 @@ reset; mkdir -p "$FK"; printf '#!/bin/bash\necho 30\n' > "$FK/osascript"; chmod 
 install_with "$FK"
 check "install: one volume adds up what goes there" eval 'grep -qxF "  ! only 30 GB free" <<<"$OUT" &&
   grep -qxF "      an install needs up to ~40 GB (extracted files, bottle)" <<<"$OUT"'
+smoke_copy() { # $1 = name: a temporary copy made by ./revit test (its marker), of the bottle without .test
+  bottle "$1" "$2" "$2"; mkdir -p "$BOTTLES/$1/revit-macos"
+  printf 'smoke_clone=1\nsource=%s\nstate=ready\n' "${1%.test}" > "$BOTTLES/$1/revit-macos/smoke-clone"
+}
+reset; bottle rvt2024-a 2024 2024; smoke_copy rvt2024-a.test 2024; run "" status --json
+check "status --json leaves out a copy of ./revit test" eval 'grep -qF "\"name\":\"rvt2024-a\"" <<<"$OUT" && ! grep -qF "rvt2024-a.test" <<<"$OUT"'
+run "" status; check "status leaves out a copy of ./revit test" eval 'grep -qE "^  rvt2024-a " <<<"$OUT" && ! grep -qF "rvt2024-a.test" <<<"$OUT"'
+reset; bottle rvt2024-a 2024 2024; smoke_copy rvt2024-a.test 2024; mkdir -p "$R/installers/extracted/revit2024"
+run "2024" remove 2024; expect "remove: a copy of ./revit test does not keep the unpacked files" 0 "Removed Revit 2024 (rvt2024-a)."
+check "remove: unpacked files deleted despite the copy" test ! -d "$R/installers/extracted/revit2024"
+
+# ---- test ----
+reset; run "" test;                  expect "test: missing year" 1 "Which Revit year? Example: ./revit test 2025"
+reset; run "" test 2021;             expect "test: unsupported year" 1 "Revit 2021 is not supported yet"
+reset; run "" test 2024 rvt2024-a.test; expect "test: the name of a copy is no bottle name" 1 "Bottle name may contain only"
+reset; run "" test 2024;             expect "test: needs the bottle" 1 "There is no bottle rvt2024-a. To install Revit 2024: ./revit install 2024"
+reset; bottle rvt2024-a 2024 2024; run "" test 2024; expect "test runs the test script" 0 ""
+check "test passes the year and the bottle" called "smoke.sh 2024 rvt2024-a |"
+check "test gets a run context" eval 'ls -d "$R/logs/runs/"*/ >/dev/null 2>&1'
+reset; bottle rvt2024-b 2024 2024; run "" test 2024 rvt2024-b --log --keep
+check "test passes the bottle, --log and --keep" called "smoke.sh 2024 rvt2024-b --log --keep |"
+reset; bottle rvt2024-a 2024 2024; run "" install 2024 --log; expect "--log is for test only" 1 "--log is for ./revit test only."
+check "--log elsewhere: nothing ran" not_called "install.sh"
+reset; bottle rvt2024-a 2024 2024; run "" rebuild 2024 --keep; expect "--keep stays hidden elsewhere" 1 "Unknown option: --keep"
+reset; bottle rvt2025-a 2025 2025; run "" test 2024 rvt2025-a; expect "test refuses another year" 1 "Bottle rvt2025-a is for Revit 2025, not 2024."
+reset; bottle rvt2024-a 2024 2024; fake_revit rvt2024-a 2024; run "" test 2024
+expect "test refuses while Revit runs" 1 "Revit 2024 is running in rvt2024-a."
+check "Revit running: no test" not_called "smoke.sh"
+reset; bottle rvt2024-a 2024 2024; fake_lock "install.sh 2025 rvt2025-a"; run "" test 2024
+expect "test refuses while another task runs" 1 "Another task is running: install.sh 2025 rvt2025-a."
+reset; rm -rf "$CXF"; bottle rvt2024-a 2024 2024; run "" test 2024; expect "test without CrossOver" 1 "CrossOver not found"
+reset; printf '#!/bin/bash\nexit 3\n' > "$R/scripts/smoke.sh"; bottle rvt2024-a 2024 2024; run "" test 2024
+expect "test: exit 3 (a person must act) passes through" 3 ""
+reset; slow_stub "$R/scripts/smoke.sh"; bottle rvt2024-a 2024 2024; DELAY=1 group_int test 2024
+check "INT during test: the runner handled it" called "smoke.sh got-signal"
+check "INT during test: exit 1" test "$HOW" = "exit=1 signal=0"
+reset; bottle rvt2024-a 2024 2024; run "" --help; check "test is not in the help (CONTRIBUTING documents it)" eval '! grep -q "^  test" <<<"$OUT"'
 
 # ---- installer folder ----
 reset; mkdir -p "$T/dl"; touch "$T/dl/Revit_2020_G1_Win_64bit_r3_dlm_001_002.sfx.exe"; run "" find-installer "$T/dl" --json
