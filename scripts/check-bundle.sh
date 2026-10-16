@@ -22,7 +22,8 @@ tool 7zz 7zz i
 tool cabextract cabextract --version
 tool winetricks winetricks --version
 # _lzma and _hashlib by name: hashlib alone falls back to built-in code when _hashlib cannot load. Then every module
-# that tools/*.py import, so a new import is checked too
+# that tools/*.py import, so a new import is checked too; a tool that imports another tool is checked through that
+# tool's own imports (importing it here would write its bytecode into the bundle)
 tool python3 python3 -I -c '
 import ast, glob, importlib, os, platform, sys
 import _hashlib, _lzma, lzma
@@ -36,6 +37,7 @@ for f in glob.glob(os.path.join(sys.argv[1], "*.py")):
                 mods.update(a.name.split(".")[0] for a in n.names)
             elif isinstance(n, ast.ImportFrom) and n.level == 0 and n.module:
                 mods.add(n.module.split(".")[0])
+mods -= {os.path.basename(f)[:-3] for f in glob.glob(os.path.join(sys.argv[1], "*.py"))}
 for m in sorted(mods):
     importlib.import_module(m)
 print(platform.python_version())' "$ROOT/tools"
