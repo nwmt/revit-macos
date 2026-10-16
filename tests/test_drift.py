@@ -3,7 +3,7 @@
 Run: python3 -I -m unittest discover -s tests -p 'test_*.py'
 Every manifest is generated here, with attributes in unusual orders and a namespace; a fake 7zz on PATH prints the
 member files the tests put next to each archive. Nothing from Autodesk or Microsoft is needed."""
-import json, os, shutil, stat, subprocess, sys, tempfile, unittest
+import glob, hashlib, json, os, shutil, stat, subprocess, sys, tempfile, unittest
 
 REPO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 TOOLS = os.path.join(REPO, "tools")
@@ -333,7 +333,7 @@ class Source(Base):
         self.assertEqual(self.src_tool("build", self.put("bad.json", "[]"), "1.2.3.4").returncode, 1)
 
 
-class Preflight(Base):
+class Install(Base):
     """install.sh in a sandbox (a copy of the repo, a fake HOME, CrossOver and tools; every action a stub)."""
 
     def setUp(self):
@@ -351,8 +351,8 @@ class Preflight(Base):
             self.put(f"bin/{t}", "#!/bin/bash\nexit 0\n"); os.chmod(os.path.join(self.bin, t), 0o755)
         self.put("cx/bin/cxbottle", "#!/bin/bash\nexit 0\n"); os.chmod(self.p("cx/bin/cxbottle"), 0o755)
         self.put("repo/installers/redist/win7sp1/x64/msls31.dll", "")
-        rec = ('#!/bin/bash\nb="$(/usr/bin/perl -MJSON::PP -0 -ne \'print decode_json($_)->{revit_build_expected} // "null"\' '
-               '"$REVIT_SOURCE_LIST")"\necho "$(basename "$0") RUNLOG_BUILD=$RUNLOG_BUILD list=$b" >> "%s"\n') % self.p("calls")
+        self.rec = rec = ('#!/bin/bash\nb="$(/usr/bin/perl -MJSON::PP -0 -ne \'print decode_json($_)->{revit_build_expected} // "null"\' '
+                          '"$REVIT_SOURCE_LIST")"\necho "$(basename "$0") RUNLOG_BUILD=$RUNLOG_BUILD list=$b" >> "%s"\n') % self.p("calls")
         for s in ("get-shims", "get-revit", "get-redist", "unpack-revit", "make-apps"):
             self.put(f"repo/scripts/{s}.sh", rec)
         self.put("repo/scripts/new-bottle.sh", rec + 'mkdir -p "$HOME/Library/Application Support/CrossOver/Bottles/$2/drive_c"\n')
@@ -379,6 +379,10 @@ class Preflight(Base):
         self.put(f"{t}/setup_ext.xml", '<BundleExtension><Add><Packages><Package sourceDir="SGM" name="U"/></Packages></Add></BundleExtension>')
         self.put(f"{t}/SGM/setup.xml", '<Package><Identity><BuildNumber>27.3.0.28</BuildNumber></Identity><Payload><File '
                  'sizePacked="1" checkSum="ab">https://up1.autodesk.com/u/Revit_2027_3_0.exe</File></Payload></Package>')
+
+
+class Preflight(Install):
+    """The preflight's first answer and its warnings."""
 
     def test_the_build_and_the_warnings(self):
         self.create_installer(self.pkgs)
@@ -416,6 +420,109 @@ class Preflight(Base):
                          ["  ! AdskLicensing 17.0 is not tested yet."])
         self.assertIn("  ! AdskLicensing 17.0 is not tested yet.\n      You can continue. If the install stops at licensing, report a problem.\n", r.stdout)
         self.assertIn("unpack-revit.sh RUNLOG_BUILD=27.3.0.28", read(self.p("calls")))
+
+
+class AfterUnpack(Install):
+    """The final expected build: the real unpack-revit.sh (the fake 7zz unpacks <archive>.tree) keeps the build of what it
+    unpacked in the source list and .source; install.sh takes it for the actions after it and the run record, and checks
+    the unpacked folder for what the preflight could not see."""
+
+    BOTTLE = "Library/Application Support/CrossOver/Bottles/rvt2027-t"
+    EX = "repo/installers/extracted/revit2027"
+
+    def setUp(self):
+        super().setUp()
+        shutil.copy(os.path.join(REPO, "scripts", "unpack-revit.sh"), os.path.join(self.r, "scripts"))
+        self.put("repo/scripts/new-bottle.sh", self.rec + 'b="$HOME/Library/Application Support/CrossOver/Bottles/$2"\n'
+                 'mkdir -p "$b/drive_c"; printf \'[Bottle]\\n"Description" = "Revit %s"\\n\' "$1" > "$b/cxbottle.conf"\n')
+        os.chmod(self.p("repo/scripts/new-bottle.sh"), 0o755)
+
+    def record(self):
+        """The bottle's newest run record, as tools/runlog.py reads it."""
+        r = subprocess.run([sys.executable, "-I", "-B", os.path.join(TOOLS, "runlog.py"), "last", self.p("home", self.BOTTLE)],
+                           capture_output=True, text=True, env=self.env, cwd="/")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    def run_list(self):
+        runs = glob.glob(self.p("repo", "logs", "rvt2027-t", "*-install", "source.list"))
+        self.assertEqual(len(runs), 1, runs)
+        return read(runs[0])
+
+    def unpack_output(self, out):
+        """What the run printed from the unpack action up to the next action."""
+        seg = out[out.index("] scripts/unpack-revit.sh 2027"):]
+        return seg[:seg.index("==> [")]
+
+    def test_a_first_install_takes_the_build_of_what_it_unpacked(self):
+        # a Create Installer, attributes in unusual orders; its update is not downloaded yet and its manifest names no
+        # build, so the preflight's first answer is unknown
+        payload = "update payload"
+        ci = "repo/installers/revit2027/Create_Installer_RVT_2027_3_English_WIN64.exe"; t = ci + ".tree/RVT_2027_en-US"
+        self.put(ci, "x")
+        self.put(ci + ".tree/collection.xml", f"<Collection {NS}><Configuration><BrowserImageUrl>"
+                 "https://dds.autodesk.com/x/RVT_2027_B_002_002.7z</BrowserImageUrl></Configuration></Collection>")
+        self.put(f"{t}/setup.xml", setup_xml("27.0.4.412"))
+        self.put(f"{t}/manifest/app.RVT.xml", app_xml(self.pkgs[:-1]))   # the last name of PKGS is missing: said once
+        self.put(f"{t}/setup_ext.xml", f'<BundleExtension {NS}><Add><Packages><Package name="U" path="setup.xml" upi2="{{2}}" '
+                 'sourceDir="SGM"/></Packages></Add></BundleExtension>')
+        self.put(f"{t}/SGM/setup.xml", f'<Package {NS}><Identity><Publisher>P</Publisher></Identity><Payload><File sizeUnpacked="9" '
+                 f'checkSum="{hashlib.sha256(payload.encode()).hexdigest().upper()}" sizePacked="{len(payload)}">'
+                 "https://up1.autodesk.com/u/Revit_2027_3_0.exe</File></Payload></Package>")
+        # what get-revit.sh downloads: the base (the licensing package only it has) and the update (its own build)
+        self.put("dl/RVT_2027_B_002_002.7z", "base")
+        self.put("dl/RVT_2027_B_002_002.7z.tree/setup.xml", setup_xml("27.0.4.412"))
+        self.put("dl/RVT_2027_B_002_002.7z.tree/manifest/app.RVT.xml", app_xml(self.pkgs[:-1]))
+        self.put("dl/RVT_2027_B_002_002.7z.tree/x86/Licensing/pkg.licensing.xml", pkg_xml("EXE", "17.0.0.16519"))
+        self.put("dl/update/Revit_2027_3_0.exe", payload)
+        self.put("dl/update/Revit_2027_3_0.exe.setup.xml",
+                 setup_xml("27.3.0.28", [("NEWPKG", "x64/NEW/pkg.NEW.xml")], targets=["27.0.4.412"]))
+        self.put("dl/update/Revit_2027_3_0.exe.tree/x64/NEW/pkg.NEW.xml", pkg_xml())
+        self.put("repo/scripts/get-revit.sh", self.rec + f'cp -R "{self.p("dl")}/." "{self.p("repo/installers/revit2027")}/"\n')
+        r = self.install()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        calls = read(self.p("calls")).splitlines()
+        self.assertIn("get-revit.sh RUNLOG_BUILD= list=null", calls)   # the first answer
+        for s in ("new-bottle.sh", "run-steps.sh", "make-apps.sh"):   # the final one
+            self.assertIn(f"{s} RUNLOG_BUILD=27.3.0.28 list=27.3.0.28", calls)
+        self.assertEqual(json.loads(self.run_list())["revit_build_expected"], "27.3.0.28")
+        dot = json.loads(read(self.p(self.EX, ".source")))
+        self.assertEqual((dot["revit_build_expected"], bool(dot["source_id"])), ("27.3.0.28", True))
+        self.assertEqual(read(self.p(self.EX, "applied-updates.txt")), "Revit_2027_3_0.exe\n")
+        self.assertEqual(self.record()["revit_build_expected"], "27.3.0.28")
+        seg = self.unpack_output(r.stdout)
+        self.assertIn("  ! AdskLicensing 17.0 is not tested yet.\n      You can continue. If the install stops at licensing", seg)
+        self.assertIn("  ! The update Revit_2027_3_0.exe adds packages that are not installed: NEWPKG.\n      You can continue", seg)
+        self.assertEqual(r.stdout.count(f"does not have packages that this project installs: {self.pkgs[-1][0]}."), 1)
+        self.assertEqual(r.stdout.count("AdskLicensing 17.0"), 1)
+
+    def test_reuse_takes_the_build_its_unpack_found(self):
+        self.dist(self.EX, build="27.0.4.412", packages=[(n, p, "ADIX", []) for n, p in self.pkgs],
+                  licensing="17.0.0.16519", applied=["Revit_2027_3_0.exe"])
+        # the update's file is gone and the record has no build for it: only the build kept at its unpack knows it
+        s = json.loads(read(self.source([("update", "gone/update/Revit_2027_3_0.exe", None, False)], name="dot.json")))
+        s["revit_build_expected"] = "27.3.0.28"
+        before = json.dumps(s, indent=1)
+        self.put(f"{self.EX}/.source", before)
+        r = self.install(("REVIT_REUSE_EXTRACTED", "1"))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        calls = read(self.p("calls")).splitlines()
+        self.assertIn("get-shims.sh RUNLOG_BUILD= list=null", calls)   # the preflight could not know it
+        self.assertIn("new-bottle.sh RUNLOG_BUILD=27.3.0.28 list=27.3.0.28", calls)
+        self.assertEqual(self.record()["revit_build_expected"], "27.3.0.28")
+        self.assertEqual(read(self.p(self.EX, ".source")), before)   # used exactly as it is
+        self.assertEqual(r.stdout.count("AdskLicensing 17.0 is not tested yet."), 1)   # said at the preflight, not again
+        self.assertNotIn("  ! ", self.unpack_output(r.stdout))
+
+    def test_a_list_that_cannot_be_read_keeps_the_first_answer(self):
+        self.dist(self.EX, build="27.0.4.412", packages=[(n, p, "ADIX", []) for n, p in self.pkgs], applied=["Revit_2027_3_0.exe"])
+        self.put(f"{self.EX}/.source", read(self.source([("update", "gone/update/Revit_2027_3_0.exe", "27.3.0.28", False)], name="dot.json")))
+        self.put("repo/installers/revit2027/Create_Installer_RVT_2027_3_English_WIN64.exe", "junk")   # resolve stops on it
+        r = self.install(("REVIT_REUSE_EXTRACTED", "1"))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.run_list(), "")
+        self.assertIn("new-bottle.sh RUNLOG_BUILD=27.3.0.28 list=", read(self.p("calls")).splitlines())
+        self.assertEqual(self.record()["revit_build_expected"], "27.3.0.28")
 
 
 if __name__ == "__main__":

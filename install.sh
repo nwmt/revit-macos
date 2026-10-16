@@ -55,7 +55,7 @@ fi
 # the Revit build this install lays down (for the run record, source.list and .source), and what in the installer this
 # project does not know yet. The unpacked folder counts unless it is unpacked again; used as it is (--reuse-extracted, or
 # no installer file left), its own record says which updates it has. Neither ever stops the install
-RUNLOG_BUILD=""
+RUNLOG_BUILD=""; DRIFT_SHOWN=""   # a first answer: after the unpack the run loop takes the final build, prints new warnings
 if { [ -n "$kind" ] || [ -d "$DST" ]; } && command -v python3 >/dev/null; then
   dsl="$SL"; ddist=""
   if [ -d "$DST" ] && [ "${REVIT_REEXTRACT:-0}" != 1 ]; then
@@ -65,7 +65,7 @@ if { [ -n "$kind" ] || [ -d "$DST" ]; } && command -v python3 >/dev/null; then
   RUNLOG_BUILD="$(python3 -I -B "$ROOT/tools/installer_drift.py" expected-build "$YEAR" "$dsl" ${ddist:+"$ddist"} 2>/dev/null)"
   [ "$RUNLOG_BUILD" != unknown ] || RUNLOG_BUILD=""
   python3 -I "$ROOT/tools/installer_source.py" build "$SL" "${RUNLOG_BUILD:-unknown}" >/dev/null 2>&1
-  while IFS=$'\t' read -r w_ t_ f_; do [ "$w_" = warn ] && warn "$t_" "$f_"; done \
+  while IFS=$'\t' read -r w_ t_ f_; do [ "$w_" = warn ] && { warn "$t_" "$f_"; DRIFT_SHOWN+="$t_"$'\n'; }; done \
     < <(python3 -I -B "$ROOT/tools/installer_drift.py" check "$YEAR" "$dsl" ${ddist:+"$ddist"} --pkgs "$PKGS" 2>/dev/null)
 fi
 export RUNLOG_BUILD
@@ -176,6 +176,19 @@ for a in "${PLAN[@]}"; do
     echo "See docs/troubleshooting.md. To start over: $again" >&2
     result_set failed_action "$a"; result_set result failed
     exit 1
+  fi
+  if [ "$a" = unpack ]; then   # what is unpacked now gives the final build: unpack-revit.sh put it into the source
+    # list (a list that cannot be read keeps the first answer). Then the check of the unpacked folder, for what the
+    # preflight could not see (the licensing package of a first install); it never stops the install
+    b_="$(/usr/bin/perl -MJSON::PP -0777 -e 'my $s = eval { decode_json(<STDIN>) }; ref $s eq "HASH" or exit 1;
+      my $v = $s->{revit_build_expected} // ""; print $v if $v =~ /^\d+(\.\d+){3}$/' 2>/dev/null < "$REVIT_SOURCE_LIST")" \
+      && RUNLOG_BUILD="$b_"
+    export RUNLOG_BUILD
+    usl="$DST/.source"   # what was unpacked; a folder without that record: the list laid on it, unless used as it is
+    [ -f "$usl" ] || [ "${REVIT_REUSE_EXTRACTED:-0}" = 1 ] || [ -z "$kind" ] || usl="$REVIT_SOURCE_LIST"
+    while IFS=$'\t' read -r w_ t_ f_; do
+      [ "$w_" = warn ] && ! grep -qxF -- "$t_" <<<"$DRIFT_SHOWN" && warn "$t_" "$f_"
+    done < <(python3 -I -B "$ROOT/tools/installer_drift.py" check "$YEAR" "$usl" "$(revit_dist "$YEAR")" --pkgs "$PKGS" 2>/dev/null)
   fi
   i=$((i + 1))
 done
