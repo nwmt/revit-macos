@@ -43,7 +43,7 @@ fake_tool() { # $1 = folder, $2 = name, $3 = version line, $4 = exit code (defau
 }
 wrap_tool() { # $1 = path, $2 = host tool: logs the call, then runs the host tool (python3 and 7zz of a fixture bundle)
   mkdir -p "$(dirname "$1")"
-  printf '#!/bin/bash\necho "%s $*" >> "%s"\nexec "%s" "$@"\n' "$1" "$CALLS" "$2" > "$1"; chmod +x "$1"
+  printf '#!/bin/bash\necho "$0 $*" >> "%s"\nexec "%s" "$@"\n' "$CALLS" "$2" > "$1"; chmod +x "$1"
 }
 repo_copy() { # the repo as git sees it (tracked and new files, working-tree content) in $R: a git repo with the shim tag
   chmod -R u+w "$R" 2>/dev/null; rm -rf "$R"; mkdir -p "$R" || exit 1
@@ -68,7 +68,7 @@ fake_bundle() { # $1 = app path: the engine of $R, fake shims, fixture tools, th
   fake_tool "$res/bin" cabextract "cabextract version 1.11"; fake_tool "$res/bin" winetricks "20260125 - sha256sum: 0"
   printf 'app_name=Test App\napp_version=0.0.1\n' > "$e/.app-bundle"
 }
-: > "$CALLS"; mkdir -p "$H/Applications"; repo_copy
+mkdir -p "$H/Applications" && : > "$CALLS" || exit 1; repo_copy
 
 # ---- the marker and placement (Task 1) ----
 for c in "ok:/Applications/Test App.app" "ok:/Applications/Utilities/Test App.app" "ok:$H/Applications/Test App.app" \
@@ -121,6 +121,112 @@ check "fetch: nothing downloaded before the shim check" [ -z "$(find "$R/dist/ap
 repo_copy; git -C "$R" tag -d "v$SHIMS_VERSION" >/dev/null
 in_sandbox "$R/app/fetch-tools.sh" "$T/out"; expect "fetch: no shim tag" 1 "no tag v$SHIMS_VERSION"
 repo_copy
+
+# ---- assembling the bundle (Task 3) ----
+fixture_tools() { # $1 = folder: what app/fetch-tools.sh makes, with fixture content
+  local d="$1" s l
+  rm -rf "$d"; mkdir -p "$d/python/lib/python3.99" "$d/sources"
+  wrap_tool "$d/bin/7zz" "$HOST_7ZZ"; wrap_tool "$d/python/bin/python3" "$HOST_PY"
+  fake_tool "$d/bin" cabextract "cabextract version 1.11"; fake_tool "$d/bin" winetricks "20260125 - sha256sum: 0"
+  echo 'X = 1' > "$d/python/lib/python3.99/m.py"
+  for s in "${SHIMS[@]}"; do mkdir -p "$d/shims/$s"; echo "fake $s" > "$d/shims/$s/$s.dll"; done; echo MIT > "$d/shims/LICENSE"
+  for l in 7-Zip cabextract winetricks Python; do mkdir -p "$d/licenses/$l"; echo "license of $l" > "$d/licenses/$l/LICENSE.txt"; done
+  echo src > "$d/sources/7z2604-src.tar.xz"; echo src > "$d/sources/cabextract-1.11.tar.gz"
+}
+printf '#!/bin/bash\n' > "$T/stub"; chmod +x "$T/stub"
+TOOLS="$T/tools"; fixture_tools "$TOOLS"
+mkzip() { "$HOST_PY" -I -c 'import sys, zipfile; z = zipfile.ZipFile(sys.argv[1], "w")
+for a in sys.argv[2:]: n, c = a.split("=", 1); z.writestr(n, c)
+z.close()' "$@"; }
+mkdir -p "$T/ci"; mkzip "$T/ci/Create_Installer_RVT_2025_5_English_WIN64.exe" \
+  "collection.xml=<C><BrowserImageUrl>https://dds.autodesk.com/x/RVT_2025_B_002_002.7z</BrowserImageUrl></C>"
+mkdir -p "$T/cx/bin"; for x in cxbottle wineserver; do printf '#!/bin/bash\nexit 0\n' > "$T/cx/bin/$x"; chmod +x "$T/cx/bin/$x"; done
+listing() { find "$1" -exec stat -f '%N %z %m' {} + | sort; }
+
+B="$T/out/Test App.app"; E="$B/Contents/Resources/engine"; RS="$B/Contents/Resources"
+in_sandbox "$R/app/make-bundle.sh" "$B" "$T/stub" "$TOOLS" 0.0.1
+expect "bundle: make-bundle.sh assembles the app" 0 ""
+miss=""; for f in "Contents/MacOS/Test App" Contents/Info.plist Contents/Resources/engine/tools/installer_source.py \
+  Contents/Resources/engine/installers/CHECKSUMS.txt Contents/Resources/engine/LICENSE Contents/Resources/bin/7zz \
+  Contents/Resources/python/bin/python3 Contents/Resources/Licenses/README.txt Contents/Resources/Licenses/revit-macos/LICENSE \
+  Contents/Resources/Licenses/Python/LICENSE.txt Contents/Resources/engine/build/LICENSE; do [ -e "$B/$f" ] || miss+=" $f"; done
+check "bundle: layout" [ -z "$miss" ]
+miss=""; for f in revit install.sh scripts/run-steps.sh scripts/check-bundle.sh; do [ -x "$E/$f" ] || miss+=" $f"; done
+check "bundle: engine scripts stay executable" [ -z "$miss" ]
+extra=""; for f in tests docs .git internal app scripts/get-toolchain.sh scripts/build-shims.sh scripts/build-release.sh; do
+  [ ! -e "$E/$f" ] || extra+=" $f"; done
+check "bundle: no tests, docs, git, app sources or dev-only scripts" [ -z "$extra" ]
+check "bundle: the shims are release v$SHIMS_VERSION" eval '[ "$(cat "$E/build/.prebuilt")" = "$SHIMS_VERSION" ] && [ -f "$E/build/rvtfix/rvtfix.dll" ]'
+check "bundle: the marker names the app and the tools" eval 'grep -qx "app_name=Test App" "$E/.app-bundle" &&
+  grep -qx "app_version=0.0.1" "$E/.app-bundle" && grep -qx "sevenzip=26.04" "$E/.app-bundle" && grep -qx "shims=$SHIMS_VERSION" "$E/.app-bundle"'
+check "bundle: Licenses/README.txt names every component" eval 'for c in 7-Zip cabextract winetricks Python revit-macos; do
+  grep -q "$c" "$RS/Licenses/README.txt" || exit 1; done'
+pl() { plutil -extract "$1" raw -o - "$B/Contents/Info.plist" 2>/dev/null; }
+check "bundle: Info.plist" eval '[ "$(pl CFBundleIdentifier)" = io.example.testapp ] && [ "$(pl CFBundleExecutable)" = "Test App" ] &&
+  [ "$(pl CFBundleName)" = "Test App" ] && [ "$(pl CFBundleShortVersionString)" = 0.0.1 ] && [ "$(pl LSMinimumSystemVersion)" = 26.0 ] &&
+  [ "$(pl LSUIElement)" = true ]'
+pyc="$(find "$RS/python/lib/python3.99/__pycache__" -name 'm.*.pyc' 2>/dev/null | head -1)"
+check "bundle: Python bytecode is unchecked-hash" eval '[ -n "$pyc" ] && [ "$(od -An -tu4 -j4 -N4 "$pyc" | tr -d " ")" = 1 ]'
+in_sandbox "$R/app/make-bundle.sh" "$T/out/V.app" "$T/stub" "$TOOLS" 1.2;  expect "bundle: refuses version 1.2" 2 "X.Y.Z"
+in_sandbox "$R/app/make-bundle.sh" "$B" "$T/stub" "$TOOLS" 0.0.2;           expect "bundle: refuses an existing output" 2 "exists"
+cp -R "$TOOLS" "$T/tools-noshim"; rm -rf "$T/tools-noshim/shims/wbemshim"
+in_sandbox "$R/app/make-bundle.sh" "$T/out/S.app" "$T/stub" "$T/tools-noshim" 0.0.1; expect "bundle: refuses an incomplete shim set" 2 "shims"
+check "bundle: a refusal leaves nothing behind" eval '[ -z "$(find "$T/out" -maxdepth 1 -name "*.partial")" ] && [ ! -e "$T/out/S.app" ] && [ ! -e "$T/out/V.app" ]'
+
+fake_bundle() { # $1 = app path: from here on, the real assembly with the fixture tools; $2 = tools (default $TOOLS)
+  chmod -R u+w "$1" 2>/dev/null; rm -rf "$1"
+  (cd / && env "${CLEAN_ENV[@]}" PATH="$BASEPATH" "$R/app/make-bundle.sh" "$1" "$T/stub" "${2:-$TOOLS}" 0.0.1 >/dev/null) \
+    || { echo "make-bundle failed for $1"; exit 1; }
+}
+AE="$A/Contents/Resources/engine"
+fake_bundle "$A"; chmod -R a-w "$A"
+: > "$CALLS"; in_sandbox "$AE/scripts/check-bundle.sh"
+expect "read-only bundle: check-bundle passes" 0 ""
+check "check-bundle: five ok lines" [ "$(grep -c '^ok ' <<<"$OUT")" = 5 ]
+check "check-bundle: every tool from the bundle" eval 'for t in 7zz cabextract winetricks python3; do
+  grep "^ok   $t " <<<"$OUT" | grep -qF "($A/Contents/Resources/" || exit 1; done'
+cp -R "$TOOLS" "$T/tools-nohash"
+printf '#!/bin/bash\ncase "$*" in *_hashlib*) exit 1 ;; esac\nexec "%s" "$@"\n' "$HOST_PY" > "$T/tools-nohash/python/bin/python3"
+fake_bundle "$T/nohash/Test App.app" "$T/tools-nohash"; in_sandbox "$T/nohash/Test App.app/Contents/Resources/engine/scripts/check-bundle.sh"
+expect "check-bundle: a broken _hashlib fails it" 1 "FAIL python3"
+in_sandbox "$R/scripts/check-bundle.sh"; expect "check-bundle: outside the app" 1 "not inside the app"
+
+mkdir -p "$T/brew"; for x in 7zz python3 cabextract winetricks; do fake_tool "$T/brew" "$x" "brew $x" 1; done
+: > "$CALLS"; SB_PATH="$T/brew:$BASEPATH" in_sandbox "$AE/scripts/check-bundle.sh"; rc1=$RC
+SB_PATH="$T/brew:$BASEPATH" in_sandbox "$AE/revit" find-installer "$T/ci" --json
+check "bundle tools win over PATH: check-bundle and find-installer work" eval '[ "$rc1" = 0 ] && [ "$RC" = 0 ] &&
+  [ "$(jget "$OUT" year)" = 2025 ] && [ "$(jget "$OUT" kind)" = create-installer ]'
+check "bundle tools win over PATH: Python and its 7zz are the bundle's" eval 'grep -qF "$A/Contents/Resources/python/bin/python3 " "$CALLS" &&
+  grep -qF "$A/Contents/Resources/bin/7zz x" "$CALLS" && ! grep -qF "$T/brew/" "$CALLS"'
+
+in_sandbox REVIT_DATA="$T/data" "$AE/revit" check 2025; o1="${OUT//$AE/<root>}"; r1=$RC
+SB_PATH="$TOOLS/bin:$TOOLS/python/bin:$BASEPATH" in_sandbox REVIT_DATA="$T/data" "$R/revit" check 2025; o2="${OUT//$R/<root>}"; r2=$RC
+check "read-only bundle: revit check equals the clone" eval '[ "$r1" = "$r2" ] && [ "$o1" = "$o2" ]'
+[ "$o1" = "$o2" ] || diff <(echo "$o1") <(echo "$o2") | head -10 | sed 's/^/     /'
+in_sandbox "$AE/revit" check 2025
+check "read-only bundle: data goes to Application Support" [ -n "$(find "$H/Library/Application Support/Test App/logs/runs" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)" ]
+mkdir -p "$T/rec"; for x in git curl clang; do fake_tool "$T/rec" "$x" "" 1; done
+: > "$CALLS"; SB_PATH="$T/rec:$BASEPATH" in_sandbox "$AE/scripts/get-shims.sh"
+expect "read-only bundle: get-shims takes the bundled shims" 0 "prebuilt shims v$SHIMS_VERSION"
+check "read-only bundle: get-shims calls no git, curl or compiler" eval '! grep -qF "$T/rec/" "$CALLS"'
+
+IB="$T/inc/Test App.app"; fake_bundle "$IB"; rm -rf "$IB/Contents/Resources/engine/build/wbemshim"; chmod -R a-w "$IB"
+: > "$CALLS"; SB_PATH="$T/rec:$BASEPATH" in_sandbox "$IB/Contents/Resources/engine/scripts/check-bundle.sh"
+expect "read-only bundle: an incomplete shim set fails check-bundle" 1 "FAIL shims"
+SB_PATH="$T/rec:$BASEPATH" in_sandbox "$IB/Contents/Resources/engine/scripts/get-shims.sh"
+expect "read-only bundle: an incomplete shim set fails get-shims" 1 "not release v"
+check "read-only bundle: an incomplete shim set downloads nothing" eval '! grep -qF "$T/rec/" "$CALLS"'
+
+WB="$T/w/Test App.app"; WE="$WB/Contents/Resources/engine"; fake_bundle "$WB"; before="$(listing "$WB")"
+in_sandbox "$WE/scripts/check-bundle.sh"; in_sandbox "$WE/revit" status --json; in_sandbox "$WE/revit" check 2025
+in_sandbox "$WE/revit" find-installer "$T/ci" --json; in_sandbox "$WE/revit" addins list 2025 --json; in_sandbox "$WE/scripts/get-shims.sh"
+check "writable bundle: running the engine changes nothing in it" [ "$before" = "$(listing "$WB")" ]
+[ "$before" = "$(listing "$WB")" ] || diff <(echo "$before") <(listing "$WB") | head -10 | sed 's/^/     /'
+
+QB="$T/q/Test App.app"; fake_bundle "$QB"; xattr -w com.apple.quarantine '0081;00000000;Safari;' "$QB/Contents/Resources/engine/scripts/ps2pdf-port.sh"
+in_sandbox ROOT="$QB/Contents/Resources/engine" /bin/bash -c '. "$ROOT/scripts/lib/common.sh"; . "$ROOT/scripts/steps/fixes.sh"; pdf_port_script'
+check "PDF helper copy has not the app's quarantine" eval '[ "$OUT" = "$H/Library/Application Support/Test App/libexec/ps2pdf-port.sh" ] &&
+  ! { xattr -p com.apple.quarantine "$OUT" 2>/dev/null | grep -q Safari; }'   # a quarantine-enabled caller stamps its own
 
 echo "$((n - fails))/$n passed"
 [ "$fails" = 0 ]

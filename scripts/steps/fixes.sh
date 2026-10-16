@@ -97,7 +97,8 @@ step_wv2fix() { # the WebView2 browser inside Revit crashes ("holding USER lock"
 pdf_port_script() { # the printer port runs this path for every print job; it is stored in the bottle, so it must not
   # point into the app (moving the app would break printing): with a data folder of its own, a copy lives there
   if [ "$DATA" = "$ROOT" ]; then echo "$ROOT/scripts/ps2pdf-port.sh"; return 0; fi
-  mkdir -p "$DATA/libexec" && cp "$ROOT/scripts/ps2pdf-port.sh" "$DATA/libexec/ps2pdf-port.sh.new" \
+  # -X: not the app's quarantine attribute (a file copied out of a downloaded app keeps it)
+  mkdir -p "$DATA/libexec" && cp -X "$ROOT/scripts/ps2pdf-port.sh" "$DATA/libexec/ps2pdf-port.sh.new" \
     && chmod +x "$DATA/libexec/ps2pdf-port.sh.new" && mv -f "$DATA/libexec/ps2pdf-port.sh.new" "$DATA/libexec/ps2pdf-port.sh" \
     && echo "$DATA/libexec/ps2pdf-port.sh"
 }
