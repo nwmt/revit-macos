@@ -6,7 +6,7 @@ if [ -f "$ROOT/.app-bundle" ]; then   # inside <App>.app/Contents/Resources/engi
   # the app's data folder, its shims only, and the tools next to the engine before anything on PATH (Homebrew, the CLT)
   APP_NAME="$(sed -n 's/^app_name=//p' "$ROOT/.app-bundle")"; APP_RES="${ROOT%/engine}"
   export REVIT_BUNDLED="${REVIT_BUNDLED:-1}" REVIT_DATA="${REVIT_DATA:-$HOME/Library/Application Support/$APP_NAME}"
-  case ":$PATH:" in *":$APP_RES/bin:"*) ;; *) export PATH="$APP_RES/bin:$APP_RES/python/bin:$PATH" ;; esac
+  case "$PATH" in "$APP_RES/bin:$APP_RES/python/bin:"*) ;; *) export PATH="$APP_RES/bin:$APP_RES/python/bin:$PATH" ;; esac
 fi
 DATA="${REVIT_DATA:-$ROOT}"   # what the scripts write (installers, unpacked files, logs); the app sets it, a clone does not
 shim_dir() { echo "${SHIMS_DIR:-$ROOT/build}"; }   # our shims: build/ of a clone, or the app's prebuilt copy

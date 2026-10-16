@@ -94,6 +94,11 @@ in_sandbox ROOT="$A/Contents/Resources/engine" REVIT_DATA="$T/mine" REVIT_BUNDLE
 check "marker: the caller's REVIT_DATA and REVIT_BUNDLED=0 win" eval 'grep -qxF "data=$T/mine" <<<"$OUT" && grep -qx "bundled=0" <<<"$OUT"'
 in_sandbox ROOT="$A/Contents/Resources/engine" /bin/bash -c '. "$ROOT/scripts/lib/common.sh"; . "$ROOT/scripts/lib/common.sh"; echo "$PATH"'
 check "marker: PATH gets the bundle once" [ "$(tr ':' '\n' <<<"$OUT" | grep -cxF "$A/Contents/Resources/bin")" = 1 ]
+mkdir -p "$T/brew0"; ln -sf "$HOST_7ZZ" "$T/brew0/7zz"; ln -sf "$HOST_PY" "$T/brew0/python3"
+SB_PATH="$T/brew0:$A/Contents/Resources/bin:$A/Contents/Resources/python/bin:$BASEPATH" \
+  in_sandbox ROOT="$A/Contents/Resources/engine" /bin/bash -c '. "$ROOT/scripts/lib/common.sh"; command -v 7zz; command -v python3'
+check "marker: the bundle leads PATH even when it is already further down" \
+  eval '[ "$OUT" = "$A/Contents/Resources/bin/7zz"$'"'"'\n'"'"'"$A/Contents/Resources/python/bin/python3" ]'
 
 in_sandbox "$A/Contents/Resources/engine/revit" status --json
 expect "status --json in the bundle" 0 ""
@@ -223,8 +228,15 @@ expect "read-only bundle: an incomplete shim set fails get-shims" 1 "not release
 check "read-only bundle: an incomplete shim set downloads nothing" eval '! grep -qF "$T/rec/" "$CALLS"'
 
 WB="$T/w/Test App.app"; WE="$WB/Contents/Resources/engine"; fake_bundle "$WB"; before="$(listing "$WB")"
-in_sandbox "$WE/scripts/check-bundle.sh"; in_sandbox "$WE/revit" status --json; in_sandbox "$WE/revit" check 2025
-in_sandbox "$WE/revit" find-installer "$T/ci" --json; in_sandbox "$WE/revit" addins list 2025 --json; in_sandbox "$WE/scripts/get-shims.sh"
+rcs=""
+in_sandbox "$WE/scripts/check-bundle.sh";                 rcs+="$RC "
+in_sandbox "$WE/revit" status --json;                     rcs+="$RC "
+in_sandbox "$WE/revit" check 2025;                        rcs+="$RC "
+in_sandbox "$WE/revit" find-installer "$T/ci" --json;     rcs+="$RC "
+in_sandbox "$WE/revit" addins list 2025 --json;           rcs+="$RC "
+in_sandbox "$WE/scripts/get-shims.sh";                    rcs+="$RC "
+# each ran as it should (check 2025 stops at its preflight, as the read-only run above): the listing below means something
+check "writable bundle: the engine commands ran" [ "$rcs" = "0 0 $r1 0 0 0 " ]
 check "writable bundle: running the engine changes nothing in it" [ "$before" = "$(listing "$WB")" ]
 [ "$before" = "$(listing "$WB")" ] || diff <(echo "$before") <(listing "$WB") | head -10 | sed 's/^/     /'
 
