@@ -5,6 +5,7 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"; . "$ROOT/scripts/lib/common.sh"
 YES=0; JSON=0; ALL=0; EVENTS_DIR=""; ONLY=""; EULA=""; REUSE_X=0; REEXTRACT=0; FLAG_ERR=""; SIG_GOT=""; END_DONE=0
+LOG=0; KEEP=0   # ./revit test: --log, and --keep (the maintainer's, not in the help)
 RESULT_HINT=usage   # what an exit before the child means: usage until the arguments check out (Task 5 reads it)
 sup_end() { # $1 = exit status: the one end event, from the child's result file or from what an early exit means
   [ "$END_DONE" = 0 ] || return 0; END_DONE=1
@@ -34,7 +35,7 @@ supervise() { # <command…>: runs it in the foreground of this process group (C
   fi
   # bash reports a foreground child killed by TERM/HUP ("Terminated: 15") on its own stderr; exec'ing, it did not:
   # the child keeps the real stderr (fd 8), this shell's goes to /dev/null while it waits
-  case "$CMD" in install|rebuild|addins)   # no sleep while it works; ends with this process, holds no lock or events fd
+  case "$CMD" in install|rebuild|addins|test)   # no sleep while it works; ends with this process, holds no lock or events fd
     command -v caffeinate >/dev/null && caffeinate -i -w $$ </dev/null >/dev/null 2>&1 7>&- 9>&- & ;;
   esac
   exec 8>&2 2>/dev/null
@@ -83,6 +84,8 @@ while [ $# -gt 0 ]; do
     --all) ALL=1 ;;
     --reuse-extracted) REUSE_X=1 ;;
     --reextract) REEXTRACT=1 ;;
+    --log) LOG=1 ;;
+    --keep) KEEP=1 ;;
     --events|--only|--accept-eula)
       if [ $# -lt 2 ]; then FLAG_ERR="$1 needs a value"
       else case "$1" in --events) EVENTS_DIR="$2" ;; --only) ONLY="$2" ;; --accept-eula) EULA="$2" ;; esac; shift; fi ;;
@@ -94,7 +97,9 @@ while [ $# -gt 0 ]; do
 done
 CMD="${POS[0]:-}"; YEAR_ARG="${POS[1]:-}"; NAME="${POS[2]:-}"
 [ "$REUSE_X$REEXTRACT" != 11 ] || FLAG_ERR="Use --reuse-extracted or --reextract, not both."
-SUPERVISED=0; case "$CMD" in install|check|addins|rebuild) SUPERVISED=1 ;; esac
+[ "$LOG" = 0 ] || [ "$CMD" = test ] || FLAG_ERR="--log is for ./revit test only."
+[ "$KEEP" = 0 ] || [ "$CMD" = test ] || FLAG_ERR="Unknown option: --keep"
+SUPERVISED=0; case "$CMD" in install|check|addins|rebuild|test) SUPERVISED=1 ;; esac
 sup_traps() { # signals noted, not ignored (an ignored signal would be inherited by the child), from here to the child
   trap 'SIG_GOT=INT' INT; trap 'SIG_GOT=TERM' TERM; trap 'SIG_GOT=HUP' HUP
 }
@@ -119,7 +124,7 @@ if [ -n "$EVENTS_DIR" ]; then
 fi
 [ -z "$FLAG_ERR" ] || die "$FLAG_ERR"
 case "$CMD" in
-  install|check|doctor|addins|stop|logs|debug|rebuild|remove|status|find-installer|link-installer) ;;
+  install|check|doctor|addins|stop|logs|debug|rebuild|remove|status|find-installer|link-installer|test) ;;
   ""|help|-h|--help) usage; exit 0 ;;
   *) echo "Unknown command: $CMD" >&2; echo >&2; usage >&2; exit 1 ;;
 esac
@@ -135,7 +140,7 @@ if [ "$CMD" = status ]; then
   RESULT_HINT=failed
   b_json=""; human=""
   for b in "$BOTTLES"/*/; do
-    b="${b%/}"; [ -L "$b" ] && continue
+    b="${b%/}"; [ -L "$b" ] && continue; is_smoke_clone "$b" && continue   # a copy of ./revit test is no bottle
     ys="$(bottle_years "$b" | sort -u | tr '\n' ' ')"; ys="${ys% }"
     case "$ys" in [0-9][0-9][0-9][0-9]) ;; *) continue ;; esac   # one Revit year, or not ours
     n="$(basename "$b")"; rv=false; [ -f "$(revit_dir_unix "$b" "$ys")/Revit.exe" ] && rv=true
@@ -321,6 +326,11 @@ case "$CMD" in
     run_ctx_new; sup_traps; lock_take --no-trap "./revit rebuild $YEAR $NAME"
     bottle_guard must_exist "$YEAR" "$NAME"   # again: the bottle may have changed, or Revit started, while the user read
     export CX_RECREATE=1; export_source_flags; supervise "$ROOT/install.sh" "$YEAR" "$NAME" ;;
+  test)   # Revit plays journals in a temporary copy of the bottle (scripts/smoke.sh); documented in CONTRIBUTING
+    need_crossover; bottle_guard must_exist "$YEAR" "$NAME"; not_busy
+    run_ctx_new; sup_traps; lock_take --no-trap "./revit test $YEAR $NAME"; bottle_guard must_exist "$YEAR" "$NAME"
+    targs=(); [ "$LOG" = 0 ] || targs+=(--log); [ "$KEEP" = 0 ] || targs+=(--keep)
+    supervise "$ROOT/scripts/smoke.sh" "$YEAR" "$NAME" ${targs[@]+"${targs[@]}"} ;;
   link-installer)
     [ -n "$FOLDER" ] && [ -d "$FOLDER" ] || die "Which folder? Example: ./revit link-installer $YEAR ~/Downloads/Revit$YEAR"
     not_busy; lock_take "./revit link-installer $YEAR"
