@@ -35,6 +35,7 @@ wine_init "$NAME_ARG"
 DIST="$(revit_dist "$YEAR")"; RD="$(revit_dir_unix "$B" "$YEAR")"; LANG_UI="${REVIT_LANG:-en-US}"
 for s in "${LIST[@]}"; do
   case " $NEEDS_INSTALLER " in *" $s "*)
+    RUNLOG_EXTRACTED="$(revit_extracted "$YEAR")"
     [ -f "$DIST/setup.xml" ] || [ -f "$DIST/Setup.ini" ] \
       || die "No unpacked Revit $YEAR installer in installers/extracted/revit$YEAR (step $s). Run: ./scripts/unpack-revit.sh $YEAR" ;;
   esac

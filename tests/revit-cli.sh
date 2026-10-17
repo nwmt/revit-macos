@@ -702,5 +702,47 @@ check "cache: the text without --json" eval '[ "$RC" = 0 ] && grep -qE "^  insta
   && grep -qF "installers/extracted/revit2026 (unpacked files)" <<<"$OUT" && grep -qF "kept: bottle rvt2026-a uses it" <<<"$OUT" \
   && [ "$(tail -1 <<<"$OUT")" = "To delete them: ./revit cache clear --yes" ]'
 reset; run "" cache; check "cache: nothing to clear" eval '[ "$RC" = 0 ] && [ "$OUT" = "Nothing to clear." ]'
+# ---- remove and cache with two DATA folders ----
+# the app's DATA folder and the clone's (DATA=ROOT) each have an unpacked 2025; the bottles are shared. rvt2025-a was
+# installed from the clone's, rvt2025-c from the app's: each one's run record says so
+AD="$T/app data"
+run_in() { # $1 = DATA folder ("" = the clone), $2 = what to type, rest = ./revit arguments. Sets OUT and RC
+  local d="$1" input="$2"; shift 2; : > "$CALLS"
+  OUT="$(cd / && printf '%s\n' "$input" | env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" ${d:+REVIT_DATA="$d"} \
+    /bin/bash "$R/revit" "$@" 2>&1)"; RC=$?
+}
+from_x() { # $1 = bottle, $2 = DATA folder it was installed from: its run record, as install.sh writes it
+  python3 -I -B "$R/tools/runlog.py" append "$BOTTLES/$1" --kind install --year 2025 --run-id r --result ok \
+    --requested rvt --extracted "$2/installers/extracted/revit2025"
+}
+two_data() {
+  reset; local d; for d in "$R" "$AD"; do mkdir -p "$d/installers/extracted/revit2025"; echo x > "$d/installers/extracted/revit2025/setup.xml"; done
+  bottle rvt2025-a 2025 2025; bottle rvt2025-c 2025 2025; from_x rvt2025-a "$R"; from_x rvt2025-c "$AD"
+}
+two_data; run_in "$AD" "2025" remove 2025 rvt2025-c
+check "app: remove deletes its own unpacked files when the other bottle was installed from the clone's" \
+  eval '[ "$RC" = 0 ] && [ ! -e "$AD/installers/extracted/revit2025" ] && [ -f "$R/installers/extracted/revit2025/setup.xml" ] && ! grep -qF "Kept: installers/extracted" <<<"$OUT"'
+two_data; run_in "" "2025" remove 2025 rvt2025-a
+check "clone: remove deletes its own unpacked files when the other bottle was installed from the app's" \
+  eval '[ "$RC" = 0 ] && [ ! -e "$R/installers/extracted/revit2025" ] && [ -f "$AD/installers/extracted/revit2025/setup.xml" ]'
+two_data; run_in "" "2025" remove 2025 rvt2025-c
+expect "clone: remove keeps the unpacked files a bottle was installed from" 0 "Kept: installers/extracted/revit2025 (bottle rvt2025-a still uses it)."
+check "clone: those files are still there" test -f "$R/installers/extracted/revit2025/setup.xml"
+two_data; run_in "$AD" "2025" remove 2025 rvt2025-a
+expect "app: remove keeps the unpacked files a bottle was installed from" 0 "Kept: installers/extracted/revit2025 (bottle rvt2025-c still uses it)."
+two_data; from_x rvt2025-a "$AD"; run_in "$AD" "2025" remove 2025 rvt2025-c
+expect "app: a bottle installed from both keeps both" 0 "Kept: installers/extracted/revit2025 (bottle rvt2025-a still uses it)."
+two_data; printf '{"run_id":"old","kind":"install","year":2025,"result":"ok"}\n' >> "$BOTTLES/rvt2025-a/revit-macos/runs.ndjson"
+run_in "$AD" "2025" remove 2025 rvt2025-c
+expect "app: a bottle with a record from before the field keeps them" 0 "Kept: installers/extracted/revit2025 (bottle rvt2025-a still uses it)."
+two_data; rm -rf "$BOTTLES/rvt2025-c"; run_in "$AD" "" cache --json
+check "app: cache: its unpacked folder is removable when the bottle of its year was installed from the clone's" \
+  eval '[ "$(items | cut -d"|" -f1-2)" = "installers/extracted/revit2025 (unpacked files)|rm" ]'
+run_in "" "" cache --json
+check "clone: cache: its unpacked folder that bottle was installed from is kept" \
+  eval '[ "$(items | cut -d"|" -f1-3)" = "installers/extracted/revit2025 (unpacked files)|keep|bottle rvt2025-a uses it" ]'
+run_in "$AD" "" cache clear --yes
+check "app: cache clear --yes frees its own, the clone's stays" \
+  eval '[ "$RC" = 0 ] && [ ! -e "$AD/installers/extracted/revit2025" ] && [ -f "$R/installers/extracted/revit2025/setup.xml" ]'
 # ---- end ----
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]

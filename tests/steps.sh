@@ -292,12 +292,16 @@ expect "run record: the run ends as before" 0 ">> Revit 2024"
 check "run record: kind, steps, ok; engine unknown in a copy without .git; the release's shims" test "$(last_run rvt2024-t)" = \
   "addins 2024 ok requested=t_two,t_ok,t_skip done=t_two,t_ok skipped=t_skip failed= engine=unknown shims=$SV crossover=null compatdb_sha256=null revit_build_expected=null run_id=$(basename "$RUN") lines=1"
 check "run record: the year is a number" grep -q '"year":2024,' "$(runs rvt2024-t)"
+run_x() { /usr/bin/perl -MJSON::PP -ne '$x = decode_json($_)->{extracted}; END { print $x // "null" }' "$(runs "$1")"; }
+check "run record: steps that read no unpacked installer name none" test "$(run_x rvt2024-t)" = null
 check "run record: nothing about it on the terminal" eval '! grep -q "run record" <<<"$OUT"'
 run_steps 2024 rvt2024-t t_fail t_ok
 check "run record: a failed step is partial" test "$(last_run rvt2024-t | cut -d' ' -f1-7)" = "steps 2024 partial requested=t_fail,t_ok done=t_ok skipped= failed=t_fail"
 check "run record: the second run adds a line; each line is JSON" eval 'last_run rvt2024-t | grep -q " lines=2$"'
 reset; mkbottle rvt2024-t 2024 2024; teststeps; mkdist 2024; rule "licensing.exe" 5; run_steps 2024 rvt2024-t licensing t_ok
 check "run record: a failed critical step is failed" test "$(last_run rvt2024-t | cut -d' ' -f1-7)" = "steps 2024 failed requested=licensing,t_ok done= skipped= failed=licensing"
+check "run record: a step that reads the unpacked installer names its folder" \
+  test "$(run_x rvt2024-t)" = "$(cd -P "$R/installers/extracted/revit2024" && pwd)"
 reset; mkbottle rvt2024-t 2024 2024; teststeps; rule "t-slow" 0 "sleep 2"
 (cd / && exec "${SANDBOX_ENV[@]}" /bin/bash "$R/scripts/run-steps.sh" 2024 rvt2024-t t_slow t_ok) > "$T/out" 2>&1 &
 rs=$!; sleep 1; kill -TERM "$rs"; wait "$rs"; RC=$?; OUT="$(cat "$T/out")"

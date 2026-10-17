@@ -29,7 +29,10 @@ Revit is a Windows x64 program. On an Apple Silicon Mac it runs like this:
    shortcut (2026 and older).
 
 Each install and `./revit addins` run adds one line to `revit-macos/runs.ndjson` in the bottle: the steps, the result,
-the CrossOver build, the project version, the shims and the Revit build the installer names. `./revit doctor` reads it.
+the CrossOver build, the project version, the shims, the Revit build the installer names and the unpacked installer
+folder the steps read. `./revit doctor` reads it. `./revit remove`, `./revit cache` and `--reextract` keep an unpacked
+folder while another bottle of its year may install from it: its record names that folder, or does not say (no install
+record, or one from before that field).
 
 ## Steps
 

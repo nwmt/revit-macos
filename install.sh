@@ -184,7 +184,7 @@ bottle_ours() { # $1 = exit code of the bottle action, empty when it did not end
   [ "$BOTTLE_ACTION" = 1 ] && [ -z "$RUNLOG_KIND" ] || return 0
   if [ "${1:-}" = 0 ] || [ "$(bottle_identity)" != "$BOTTLE_BEFORE" ]; then RUNLOG_KIND=install; fi
 }
-RUNLOG_REQUESTED="${STEPS[*]}"; trap 'rc_=$?; bottle_ours; runlog_exit $rc_; rm -f "$SL"' EXIT
+RUNLOG_REQUESTED="${STEPS[*]}"; RUNLOG_EXTRACTED="$DST"; trap 'rc_=$?; bottle_ours; runlog_exit $rc_; rm -f "$SL"' EXIT
 cp "$SL" "$RUN_DIR/source.list"; export REVIT_SOURCE_LIST="$RUN_DIR/source.list"
 result_set log_dir "$RUN_DIR"; export INSTALL_PARENT=1   # the runner leaves the final result to this script
 echo; echo "Logs: $(tilde "$RUN_DIR")"

@@ -16,8 +16,9 @@ LOCK_DIR="${REVIT_LOCK_DIR:-$HOME/Library/Application Support/revit-macos}"   # 
 LOCK_FILE="$LOCK_DIR/lock"                                                    # they share the bottles
 STOP_REQUESTED=0; CHILD=""
 # the run record (runlog_append): install.sh and run-steps.sh set the kind once the run is one to record, the steps
-# asked for and the Revit build the installer gives; result_set keeps the result
-RUNLOG_KIND=""; RUNLOG_REQUESTED=""; RUNLOG_BUILD=""; RUNLOG_RESULT=""
+# asked for, the Revit build the installer gives and the unpacked installer folder the steps read; result_set keeps
+# the result
+RUNLOG_KIND=""; RUNLOG_REQUESTED=""; RUNLOG_BUILD=""; RUNLOG_EXTRACTED=""; RUNLOG_RESULT=""
 
 die()       { echo "$*" >&2; exit 1; }
 usage_die() { echo "$*" >&2; exit 2; }
@@ -163,13 +164,18 @@ lock_free() { # 0 when nobody else holds the lock (for ./revit's checks before i
   [ -e "$LOCK_FILE" ] || return 0
   /usr/bin/perl -MFcntl=:flock -e 'open(my $f, ">>", $ARGV[0]) or exit 0; flock($f, LOCK_EX | LOCK_NB) or exit 1' "$LOCK_FILE"
 }
-other_bottle_of_year() { # another bottle of this year still needs installers/extracted/revit<year>
-  local b ys
+other_bottle_of_year() { # another bottle of this year still needs installers/extracted/revit<year> of this DATA
+  # folder: a clone and the app each have their own, the bottles are shared. A bottle whose run record names only other
+  # unpacked folders does not; without a record that says (older bottles, no python3) it does
+  local b ys x rc; x="$(revit_extracted "$YEAR")"
   for b in "$BOTTLES"/*/; do
     b="${b%/}"
     if [ "$b" = "$B" ] || [ -L "$b" ] || is_smoke_clone "$b"; then continue; fi
     ys="$(bottle_years "$b")"   # a variable, not a pipe into grep -q: see revit_running
-    grep -qx "$YEAR" <<<"$ys" && { basename "$b"; return 0; }
+    grep -qx "$YEAR" <<<"$ys" || continue
+    rc=0; (exec 7>&- 9>&-; python3 -I -B "$ROOT/tools/runlog.py" uses "$b" "$x" >/dev/null 2>&1) || rc=$?
+    [ $rc = 1 ] && continue
+    basename "$b"; return 0
   done
   return 1
 }
@@ -346,17 +352,18 @@ runlog_compatdb() { # CrossOver's newest compatibility database: it updates itse
   done
   echo "$c"
 }
-runlog_append() { # $1 = result: one line in the run record of bottle $B (kind, steps and build from RUNLOG_*, done,
-  # skipped and failed from RUN_DIR), only for a bottle that exists. A write error is one warning line and never
-  # changes the exit code. INT/TERM/HUP are ignored meanwhile: a Ctrl-C at the end must not cut the record short.
-  # Nothing it starts gets fd 9 or 7 (git may leave a daemon behind)
+runlog_append() { # $1 = result: one line in the run record of bottle $B (kind, steps, build and unpacked folder from
+  # RUNLOG_*, done, skipped and failed from RUN_DIR), only for a bottle that exists. A write error is one warning line
+  # and never changes the exit code. INT/TERM/HUP are ignored meanwhile: a Ctrl-C at the end must not cut the record
+  # short. Nothing it starts gets fd 9 or 7 (git may leave a daemon behind)
   [ -n "${RUNLOG_KIND:-}" ] && [ -f "${B:-}/cxbottle.conf" ] || return 0
   local err
   err="$(trap '' INT TERM HUP; exec 7>&- 9>&-
     python3 -I -B "$ROOT/tools/runlog.py" append "$B" --kind "$RUNLOG_KIND" --year "$YEAR" \
       --run-id "${REVIT_RUN_ID:-$(basename "${RUN_DIR:-none}")}" --result "$1" --requested "${RUNLOG_REQUESTED:-}" \
       --run-dir "${RUN_DIR:-}" --engine "$(runlog_engine)" --crossover "$(crossover_build)" \
-      --compatdb "$(runlog_compatdb)" --shims "$(runlog_shims)" --build "${RUNLOG_BUILD:-}" 2>&1 >/dev/null)" \
+      --compatdb "$(runlog_compatdb)" --shims "$(runlog_shims)" --build "${RUNLOG_BUILD:-}" \
+      --extracted "${RUNLOG_EXTRACTED:-}" 2>&1 >/dev/null)" \
     || echo "could not write the run record: $(tail -n 1 <<<"${err:-no message}")" >&2
   return 0
 }

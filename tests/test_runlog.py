@@ -15,7 +15,7 @@ def load(name):
 
 rl = load("runlog")
 FIELDS = ["run_id", "time", "kind", "year", "requested", "done", "skipped", "failed", "result", "engine", "crossover",
-          "compatdb_sha256", "shims", "revit_build_expected"]
+          "compatdb_sha256", "shims", "revit_build_expected", "extracted"]
 
 
 def run(*args):
@@ -112,6 +112,15 @@ class Append(Tmp):
         self.assertIsNone(rec["crossover"])
         self.assertIsNone(rec["revit_build_expected"])
         self.assertEqual((rec["engine"], rec["shims"]), ("unknown", "unknown"))
+        self.assertIsNone(rec["extracted"])
+
+    def test_extracted_is_the_real_path(self):
+        os.makedirs(os.path.join(self.d, "data", "installers", "extracted", "revit2027"))
+        os.symlink(os.path.join(self.d, "data"), os.path.join(self.d, "link"))
+        r = self.append("--extracted", os.path.join(self.d, "link", "installers", "extracted", "revit2027"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.runs()[0]["extracted"],
+                         os.path.realpath(os.path.join(self.d, "data", "installers", "extracted", "revit2027")))
 
     def test_appends_and_keeps_older_lines(self):
         self.append(result="failed")
@@ -174,6 +183,55 @@ class Last(Tmp):
         before = sorted(os.listdir(self.bottle))
         run("last", self.bottle)
         self.assertEqual(sorted(os.listdir(self.bottle)), before)
+
+
+class Uses(Tmp):
+    def folder(self, name):
+        p = os.path.join(self.d, name, "installers", "extracted", "revit2027")
+        os.makedirs(p, exist_ok=True)
+        return p
+
+    def uses(self, folder):
+        return run("uses", self.bottle, folder).returncode
+
+    def test_the_folder_its_records_name(self):
+        app, clone = self.folder("app"), self.folder("clone")
+        self.append("--extracted", clone)
+        self.append(kind="addins", requested="check")   # read no unpacked folder
+        self.assertEqual(self.uses(clone), 0)
+        self.assertEqual(self.uses(app), 1)
+        self.append("--extracted", app)
+        self.assertEqual(self.uses(app), 0)
+
+    def test_unknown_means_it_may(self):
+        app = self.folder("app")
+        self.assertEqual(self.uses(app), 0)   # no record
+        self.append("--extracted", self.folder("clone"))
+        with open(rl.runs_file(self.bottle), "a") as f:
+            f.write('{"run_id":"old","kind":"install","year":2027,"result":"ok"}\n')   # from before the field
+        self.assertEqual(self.uses(app), 0)
+
+    def test_only_addin_runs_say_nothing_about_the_install(self):
+        self.append(kind="addins", requested="check")
+        self.assertEqual(self.uses(self.folder("app")), 0)
+
+    def test_a_line_that_is_not_a_record_means_it_may(self):
+        app = self.folder("app")
+        self.append("--extracted", self.folder("clone"))
+        with open(rl.runs_file(self.bottle), "a") as f:
+            f.write('{"run_id":"cut sh\n')
+        self.assertEqual(self.uses(app), 0)
+
+    def test_the_same_folder_spelled_another_way(self):
+        clone = self.folder("clone")
+        self.append("--extracted", clone)
+        self.assertEqual(self.uses(clone + "/"), 0)
+        upper = os.path.join(self.d, "CLONE", "installers", "extracted", "revit2027")
+        if os.path.isdir(upper):   # a volume that ignores case (APFS by default)
+            self.assertEqual(self.uses(upper), 0)
+
+    def test_bad_arguments(self):
+        self.assertEqual(run("uses", self.bottle).returncode, 2)
 
 
 if __name__ == "__main__":

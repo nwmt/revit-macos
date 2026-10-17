@@ -122,6 +122,9 @@ $(cat "$T/calls" "$T/out")"; fi
   if [ "$RC" = 1 ] && grep -qF "Some steps failed" <<<"$OUT" && [ -d "$T/data/logs/rvt2024-t" ]; then ok "install.sh with DATA writes nothing into ROOT"
   else fail "install.sh with DATA writes nothing into ROOT" "rc=$RC
 $OUT"; fi
+  run_x() { /usr/bin/perl -MJSON::PP -ne '$x = decode_json($_)->{extracted}; END { print $x // "null" }' "$BOTTLES/$1/revit-macos/runs.ndjson"; }
+  L="$(run_x rvt2024-t)"; [ "$L" = "$T/data/installers/extracted/revit2024" ] && ok "run record: an install with DATA names DATA's unpacked folder" \
+    || fail "run record: an install with DATA names DATA's unpacked folder" "$L"
   # ---- source decisions ----
   srcprep() { prep; cp "$REPO/tools/installer_source.py" "$R/tools/"; mkdir -p "$R/installers/revit2024"
     printf 'A' > "$R/installers/revit2024/RVT_2024_NA_win_db_002_002.zip"; }
@@ -152,6 +155,21 @@ $OUT"; fi
   else fail "check --reextract with another bottle of the year ends in_use" "rc=$RC
 $OUT
 $(cat "$T/evc/events.ndjson" 2>/dev/null)"; fi
+  reext_from() { # $1 = DATA folder rvt2024-b was installed from: --reextract of the clone's unpacked folder
+    srcprep; srcrec old; mkdir -p "$BOTTLES/rvt2024-b/drive_c/Program Files/Autodesk/Revit 2024"
+    printf '[Bottle]\n"Description" = "Revit 2024"\n' > "$BOTTLES/rvt2024-b/cxbottle.conf"
+    python3 -I -B "$R/tools/runlog.py" append "$BOTTLES/rvt2024-b" --kind install --year 2024 --run-id r --result ok \
+      --requested rvt --extracted "$1/installers/extracted/revit2024"
+    OUT="$(cd / && "${INST_ENV[@]}" REVIT_REEXTRACT=1 /bin/bash "$R/install.sh" 2024 rvt2024-t 2>&1)"; RC=$?
+  }
+  mkdir -p "$T/app data/installers/extracted/revit2024"; reext_from "$T/app data"
+  if ! grep -qF "still uses it" <<<"$OUT" && grep -qF "unpack-revit 2024" "$T/calls"; then ok "--reextract goes on while the other bottle was installed from another DATA folder"
+  else fail "--reextract goes on while the other bottle was installed from another DATA folder" "rc=$RC
+$OUT"; fi
+  reext_from "$R"
+  if [ "$RC" = 1 ] && grep -qF "bottle rvt2024-b still uses it" <<<"$OUT"; then ok "--reextract refuses while the other bottle was installed from this folder"
+  else fail "--reextract refuses while the other bottle was installed from this folder" "rc=$RC
+$OUT"; fi
   srcprep; srcrec old; mv "$R/installers/extracted/revit2024" "$R/installers/extracted/revit2024.old.77"
   sed -i '' 's|^echo "unpack-revit|echo "AGAIN=$REVIT_UNPACK_AGAIN unpack-revit|' "$R/scripts/unpack-revit.sh"
   ( cd / && "${INST_ENV[@]}" ROOT="$R" HOME="$H" /bin/bash -c '. "$ROOT/scripts/lib/common.sh"; lock_take test; REVIT_REEXTRACT=1 /bin/bash "$ROOT/install.sh" 2024 rvt2024-t' ) > "$T/out" 2>&1
@@ -196,6 +214,8 @@ EOF
     ok "run record: install, ok, the year's steps from summary.txt (not the actions)"
   else fail "run record: install, ok" "rc=$RC $L
 $OUT"; fi
+  L="$(run_x rvt2024-t)"; [ "$L" = "$R/installers/extracted/revit2024" ] && ok "run record: an install names the clone's unpacked folder" \
+    || fail "run record: an install names the clone's unpacked folder" "$L"
   prep; inst 2024 rvt2024-t; L="$(last_run rvt2024-t | cut -d' ' -f3,7)"
   [ "$L" = "partial failed=tlbpin" ] && ok "run record: failed steps after Revit.exe: partial" || fail "run record: partial" "$L"
   prep; okrun; printf '#!/bin/bash\nexit 1\n' > "$R/scripts/make-apps.sh"; inst 2024 rvt2024-t; L="$(last_run rvt2024-t | cut -d' ' -f3,5)"
