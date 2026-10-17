@@ -15,4 +15,8 @@ case "$dev" in
     sdk="$dev/SDKs/MacOSX${APP_MIN_MACOS%%.*}.sdk"
     [ -n "${SDKROOT:-}" ] || [ ! -d "$sdk" ] || export SDKROOT="$sdk" ;;
 esac
+# SpawnProbe: the test "the run survives its launcher" starts a run through it, then it exits
+swift build --package-path "$ROOT/app" --product SpawnProbe ${args[@]+"${args[@]}"} >&2
+SPAWN_PROBE="$(swift build --package-path "$ROOT/app" --product SpawnProbe ${args[@]+"${args[@]}"} --show-bin-path)/SpawnProbe"
+export SPAWN_PROBE
 exec env LANG=en_US.UTF-8 swift test --package-path "$ROOT/app" --no-parallel ${args[@]+"${args[@]}"} "$@"

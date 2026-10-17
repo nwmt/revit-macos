@@ -12,5 +12,7 @@ let package = Package(
         .target(name: "AppCore", path: "Sources/AppCore"),
         .executableTarget(name: "AppMain", dependencies: ["AppCore"], path: "Sources/AppMain"),
         .testTarget(name: "AppCoreTests", dependencies: ["AppCore"], path: "Tests/AppCoreTests", exclude: ["Fixtures"]),
+        // a test helper (app/test.sh builds it): starts a run as the app does and exits at once; not in the bundle
+        .executableTarget(name: "SpawnProbe", dependencies: ["AppCore"], path: "Tests/SpawnProbe"),
     ]
 )
