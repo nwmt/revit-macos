@@ -203,7 +203,14 @@ class Journals(Tmp):
         self.assertEqual(list(br.read_lines(p, start=7)), ["third"])
         self.assertEqual(list(br.read_lines(p, start=len(data))), [])
         self.assertEqual(list(br.read_lines(p, start=len(data) + 10)), [])
-        self.assertEqual(list(br.read_lines(p, start=6, max_bytes=12)), ["second"])
+        self.assertEqual(list(br.read_lines(p, start=6, max_bytes=12)), [])   # cut off by max_bytes: not given
+        self.assertEqual(list(br.read_lines(p, start=6, max_bytes=18)), ["second line"])   # its newline is in
+
+    def test_a_line_cut_by_max_bytes_is_left_out(self):
+        p = self.write("h.txt", b"one\ntwo words here\n")
+        self.assertEqual(list(br.read_lines(p, max_bytes=8)), ["one"])
+        p = self.write("g.txt", b"one\nend without newline")   # the real end of a file: kept
+        self.assertEqual(list(br.read_lines(p)), ["one", "end without newline"])
 
 
 if __name__ == "__main__":

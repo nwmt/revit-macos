@@ -520,15 +520,19 @@ def bottle_facts(bottle_dir, year):
     return f
 
 
-BOTTLE_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")   # fullmatch: what ./revit takes as a bottle name
+BOTTLE_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")   # fullmatch: a name taken from text, as ./revit takes them
 NOT_BOTTLES = re.compile(r"(?i)mac|runs|default|revit\d{4}")   # fullmatch: the other folders of logs/
 BOTTLES_MAX = 64
 
 
-def _bottle_name(n):
-    """A bottle name (of a test copy: its source's), or None."""
+def _bottle_name(n, real=False):
+    """A bottle name (of a test copy: its source's), or None. real: a folder in the Bottles folder, which CrossOver
+    lets have any name but '/': learned as it is, whatever its characters or length; a name from text or from logs/
+    must look like one ./revit takes and not be another folder of logs/."""
     n = (n or "").strip()
     n = n[:-len(".test")] if n.endswith(".test") else n
+    if real:
+        return n[:255] or None
     return n if BOTTLE_NAME.fullmatch(n) and not NOT_BOTTLES.fullmatch(n) else None
 
 
@@ -558,8 +562,10 @@ def learn_bottles(ident, data, bottles, names=()):
     for n in (_listdir(bottles) if bottles else [])[:4 * BOTTLES_MAX]:
         p = os.path.join(bottles, n)
         if os.path.isdir(p) and not os.path.islink(p) and not NEVER_OPEN_RX.search(p):
-            found.append(n)
             dirs.append(p)
+            b = _bottle_name(n, real=True)
+            if b and not DEFAULT_BOTTLE_RX.match(b):
+                ident.add_word("bottle", b)
     for n in found:
         b = _bottle_name(n)
         if b and not DEFAULT_BOTTLE_RX.match(b):
@@ -1355,15 +1361,12 @@ def _numbered(lines):
 
 
 CUT_MARK = " \u2026[cut]"
-_CUT_AT = re.compile(r"[\s\\/\"'<>|,;]")
 
 
 def _trim_cut(line):
-    """A line the reader cut (READ_LINE characters): back to the last space or separator, so no part of a value is
-    left at its end (it could no longer be recognized), and a mark."""
-    lo = max(0, len(line) - 400)   # no learned value is that long: past this, the whole end goes
-    ks = [m.start() for m in _CUT_AT.finditer(line, lo)]
-    return line[:ks[-1] if ks else lo].rstrip() + CUT_MARK
+    """A line the reader cut (READ_LINE characters) is left out, but for a mark: its cut end may hold the first words
+    of a value of several words (a denylisted project name) that the redactor and the gate no longer recognize."""
+    return "\u2026 a line too long to check was left out (%d+ characters)" % len(line)
 
 
 def _cut_line(ln):

@@ -982,6 +982,20 @@ class NoYear(Tmp):
     """./revit report without a year: custom bottle names and the Autodesk identity of every bottle are learned from
     the material itself; the identity given knows neither."""
 
+    def test_any_bottle_folder_name_is_learned(self):
+        long_ = "Tower-" + "x" * 66                   # 72 characters, more than ./revit takes
+        odd = "Falcon Tower (main) 2026"              # spaces and brackets: CrossOver takes any name but '/'
+        bottles = os.path.join(self.d, "Bottles")
+        for n in (long_, odd, odd + ".test"):
+            os.makedirs(os.path.join(bottles, n))
+        ident = rp.learn_bottles(rp.learn_identity({}), self.d, bottles)
+        text = "run in bottle %s, then %s and %s.test" % (long_, odd, odd)
+        out = rp.redact(text, ident)[0]
+        self.assertNotIn("Tower", out)
+        self.assertNotIn("Falcon", out)
+        self.assertEqual(rp.gate(out, ident), [])
+        self.assertTrue(rp.gate(text, ident))         # the gate knows them too
+
     def setUp(self):
         super().setUp()
         self.home, self.bottles = self.path("home"), self.path("Bottles")
@@ -1255,7 +1269,14 @@ class Rev3Minor(unittest.TestCase):
         self.assertNotIn("ostrowski", whole)
         self.assertEqual(len(ex), 1)
         self.assertNotIn("ostrowski", ex[0])
-        self.assertTrue(ex[0].endswith("\u2026[cut]"))
+        self.assertIn("a line too long to check was left out", ex[0])
+
+    def test_a_cut_line_leaves_no_part_of_a_value_of_several_words(self):
+        ident = rp.learn_identity({"denylist": ["Harbor Residence"]})
+        line = "!! " + "z " * 1994 + "Harbor Residence and more"   # the reader cuts it inside the name
+        out = rp.redact("\n".join(rp.error_extract([line[:rp.READ_LINE]])), ident)[0]
+        self.assertNotIn("Harbor", out)
+        self.assertEqual(rp.gate(out, ident), [])
 
     def test_a_cut_never_splits_a_placeholder(self):
         for n in range(8):

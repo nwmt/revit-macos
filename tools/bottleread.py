@@ -279,15 +279,17 @@ def newest_journal(bottle, year):
 def read_lines(path, max_bytes=None, max_line=4000, start=0):
     """Lines of a text file that may be huge, binary in places or still growing: decoded with errors='replace', read
     up to the size the file had when opened (or max_bytes), each line cut to max_line characters. start: a byte offset
-    to begin at; the line it falls in is skipped, so the first line given is the next whole one."""
+    to begin at; the line it falls in is skipped, so the first line given is the next whole one. A line that max_bytes
+    cuts off is not given either: only whole lines (the end of a file that is still growing is not cut off)."""
     try:
         f = open(path, "rb")
     except OSError:
         return
     with f:
         size = os.fstat(f.fileno()).st_size
-        if max_bytes is not None:
-            size = min(size, max_bytes)
+        capped = max_bytes is not None and max_bytes < size
+        if capped:
+            size = max_bytes
         left = size
         if start > 0:
             f.seek(start - 1)   # from the byte before: when it ends a line, nothing of the next one is lost
@@ -312,6 +314,8 @@ def read_lines(path, max_bytes=None, max_line=4000, start=0):
                 left -= len(raw)
                 if len(keep) < max_line * 4:
                     keep += raw
+            if capped and left <= 0 and not raw.endswith(b"\n"):
+                break   # cut off by max_bytes: not a whole line
             yield keep.decode("utf-8", errors="replace").rstrip("\r\n")[:max_line]
 
 
