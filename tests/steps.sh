@@ -886,7 +886,7 @@ OUT="$(cd / && "${SANDBOX_ENV[@]}" PATH="$T:$PATH" REVIT_RUN_CTX="$T/ctx" /bin/b
 check "get-redist: a checksum mismatch has no reason" eval '[ "$RC" = 1 ] && grep -qF "checksum mismatch" <<<"$OUT" && [ -z "$(reason_of)" ]'
 # Cancel during the unpack (install.sh passes TERM on to unpack-revit): 7zz ends, nothing half-unpacked is left
 reset; mkdir -p "$T/ctx" "$T/stub7" "$R/installers/revit2025"; mkzip "$R/installers/revit2025/RVT_2025_NA_win_db_002_002.zip" "setup.xml=<Setup/>"
-printf '#!/bin/bash\n[ "$1" = x ] || exit 0\ntouch "%s/7z-started"; sleep 30\n' "$T" > "$T/stub7/7zz"; chmod +x "$T/stub7/7zz"
+printf '#!/bin/bash\n[ "$1" = x ] || exit 0\ntouch "%s/7z-started"; exec sleep 30\n' "$T" > "$T/stub7/7zz"; chmod +x "$T/stub7/7zz"
 ( cd / && exec "${SANDBOX_ENV[@]}" PATH="$T/stub7:$PATH" REVIT_RUN_CTX="$T/ctx" /bin/bash "$R/scripts/unpack-revit.sh" 2025 ) > "$T/out" 2>&1 & ur=$!
 for i in $(seq 1 100); do [ -f "$T/7z-started" ] && break; sleep 0.1; done
 t0=$SECONDS; kill -TERM "$ur"; wait "$ur"; RC=$?
@@ -894,11 +894,49 @@ check "unpack-revit: TERM during the unpack stops it at once" eval '[ -f "$T/7z-
 check "unpack-revit: a stopped unpack is result stopped and leaves no unpacked folder" eval 'grep -qx "result=stopped" "$T/ctx/result" && [ ! -e "$R/installers/extracted/revit2025" ] && [ ! -e "$R/installers/extracted/revit2025.partial" ]'
 check "unpack-revit: no 7zz is left running" eval '! pgrep -f "sand box/stub7/7zz" >/dev/null'
 pkill -f "sand box/stub7/7zz" 2>/dev/null
+# an update laid straight onto an unpacked folder made before .source finishes before the stop (no half-written files)
+reset; mkdir -p "$T/ctx" "$T/stub7" "$R/installers/revit2025/update" "$R/installers/extracted/revit2025"
+echo '<Setup/>' > "$R/installers/extracted/revit2025/setup.xml"; mkzip "$R/installers/revit2025/update/U.exe" "x64/p/up.txt=1"
+printf '#!/bin/bash\n[ "$1" = x ] || exit 0\ntouch "%s/7z-started"; sleep 2; touch "%s/overlay-done"\n' "$T" "$T" > "$T/stub7/7zz"; chmod +x "$T/stub7/7zz"
+( cd / && exec "${SANDBOX_ENV[@]}" PATH="$T/stub7:$PATH" REVIT_RUN_CTX="$T/ctx" /bin/bash "$R/scripts/unpack-revit.sh" 2025 ) > "$T/out" 2>&1 & ur=$!
+for i in $(seq 1 100); do [ -f "$T/7z-started" ] && break; sleep 0.1; done
+kill -TERM "$ur"; wait "$ur"; RC=$?
+check "unpack-revit: a stop during an update onto an old unpacked folder lets the update finish, then stops" \
+  eval '[ -f "$T/overlay-done" ] && grep -qx "U.exe" "$R/installers/extracted/revit2025/applied-updates.txt" && [ "$RC" = 1 ] && grep -qx "result=stopped" "$T/ctx/result"'
+# a stop while no child runs (the checksum pass) is not lost: nothing is unpacked after it
+PY="$(command -v python3)"
+reset; mkdir -p "$T/ctx" "$T/stub7" "$R/installers/revit2025"; mkzip "$R/installers/revit2025/RVT_2025_NA_win_db_002_002.zip" "setup.xml=<Setup/>"
+printf '#!/bin/bash\n[ "$1" = x ] || exit 0\ntouch "%s/7z-started"; exec sleep 30\n' "$T" > "$T/stub7/7zz"
+printf '#!/bin/bash\ncase "$*" in *finalize*) touch "%s/fin-started"; sleep 2 ;; esac\nexec "%s" "$@"\n' "$T" "$PY" > "$T/stub7/python3"; chmod +x "$T/stub7/7zz" "$T/stub7/python3"
+( cd / && exec "${SANDBOX_ENV[@]}" PATH="$T/stub7:$PATH" REVIT_RUN_CTX="$T/ctx" /bin/bash "$R/scripts/unpack-revit.sh" 2025 ) > "$T/out" 2>&1 & ur=$!
+for i in $(seq 1 100); do [ -f "$T/fin-started" ] && break; sleep 0.1; done
+kill -TERM "$ur"; wait "$ur"; RC=$?
+check "unpack-revit: a stop during the checksum pass starts no unpack" \
+  eval '[ -f "$T/fin-started" ] && [ ! -f "$T/7z-started" ] && [ "$RC" = 1 ] && grep -qx "result=stopped" "$T/ctx/result" && [ ! -e "$R/installers/extracted/revit2025.partial" ]'
+pkill -f "sand box/stub7/7zz" 2>/dev/null
+# the size probe before a download can be stopped (a stalled server must not hold Cancel forever)
+reset; srv_curl; mkdir -p "$T/ctx" "$R/installers/revit2025"; mkzip "$T/srv/RVT_2025_B_002_002.7z" "setup.xml=<Setup/>"
+mkzip "$R/installers/revit2025/Create_Installer_RVT_2025_5_English_WIN64.exe" "collection.xml=<C><BrowserImageUrl>https://dds.autodesk.com/x/RVT_2025_B_002_002.7z</BrowserImageUrl></C>"
+sed -i '' "s|^if \[ \\\$head = 1 \]; then|if [ \\\$head = 1 ]; then touch '$T/probe-started'; exec sleep 30; fi; if false; then|" "$T/curl"
+( cd / && exec "${SANDBOX_ENV[@]}" PATH="$T:$PATH" REVIT_RUN_CTX="$T/ctx" /bin/bash "$R/scripts/get-revit.sh" 2025 ) > "$T/out" 2>&1 & gr=$!
+for i in $(seq 1 50); do [ -f "$T/probe-started" ] && break; sleep 0.1; done
+t0=$SECONDS; kill -TERM "$gr"; wait "$gr"; RC=$?
+check "get-revit: TERM during the size probe stops it at once" eval '[ -f "$T/probe-started" ] && [ "$RC" = 1 ] && [ $((SECONDS - t0)) -lt 10 ] && grep -qx "result=stopped" "$T/ctx/result"'
+pkill -f "sand box/curl" 2>/dev/null
+# get-redist: a stop during a runtime's download ends it at once; the .part stays
+reset; mkdir -p "$T/ctx"
+printf '#!/bin/bash\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && echo part > "$2"; shift; done\ntouch "%s/dl-started"; exec sleep 30\n' "$T" > "$T/curl"; chmod +x "$T/curl"
+( cd / && exec "${SANDBOX_ENV[@]}" PATH="$T:$PATH" REVIT_RUN_CTX="$T/ctx" /bin/bash "$R/scripts/get-redist.sh" 2025 ) > "$T/out" 2>&1 & gd=$!
+for i in $(seq 1 50); do [ -f "$T/dl-started" ] && break; sleep 0.1; done
+t0=$SECONDS; kill -TERM "$gd"; wait "$gd"; RC=$?
+check "get-redist: TERM during a download stops it at once and keeps the .part" \
+  eval '[ -f "$T/dl-started" ] && [ "$RC" = 1 ] && [ $((SECONDS - t0)) -lt 10 ] && grep -qx "result=stopped" "$T/ctx/result" && ls "$R"/installers/redist/webview2/*.part >/dev/null 2>&1'
+pkill -f "sand box/curl" 2>/dev/null
 # Cancel during the download (install.sh passes TERM on to get-revit): curl ends, get-revit stops at once as stopped,
 # the .part stays for the next run
 reset; srv_curl; mkdir -p "$T/ctx" "$R/installers/revit2025"; mkzip "$T/srv/RVT_2025_B_002_002.7z" "setup.xml=<Setup/>" "x64/a.txt=1234567890"
 mkzip "$R/installers/revit2025/Create_Installer_RVT_2025_5_English_WIN64.exe" "collection.xml=<C><BrowserImageUrl>https://dds.autodesk.com/x/RVT_2025_B_002_002.7z</BrowserImageUrl></C>"
-sed -i '' "s|^cp \"\\\$f\" \"\\\$out\"\$|head -c 100 \"\\\$f\" > \"\\\$out\"; touch '$T/curl-started'; sleep 30|" "$T/curl"
+sed -i '' "s|^cp \"\\\$f\" \"\\\$out\"\$|head -c 100 \"\\\$f\" > \"\\\$out\"; touch '$T/curl-started'; exec sleep 30|" "$T/curl"
 printf '#!/bin/bash\necho 999999999999999\n' > "$T/osascript"; chmod +x "$T/osascript"
 ( cd / && exec "${SANDBOX_ENV[@]}" PATH="$T:$PATH" REVIT_RUN_CTX="$T/ctx" /bin/bash "$R/scripts/get-revit.sh" 2025 ) > "$T/out" 2>&1 & gr=$!
 for i in $(seq 1 50); do [ -f "$T/curl-started" ] && break; sleep 0.1; done

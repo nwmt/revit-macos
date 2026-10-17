@@ -17,7 +17,7 @@ get() { # $1 = url, $2 = file, $3 = sha256 or "" ; download into .part (resumabl
   local url="$1" f="$2" sha="$3"
   if [ -f "$f" ]; then echo "   $(basename "$f"): already here"; return 0; fi
   mkdir -p "$(dirname "$f")"; echo ">> $(basename "$f") from $url"
-  curl -fL --retry 5 --retry-delay 5 -C - -o "$f.part" "$url" || { result_set reason download; echo "!! download failed; run again to resume" >&2; return 1; }
+  run_child curl -fL --retry 5 --retry-delay 5 -C - -o "$f.part" "$url" || { stop_check; result_set reason download; echo "!! download failed; run again to resume" >&2; return 1; }
   if [ -n "$sha" ]; then
     echo "$sha  $f.part" | shasum -a 256 -c --quiet - || { rm -f "$f.part"; echo "!! checksum mismatch, download removed; run again" >&2; return 1; }
   elif [ "$(head -c 2 "$f.part")" != MZ ]; then

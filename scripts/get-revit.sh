@@ -13,8 +13,8 @@ set -uo pipefail
 YEAR="${1:?specify a year, e.g. 2027}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; . "$ROOT/scripts/lib/common.sh"; lock_take "get-revit.sh $YEAR"
 command -v 7zz >/dev/null || { echo "7zz required: brew install sevenzip" >&2; exit 1; }
-SL="${REVIT_SOURCE_LIST:-}"; PW=""; TMPSL=""
-cleanup() { [ -z "$PW" ] || { kill "$PW" 2>/dev/null; wait "$PW" 2>/dev/null; }; [ -z "$TMPSL" ] || rm -f "$TMPSL"; }
+SL="${REVIT_SOURCE_LIST:-}"; PW=""; TMPSL=""; HDR=""
+cleanup() { [ -z "$PW" ] || { kill "$PW" 2>/dev/null; wait "$PW" 2>/dev/null; }; [ -z "$TMPSL" ] || rm -f "$TMPSL"; [ -z "$HDR" ] || rm -f "$HDR"; }
 trap cleanup EXIT
 if [ -z "$SL" ]; then   # run by hand: resolve here
   TMPSL="$(mktemp "${TMPDIR:-/tmp}/revit-source.XXXXXX")"; SL="$TMPSL"
@@ -32,7 +32,10 @@ echo ">> $(basename "$ci"): full installer (the base release), $(grep -c $'\tbas
 while IFS=$'\t' read -r _ _ role b; do [ "$role" = update ] && echo "   + update $b"; done <<<"$want"
 need=0; plan=()
 while IFS=$'\t' read -r u f _ _; do
-  size="$(curl -fsSIL --retry 3 "$u" | tr -d '\r' | awk 'tolower($1)=="content-length:" {n=$2} END {print n}')"
+  # the headers through run_child: a stop (Cancel) ends a probe that hangs on a stalled server
+  HDR="$(mktemp "${TMPDIR:-/tmp}/revit-head.XXXXXX")" || exit 1
+  run_child curl -fsSIL --retry 3 "$u" > "$HDR" 7>&-; stop_check
+  size="$(tr -d '\r' < "$HDR" | awk 'tolower($1)=="content-length:" {n=$2} END {print n}')"; rm -f "$HDR"; HDR=""
   [ -n "$size" ] || { result_set reason download; echo "!! cannot reach $u (offline?)" >&2; exit 1; }
   have="$(stat -f %z "$f" 2>/dev/null || echo 0)"
   if [ "$have" = "$size" ]; then echo "   $(basename "$f"): already here"; continue; fi
@@ -70,7 +73,8 @@ if [ ${#plan[@]} -gt 0 ]; then
     mv "$f.part" "$f"
   done
 fi
-python3 -I "$ROOT/tools/installer_source.py" finalize "$SL" "$DATA/installers/.hashes" || exit 1
+stop_check   # a stop between the downloads and the checksums is not lost
+run_child python3 -I "$ROOT/tools/installer_source.py" finalize "$SL" "$DATA/installers/.hashes" || { stop_check; exit 1; }
 for n in $(J 'print "$_\n" for @{$s->{unknown}}'); do
   emit message level "$(json_str warn)" text "$(json_str "$n: no known checksum (a build this project has not seen); used as it is")"
 done
