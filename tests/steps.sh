@@ -79,6 +79,10 @@ hold_lock() { # $1 = owner text: a background process that holds the lock like a
 reset; in_repo 'echo "${REVIT_SUPPORTED[*]}"'; expect "supported years come from the profiles" 0 "2020 2023 2024 2025 2026 2027"
 reset; in_repo 'load_profile 2024 && echo "$YEAR $PRODKEY ${#STEPS[@]} ${REVITINI[1]}"'
 expect "a profile loads" 0 '2024 829P1 21 Interoperability.RealDWGInstalledLocation=C:\Program Files\Autodesk\RealDWG Shared 2024\'
+# a version page lists Dynamo under Works only for a year whose install has the dynamo step
+reset; in_repo 'for y in "${REVIT_SUPPORTED[@]}"; do load_profile "$y"; in_list dynamo "${STEPS[@]}" && continue
+  awk "/^## Works/{f=1; next} /^## /{f=0} f" "'"$REPO"'/versions/$y.md" | grep -qi dynamo && echo "$y lists Dynamo"; done; echo checked'
+check "no version page lists Dynamo under Works without the dynamo step" test "$OUT" = checked
 reset; in_repo 'load_profile 2021'; expect "a year without a profile is not loaded" 1 ""
 reset; in_repo 'load_profile 2027; load_profile 2023; echo "[${ENSCAPE}] ${#ADDIN_STEPS[@]}"'
 expect "loading a profile clears the previous one" 0 "[] 5"
