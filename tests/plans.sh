@@ -195,6 +195,33 @@ $OUT"
   OUT="$(cd / && "${INST_ENV[@]}" CX_RECREATE=1 /bin/bash "$R/install.sh" 2024 rvt2024-t 2>&1)"; RC=$?
   [ "$RC" = 1 ] && [ ! -e "$(runs rvt2024-t)" ] && ok "run record: none in the old bottle of a rebuild that stops early" || fail "run record: old bottle" "rc=$RC
 $OUT"
+  # a rebuild whose bottle action fails before it deletes the old bottle (Revit was started meanwhile, cxbottle
+  # --delete failed): the old bottle is untouched, it gets no record
+  prep; oldbottle; printf '#!/bin/bash\necho "Revit 2024 is running" >&2; exit 1\n' > "$R/scripts/new-bottle.sh"
+  OUT="$(cd / && "${INST_ENV[@]}" CX_RECREATE=1 /bin/bash "$R/install.sh" 2024 rvt2024-t 2>&1)"; RC=$?
+  if [ "$RC" = 1 ] && grep -qF "Step failed: scripts/new-bottle.sh" <<<"$OUT" && [ ! -e "$(runs rvt2024-t)" ]; then
+    ok "run record: none in the old bottle when the rebuild's bottle action fails before replacing it"
+  else fail "run record: failed bottle action, old bottle" "rc=$RC $(cat "$(runs rvt2024-t)" 2>/dev/null)
+$OUT"; fi
+  # a rebuild whose bottle action replaces the old bottle and then fails: the new bottle is this run's
+  prep; oldbottle; cat > "$R/scripts/new-bottle.sh" <<EOF
+#!/bin/bash
+rm -rf "$BOTTLES/\$2"; mkdir -p "$BOTTLES/\$2/drive_c"
+printf '[Bottle]\n"BottleID" = "b1"\n"Description" = "Revit %s"\n' "\$1" > "$BOTTLES/\$2/cxbottle.conf"; exit 1
+EOF
+  chmod +x "$R/scripts/new-bottle.sh"
+  OUT="$(cd / && "${INST_ENV[@]}" CX_RECREATE=1 /bin/bash "$R/install.sh" 2024 rvt2024-t 2>&1)"; RC=$?; L="$(last_run rvt2024-t | cut -d' ' -f1,3,9)"
+  [ "$RC" = 1 ] && [ "$L" = "install failed lines=1" ] && ok "run record: a rebuild's new bottle gets the failed record" || fail "run record: new bottle of a failed rebuild" "rc=$RC $L
+$OUT"
+  # the bottle's identity is its cxbottle.conf and its BottleID: one rewritten in place with a new BottleID is new too
+  prep; oldbottle; cat > "$R/scripts/new-bottle.sh" <<EOF
+#!/bin/bash
+printf '[Bottle]\n"BottleID" = "b2"\n' > "$BOTTLES/\$2/cxbottle.conf"; exit 1
+EOF
+  chmod +x "$R/scripts/new-bottle.sh"
+  OUT="$(cd / && "${INST_ENV[@]}" CX_RECREATE=1 /bin/bash "$R/install.sh" 2024 rvt2024-t 2>&1)"; RC=$?; L="$(last_run rvt2024-t | cut -d' ' -f1,3,9)"
+  [ "$RC" = 1 ] && [ "$L" = "install failed lines=1" ] && ok "run record: a new BottleID is a new bottle" || fail "run record: new BottleID" "rc=$RC $L
+$OUT"
   prep; cat > "$R/scripts/run-steps.sh" <<EOF
 #!/bin/bash
 trap 'exit 1' TERM

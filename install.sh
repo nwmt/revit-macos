@@ -171,9 +171,20 @@ bottle_guard allow_missing "$YEAR" "$BOTTLE"
 [ ! -d "$B" ] || [ "${CX_RECREATE:-0}" = 1 ] || die "Bottle $BOTTLE already exists. To rebuild it: ./revit rebuild $YEAR$SFX"
 RUN_DIR="$(run_dir_new "$BOTTLE" install)" || die "Cannot create a log folder in $(tilde "$DATA/logs")."
 export RUN_DIR
-# one EXIT handler for the run record and the source list. The record goes into the bottle once the bottle action has
-# started (RUNLOG_KIND, in the loop): before that, a rebuild's bottle is still the old one
-RUNLOG_REQUESTED="${STEPS[*]}"; trap 'runlog_exit $?; rm -f "$SL"' EXIT
+# one EXIT handler for the run record and the source list. The record goes into the bottle only once the bottle is
+# this run's (RUNLOG_KIND): the bottle action ended well, or the bottle is no longer the one there was before it (its
+# cxbottle.conf, by inode and BottleID). A rebuild that fails before the old bottle is gone leaves that bottle alone
+bottle_identity() { # the bottle at $B as its cxbottle.conf: device, inode and BottleID; nothing without one
+  [ -f "$B/cxbottle.conf" ] || return 0
+  printf '%s %s\n' "$(stat -f %d:%i "$B/cxbottle.conf" 2>/dev/null)" \
+    "$(sed -n 's/^"BottleID" *= *"\(.*\)".*/\1/p' "$B/cxbottle.conf" 2>/dev/null | head -1)"
+}
+BOTTLE_BEFORE="$(bottle_identity)"; BOTTLE_ACTION=0
+bottle_ours() { # $1 = exit code of the bottle action, empty when it did not end: RUNLOG_KIND once the bottle is this run's
+  [ "$BOTTLE_ACTION" = 1 ] && [ -z "$RUNLOG_KIND" ] || return 0
+  if [ "${1:-}" = 0 ] || [ "$(bottle_identity)" != "$BOTTLE_BEFORE" ]; then RUNLOG_KIND=install; fi
+}
+RUNLOG_REQUESTED="${STEPS[*]}"; trap 'rc_=$?; bottle_ours; runlog_exit $rc_; rm -f "$SL"' EXIT
 cp "$SL" "$RUN_DIR/source.list"; export REVIT_SOURCE_LIST="$RUN_DIR/source.list"
 result_set log_dir "$RUN_DIR"; export INSTALL_PARENT=1   # the runner leaves the final result to this script
 echo; echo "Logs: $(tilde "$RUN_DIR")"
@@ -181,10 +192,11 @@ t0=$SECONDS; i=1
 for a in "${PLAN[@]}"; do
   stop_check
   action_argv "$a"; echo; echo "==> [$i/${#PLAN[@]}] ${A[*]}"; t=$SECONDS
-  [ "$a" != bottle ] || RUNLOG_KIND=install   # from here on the bottle is this run's
+  [ "$a" != bottle ] || BOTTLE_ACTION=1
   # the action's output also goes to action-<name>.log (new-bottle.sh and run-steps.sh write their own logs as well)
   emit action id "$(json_str "$a")" state "$(json_str running)"
   run_child --log "$RUN_DIR/action-$a.log" "$ROOT/${A[0]}" "${A[@]:1}"; rc=$?
+  [ "$a" != bottle ] || bottle_ours "$rc"   # from here on the bottle is this run's, unless it is still the old one
   emit action id "$(json_str "$a")" state "$(json_str "$([ $rc = 0 ] && echo done || echo failed)")" exit "$rc"
   printf '   %-10s exit=%-5s %s\n' "$a" "$rc" "${A[*]} ($((SECONDS - t)) s; action-$a.log)" >> "$RUN_DIR/summary.txt"
   stop_check
