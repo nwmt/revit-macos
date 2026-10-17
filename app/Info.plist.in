@@ -22,5 +22,7 @@
 	<string>@APP_MIN_MACOS@</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>AppRepository</key>
+	<string>@APP_REPO@</string>
 </dict>
 </plist>

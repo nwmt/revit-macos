@@ -15,6 +15,7 @@ OUT="$1"; BIN="$2"; TOOLS="$3"; VER="$4"
 . "$ROOT/app/app.conf"; . "$ROOT/app/tools.sh"; . "$ROOT/scripts/lib/shims.sh"
 [[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || refuse "The version must look like X.Y.Z: $VER"
 [[ "$APP_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9\ ]*$ ]] || refuse "APP_NAME in app/app.conf may hold letters, digits and spaces only"
+[[ "$APP_REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || refuse "APP_REPO in app/app.conf must be owner/name"
 [ ! -e "$OUT" ] || refuse "$OUT already exists"
 [ -f "$BIN" ] && [ -d "$TOOLS/bin" ] && [ -x "$TOOLS/python/bin/python3" ] || refuse "Missing the app binary or the tools in $TOOLS"
 release_complete "$TOOLS/shims" || refuse "The shims in $TOOLS/shims do not hold every shim of SHIMS"
@@ -23,7 +24,7 @@ C="$P/Contents"; RES="$C/Resources"; E="$RES/engine"
 mkdir -p "$C/MacOS" "$E/build" "$RES/bin" "$RES/Licenses/revit-macos"
 
 sed -e "s|@APP_NAME@|$APP_NAME|g" -e "s|@APP_BUNDLE_ID@|$APP_BUNDLE_ID|g" -e "s|@APP_VERSION@|$VER|g" \
-  -e "s|@APP_MIN_MACOS@|$APP_MIN_MACOS|g" "$ROOT/app/Info.plist.in" > "$C/Info.plist"
+  -e "s|@APP_MIN_MACOS@|$APP_MIN_MACOS|g" -e "s|@APP_REPO@|$APP_REPO|g" "$ROOT/app/Info.plist.in" > "$C/Info.plist"
 plutil -lint -s "$C/Info.plist"
 cp "$BIN" "$C/MacOS/$APP_NAME"; chmod 755 "$C/MacOS/$APP_NAME"
 

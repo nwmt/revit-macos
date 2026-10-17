@@ -51,7 +51,7 @@ repo_copy() { # the repo as git sees it (tracked and new files, working-tree con
   (cd "$REPO" && git ls-files -z --cached --others --exclude-standard | while IFS= read -r -d '' f; do [ -e "$f" ] && printf '%s\0' "$f"; done \
     | cpio -p0dm --quiet "$R") || { echo "repo copy failed"; exit 1; }
   mkdir -p "$R/app"
-  printf "APP_NAME='Test App'\nAPP_BUNDLE_ID='io.example.testapp'\nAPP_MIN_MACOS=26.0\n" > "$R/app/app.conf"
+  printf "APP_NAME='Test App'\nAPP_BUNDLE_ID='io.example.testapp'\nAPP_MIN_MACOS=26.0\nAPP_REPO='example/test-app'\n" > "$R/app/app.conf"
   ( cd "$R" && git init -q && git add -A && git -c core.hooksPath=/dev/null -c user.name=test -c user.email=test \
       commit -qm fixture && git tag "v$SHIMS_VERSION" ) || { echo "repo copy: git failed"; exit 1; }
 }
@@ -173,7 +173,7 @@ check "bundle: Licenses/README.txt names every component" eval 'for c in 7-Zip c
 pl() { plutil -extract "$1" raw -o - "$B/Contents/Info.plist" 2>/dev/null; }
 check "bundle: Info.plist" eval '[ "$(pl CFBundleIdentifier)" = io.example.testapp ] && [ "$(pl CFBundleExecutable)" = "Test App" ] &&
   [ "$(pl CFBundleName)" = "Test App" ] && [ "$(pl CFBundleShortVersionString)" = 0.0.1 ] && [ "$(pl LSMinimumSystemVersion)" = 26.0 ] &&
-  [ "$(pl LSUIElement)" = true ]'
+  [ "$(pl LSUIElement)" = true ] && [ "$(pl AppRepository)" = example/test-app ]'
 pyc="$(find "$RS/python/lib/python3.99/__pycache__" -name 'm.*.pyc' 2>/dev/null | head -1)"
 check "bundle: Python bytecode is unchecked-hash" eval '[ -n "$pyc" ] && [ "$(od -An -tu4 -j4 -N4 "$pyc" | tr -d " ")" = 1 ]'
 in_sandbox "$R/app/make-bundle.sh" "$T/out/V.app" "$T/stub" "$TOOLS" 1.2;  expect "bundle: refuses version 1.2" 2 "X.Y.Z"

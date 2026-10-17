@@ -1,104 +1,101 @@
-// A stub until the real app: a menu bar item and one window that shows whether the bundled engine, its tools and its
-// shims work (engine/scripts/check-bundle.sh) and whether the app should be moved to the Applications folder
-// (engine/revit status --json). The name comes from Info.plist (app/app.conf), never from this file.
+// The menu bar app: a menu (MenuBarExtra) and its windows — the progress of a run, the first-run wizard, the add-ins of
+// a bottle, the settings. Every decision is the engine's (AppCore's models ask it); these views only draw and ask.
+// The name comes from Info.plist (app/app.conf), never from this file.
 import AppCore
 import AppKit
-import Observation
 import SwiftUI
 
 @main
 struct AppMain: App {
-    @State private var check = BundleCheck()
-    private let name = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? ""
+    @State private var env = AppEnvironment()
 
     var body: some Scene {
-        Window("Bundle check", id: "check") {
-            CheckView(check: check, name: name)
+        MenuBarExtra {
+            if let app = env.app {
+                MenuView(app: app, env: env)
+            } else {
+                Text("The app is incomplete. Download it again.")
+                Button("Quit") { NSApplication.shared.terminate(nil) }
+            }
+        } label: {
+            MenuLabel(env: env)
         }
-        MenuBarExtra(name, systemImage: "building.columns") {
-            CheckButton(check: check)
-            Divider()
-            Button("Quit") { NSApplication.shared.terminate(nil) }
+        .menuBarExtraStyle(.menu)
+
+        Window("Progress", id: Route.run.id) {
+            if let app = env.app { RunWindow(app: app, env: env) }
+        }
+        .windowResizability(.contentSize)
+
+        Window("Add Revit", id: Route.wizard.id) {
+            if let app = env.app { WizardWindow(app: app, env: env) }
+        }
+        .windowResizability(.contentSize)
+
+        WindowGroup("Add-ins", id: "addins", for: BottleRef.self) { $ref in
+            if let app = env.app, let ref { AddinsWindow(app: app, env: env, ref: ref) }
+        }
+        .windowResizability(.contentSize)
+
+        Window("Settings", id: Route.settings.id) {
+            if let app = env.app { SettingsWindow(app: app, env: env) }
+        }
+        .windowResizability(.contentSize)
+    }
+}
+
+/// What every view needs: the app model (nil when the bundle has no engine), the window router, the app's name and
+/// repository from Info.plist.
+@MainActor @Observable final class AppEnvironment {
+    let router = WindowRouter()
+    let name = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? ProcessInfo.processInfo.processName
+    let repo = Bundle.main.object(forInfoDictionaryKey: "AppRepository") as? String ?? ""
+    let app: AppModel?
+
+    init() {
+        let env = ProcessInfo.processInfo.environment
+        if let engine = EngineLocator.find(resources: Bundle.main.resourceURL, env: env) {
+            let notifier = UserNotifier(router: router)
+            // REVIT_DATA (dev, the demo) wins over the data folder the bundled engine reports
+            app = AppModel(engine: ProcessEngine(engine: engine, environment: EngineEnvironment.make(from: env)),
+                           defaults: .standard, notifier: notifier, dataOverride: env["REVIT_DATA"].map { URL(fileURLWithPath: $0) })
+        } else {
+            app = nil
         }
     }
 }
 
-struct CheckButton: View {
+/// The menu bar icon. It stays for the app's whole life, so it runs the launch, the poll loop and the window requests.
+struct MenuLabel: View {
+    let env: AppEnvironment
     @Environment(\.openWindow) private var openWindow
-    let check: BundleCheck
 
     var body: some View {
-        Button("Check bundle…") {
-            check.run()
-            openWindow(id: "check")
-            NSApp.activate()
-        }
-    }
-}
-
-struct CheckView: View {
-    let check: BundleCheck
-    let name: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if check.placement == "move" {
-                Text("Move \(name) to the Applications folder, then open it again.")
-                    .font(.headline)
+        Image(systemName: "building.columns")
+            .task { await run() }
+            .onChange(of: env.router.pending) { _, r in
+                guard let r else { return }
+                env.router.pending = nil
+                switch r {
+                case .addins(let ref): openWindow(id: "addins", value: ref)
+                default: openWindow(id: r.id)
+                }
+                NSApp.activate()
             }
-            ScrollView {
-                Text(check.running ? "Checking…" : check.output)
-                    .font(.system(.body, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+    }
+
+    private func run() async {
+        guard let app = env.app else { return }
+        await app.launch()
+        if app.status?.app?.placement == "move" { Placement.ask(name: env.name) }
+        if app.watched != nil {
+            env.router.open(.run)
+        } else if (app.status?.bottles ?? []).isEmpty && !app.isBusy {
+            env.router.open(.wizard)
         }
-        .padding()
-        .frame(minWidth: 560, minHeight: 240)
-        .onAppear { if check.output.isEmpty && !check.running { check.run() } }
-    }
-}
-
-@MainActor @Observable
-final class BundleCheck {
-    var output = ""
-    var placement = ""
-    var running = false
-
-    func run() {
-        guard !running else { return }
-        running = true
-        Task.detached {
-            let out = BundleCheck.engine(["scripts/check-bundle.sh"])
-            let status = BundleCheck.engine(["revit", "status", "--json"])
-            let placement = BundleCheck.placement(fromStatus: status)
-            await MainActor.run {
-                self.output = out
-                self.placement = placement
-                self.running = false
-            }
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(1))
+            await app.poll()
         }
-    }
-
-    // /bin/bash <Resources>/engine/<script> <arguments…>: an argument list, no shell string; stdin from /dev/null
-    nonisolated static func engine(_ args: [String]) -> String {
-        guard let res = Bundle.main.resourceURL, let script = args.first else { return "no Resources folder" }
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/bash")
-        p.arguments = [res.appendingPathComponent("engine").appendingPathComponent(script).path] + args.dropFirst()
-        p.standardInput = FileHandle.nullDevice
-        let pipe = Pipe()
-        p.standardOutput = pipe
-        p.standardError = pipe
-        do { try p.run() } catch { return "cannot run \(script): \(error.localizedDescription)" }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
-        return String(decoding: data, as: UTF8.self)
-    }
-
-    nonisolated static func placement(fromStatus json: String) -> String {
-        guard let obj = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
-              let app = obj["app"] as? [String: Any], let p = app["placement"] as? String else { return "" }
-        return p
     }
 }

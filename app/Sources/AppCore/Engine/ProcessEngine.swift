@@ -4,6 +4,9 @@
 import Darwin
 import Foundation
 
+/// One pipe's bytes: written by its reader before the group's leave, read after the wait.
+private final class Collected: @unchecked Sendable { var data = Data() }
+
 public struct EngineStartError: Error, CustomStringConvertible {
     public let description: String
 }
@@ -30,12 +33,12 @@ public final class ProcessEngine: EngineClient, Sendable {
                 p.standardOutput = out; p.standardError = err
                 do { try p.run() } catch { cont.resume(throwing: error); return }
                 // both pipes at once: a full stderr pipe must not block a reader waiting on stdout
-                var o = Data(), e = Data()
+                let o = Collected(), e = Collected()
                 let g = DispatchGroup()
-                g.enter(); DispatchQueue.global().async { o = out.fileHandleForReading.readDataToEndOfFile(); g.leave() }
-                g.enter(); DispatchQueue.global().async { e = err.fileHandleForReading.readDataToEndOfFile(); g.leave() }
+                g.enter(); DispatchQueue.global().async { o.data = out.fileHandleForReading.readDataToEndOfFile(); g.leave() }
+                g.enter(); DispatchQueue.global().async { e.data = err.fileHandleForReading.readDataToEndOfFile(); g.leave() }
                 g.wait(); p.waitUntilExit()
-                cont.resume(returning: EngineOutput(stdout: o, stderr: String(decoding: e, as: UTF8.self), exitCode: p.terminationStatus))
+                cont.resume(returning: EngineOutput(stdout: o.data, stderr: String(decoding: e.data, as: UTF8.self), exitCode: p.terminationStatus))
             }
         }
     }
