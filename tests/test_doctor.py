@@ -331,6 +331,62 @@ class Bottle(Sandbox):
         self.assertIn("(2026-10-01)", cs["install.last"].title)
         self.assertEqual(cs["install.steps"].status, "ok")
 
+    def old_install_log(self, stamp="20261001-100000-install", steps=STEPS, failed=None):
+        d = os.path.join(self.data, "logs", self.name, stamp)
+        self.write(os.path.join(d, "summary.txt"), "".join("   %-10s exit=0     x (1 s)\n" % s for s in steps))
+        if failed is not None:
+            self.write(os.path.join(d, "failed.txt"), "".join(x + "\n" for x in failed))
+        return d
+
+    def test_an_old_bottle_after_an_addins_run(self):
+        # installed before the run record: an add-ins run writes the first record; the install log still tells
+        self.records_clear()
+        self.old_install_log()
+        self.record(kind="addins", requested=["revitlookup"])
+        cs = self.checks()
+        ids = self.by_id(cs)
+        self.assertEqual(self.problems(cs), [])
+        self.assertEqual((ids["install.last"].status, ids["install.steps"].status), ("ok", "ok"))
+        self.assertIn("fixes.warpshim.revit.d3dwp.dll", ids)
+        os.remove(os.path.join(self.b, dr.rd(self.year), "d3dwp.dll"))
+        self.assertEqual(self.problems(self.checks()), [("fixes.warpshim.revit.d3dwp.dll", "fail")])
+
+    def test_no_install_record_and_no_install_log(self):
+        # only a steps run is known: how it was installed is not, so every fix of the profile keeps its file check
+        self.records_clear()
+        self.record(kind="steps", requested=["tlbpin"])
+        cs = self.checks()
+        ids = self.by_id(cs)
+        self.assertNotIn("install.steps", ids)
+        self.assertEqual(self.problems(cs), [])
+        self.assertIn("fixes.wv2fix.webview2.old-version.dll", ids)
+        os.remove(os.path.join(self.b, dr.rd(self.year), "d3dwp.dll"))
+        self.assertEqual(self.problems(self.checks()), [("fixes.warpshim.revit.d3dwp.dll", "fail")])
+
+    def test_an_install_record_is_not_hidden_by_later_runs(self):
+        self.records_clear()
+        self.old_install_log()   # an older install log does not count over the install record
+        self.record(requested=[s for s in STEPS if s != "wv2fix"])
+        self.record(kind="addins", requested=["revitlookup"])
+        cs = self.checks()
+        self.assertEqual(self.problems(cs), [("install.steps", "warn")])
+        self.assertFalse([c.id for c in cs if c.id.startswith("fixes.wv2fix.")])
+        self.record(kind="steps", requested=["wv2fix"])
+        self.assertEqual(self.problems(self.checks()), [])
+
+    def test_the_newest_install_log_of_two_in_one_second(self):
+        # run_dir_new names a second run of the same second <time>-<kind>-2; older clones wrote <time>-2-<kind>
+        self.records_clear()
+        self.old_install_log("20261001-100000-install", failed=[])
+        self.old_install_log("20261001-100000-install-2", failed=["dynamo"])
+        c = self.by_id(self.checks())["install.last"]
+        self.assertEqual(c.status, "warn")
+        self.assertIn("(2026-10-01)", c.title)
+        self.old_install_log("20261001-100000-3-install", failed=[])
+        self.assertEqual(self.by_id(self.checks())["install.last"].status, "ok")
+        self.old_install_log("20261001-100000-install-10", failed=["rvtfix"])   # 10 is newer than 3, not older
+        self.assertIn("rvtfix", self.by_id(self.checks())["install.last"].detail)
+
     def test_build(self):
         self.assertEqual(self.by_id(self.checks())["install.build"].status, "ok")
         self.write(os.path.join(self.b, dr.rd(self.year), "Revit.exe"), pe("25.5.0.58"))
@@ -516,6 +572,19 @@ class Logs(Sandbox):
         self.assertIn("seen in the steps run of", cs["logs.licensing-no-answer"].title)
         self.assertEqual(cs["logs.licensing-no-answer"].doc,
                          "docs/troubleshooting.md#install-stops-the-autodesk-licensing-service-does-not-answer")
+
+    def test_two_runs_in_one_second(self):
+        # run_dir_new names a second run of the same second <time>-<kind>-2; older clones wrote <time>-2-<kind>
+        self.run_logs(self.RUN, "install", {"rvt.msi.log": ["Action ended 1:00:00: INSTALL. Return value 0."]})
+        self.run_logs(self.RUN, "install-2", {"rvt.log": [
+            "the Autodesk licensing service does not answer, so RVT.msi would fail"]})
+        cs = self.by_id(self.checks())
+        self.assertNotIn("logs.msi-failed", cs)
+        self.assertIn("seen in the install of", cs["logs.licensing-no-answer"].title)
+        self.run_logs(self.RUN + "-3", "steps", {"rvt.log": ["the licensing installer returned 5"]})
+        cs = self.by_id(self.checks())
+        self.assertNotIn("logs.licensing-no-answer", cs)
+        self.assertIn("seen in the steps run of", cs["logs.licensing-install-failed"].title)
 
     def test_utf16_msi_log_and_journal(self):
         d = self.run_logs(self.RUN, "install", {})

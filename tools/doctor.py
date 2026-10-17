@@ -75,7 +75,15 @@ DOC = {"start-over": TS + "start-over", "report": TS + "report-a-problem",
        "signin": TS + "after-sign-in-the-browser-shows-opening-product-and-nothing-happens",
        "web": TS + "start-screen-manage-links-or-project-browser-is-white-a-browser-process-uses-a-lot-of-cpu",
        "netfx2020": TS + "revit-2020-crashes-on-start-after-installing-net-framework-472-or-48"}
-LOG_RUN = re.compile(r"^(\d{8}-\d{6})(?:-(\d+))?-([a-z]+)$")   # logs/<bottle>/<time>[-n]-<kind> (run_dir_new)
+# logs/<bottle>/<time>-<kind>[-n] (run_dir_new: a second run of the same second gets -2, -3, ...); older clones wrote
+# <time>-<n>-<kind>
+LOG_RUN = re.compile(r"^(\d{8}-\d{6})(?:-(\d+))?-([a-z]+)(?:-(\d+))?$")
+
+
+def run_key(name):
+    """(time, n) of a run folder's name, the order run_dir_new made them in, or None for another name."""
+    m = LOG_RUN.match(name)
+    return (m.group(1), int(m.group(2) or m.group(4) or 1)) if m else None
 LOG_LABEL = {"debug": "Revit session", "install": "install", "steps": "steps run", "addins": "add-ins run"}
 LOG_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,80}\.log$")
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
@@ -564,7 +572,13 @@ def apps(ctx):
 def install_summary(data, name):
     """Steps and failed steps of the newest install log of the bottle (logs/<bottle>/<time>-install), for bottles
     made before the run record."""
-    runs = sorted(d for d in glob.glob(os.path.join(data, "logs", name, "*-install")) if os.path.isdir(d))
+    base = os.path.join(data, "logs", name)
+    try:
+        names = os.listdir(base)
+    except OSError:
+        names = []
+    runs = [os.path.join(base, n) for n in sorted((n for n in names if run_key(n)), key=run_key)
+            if LOG_RUN.match(n).group(3) == "install" and os.path.isdir(os.path.join(base, n))]
     if not runs:
         return None
     steps = {}
@@ -702,7 +716,7 @@ def collect_logs(ctx, bottle_dir, records):
     for n in names:
         m, d = LOG_RUN.match(n), os.path.join(base, n)
         if m and m.group(3) in LOG_LABEL and os.path.isdir(d) and not os.path.islink(d):
-            key = (m.group(1), int(m.group(2) or 1))
+            key = run_key(n)
             if m.group(3) not in newest or key > newest[m.group(3)][0]:
                 newest[m.group(3)] = (key, d)
 
@@ -975,15 +989,18 @@ def app_checks(f, b):
 
 
 def ran_steps(b):
-    """The steps the bottle has seen (done, skipped or failed in any record, else in the newest install log), or None
-    when nothing tells."""
-    seen = set()
-    for r in b.get("records") or []:
+    """The steps the bottle has seen: done, skipped or failed in the newest install record and the records after it;
+    without an install record (a bottle made before the run record), the steps of the newest install log and of every
+    record. None when neither tells how the bottle was installed: a steps or add-ins run alone does not."""
+    recs = b.get("records") or []
+    last = max((i for i, r in enumerate(recs) if r.get("kind") == "install"), default=None)
+    if last is None and not b.get("summary"):
+        return None
+    seen = set() if last is not None else set(b["summary"]["steps"])
+    for r in recs[last or 0:]:
         for k in ("done", "skipped", "failed"):
             seen.update(x for x in r.get(k) or [] if isinstance(x, str))
-    if not b.get("records") and b.get("summary"):
-        seen.update(b["summary"]["steps"])
-    return seen if (b.get("records") or b.get("summary")) else None
+    return seen
 
 
 def engine_key(e):
