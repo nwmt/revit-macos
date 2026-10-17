@@ -884,6 +884,19 @@ check "get-redist: a failed download gives reason download" eval '[ "$RC" = 1 ] 
 reset; mkdir -p "$T/ctx"; printf '#!/bin/bash\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && echo junk > "$2"; shift; done\nexit 0\n' > "$T/curl"; chmod +x "$T/curl"
 OUT="$(cd / && "${SANDBOX_ENV[@]}" PATH="$T:$PATH" REVIT_RUN_CTX="$T/ctx" /bin/bash "$R/scripts/get-redist.sh" 2020 2>&1)"; RC=$?
 check "get-redist: a checksum mismatch has no reason" eval '[ "$RC" = 1 ] && grep -qF "checksum mismatch" <<<"$OUT" && [ -z "$(reason_of)" ]'
+# Cancel during the download (install.sh passes TERM on to get-revit): curl ends, get-revit stops at once as stopped,
+# the .part stays for the next run
+reset; srv_curl; mkdir -p "$T/ctx" "$R/installers/revit2025"; mkzip "$T/srv/RVT_2025_B_002_002.7z" "setup.xml=<Setup/>" "x64/a.txt=1234567890"
+mkzip "$R/installers/revit2025/Create_Installer_RVT_2025_5_English_WIN64.exe" "collection.xml=<C><BrowserImageUrl>https://dds.autodesk.com/x/RVT_2025_B_002_002.7z</BrowserImageUrl></C>"
+sed -i '' "s|^cp \"\\\$f\" \"\\\$out\"\$|head -c 100 \"\\\$f\" > \"\\\$out\"; touch '$T/curl-started'; sleep 30|" "$T/curl"
+printf '#!/bin/bash\necho 999999999999999\n' > "$T/osascript"; chmod +x "$T/osascript"
+( cd / && exec "${SANDBOX_ENV[@]}" PATH="$T:$PATH" REVIT_RUN_CTX="$T/ctx" /bin/bash "$R/scripts/get-revit.sh" 2025 ) > "$T/out" 2>&1 & gr=$!
+for i in $(seq 1 50); do [ -f "$T/curl-started" ] && break; sleep 0.1; done
+t0=$SECONDS; kill -TERM "$gr"; wait "$gr"; RC=$?
+check "get-revit: TERM during the download stops it at once" eval '[ "$RC" = 1 ] && [ $((SECONDS - t0)) -lt 10 ] && grep -qF "Stopped." "$T/out"'
+check "get-revit: a stopped download is result stopped and keeps its .part" eval 'grep -qx "result=stopped" "$T/ctx/result" && [ -s "$R/installers/revit2025/RVT_2025_B_002_002.7z.part" ]'
+check "get-revit: no curl is left running" eval '! pgrep -f "sand box/curl" >/dev/null'
+pkill -f "sand box/curl" 2>/dev/null
 ci2025() { mkdir -p "$R/installers/revit2025"; mkzip "$R/installers/revit2025/Create_Installer_RVT_2025_5_English_WIN64.exe" \
   "collection.xml=<C><BrowserImageUrl>https://dds.autodesk.com/x/RVT_2025_B_002_002.7z</BrowserImageUrl></C>"; }
 reset; srv_curl; ci2025; mkdir -p "$T/ctx"   # nothing on the server: the size probe fails

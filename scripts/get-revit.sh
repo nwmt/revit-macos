@@ -58,8 +58,11 @@ if [ ${#plan[@]} -gt 0 ]; then
       PW=$!
     fi
     # into .part first: a half-downloaded file must not look finished to install.sh; -C - resumes it
+    # curl as run_child: a stop (TERM/INT, Cancel in the app) ends it now; the .part stays for the next run
     for try in 1 2 3 4 5; do
-      curl -fL --retry 5 --retry-delay 5 -C - -o "$f.part" "$u" 7>&- && break
+      stop_check
+      run_child curl -fL --retry 5 --retry-delay 5 -C - -o "$f.part" "$u" 7>&- && break
+      stop_check
       echo "   download interrupted, resuming ($try/5)…"; sleep 5
     done
     [ -z "$PW" ] || { kill "$PW" 2>/dev/null; wait "$PW" 2>/dev/null; PW=""; }
