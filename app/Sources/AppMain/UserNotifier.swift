@@ -1,7 +1,7 @@
-// The notification at the end of a run, through UserNotifications (permission is asked at the first one). Clicking
-// it opens the progress window.
+// The notifications (the end of a run, a new version), through UserNotifications; permission is asked at the first one.
+// Clicking a run's opens the progress window, a new version's its release page.
 import AppCore
-import Foundation
+import AppKit
 import UserNotifications
 
 @MainActor final class UserNotifier: NSObject, Notifier, UNUserNotificationCenterDelegate {
@@ -22,6 +22,7 @@ import UserNotifications
         let c = UNUserNotificationCenter.current()
         let content = UNMutableNotificationContent()
         content.title = title; content.body = body
+        content.userInfo = NotificationLink.userInfo(url, release: url.map { $0.scheme == "https" } ?? false)
         let req = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         let first = !asked; asked = true
         Task {
@@ -31,7 +32,11 @@ import UserNotifications
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        await MainActor.run { router.open(.run) }
+        let info = response.notification.request.content.userInfo
+        let release = NotificationLink.isRelease(info) ? NotificationLink.url(from: info) : nil
+        await MainActor.run {
+            if let release { NSWorkspace.shared.open(release) } else { router.open(.run) }   // a new version: its page; a run: progress
+        }
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
