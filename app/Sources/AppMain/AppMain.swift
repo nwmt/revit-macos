@@ -52,6 +52,15 @@ struct AppMain: App {
     let repo = Bundle.main.object(forInfoDictionaryKey: "AppRepository") as? String ?? ""
     let app: AppModel?
     let wizard: WizardModel?
+    let settings: SettingsModel?
+
+    /// A GitHub API GET; anything but 200 is an error.
+    nonisolated static func fetch(_ url: URL) async throws -> Data {
+        var r = URLRequest(url: url); r.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        let (d, resp) = try await URLSession.shared.data(for: r)
+        guard (resp as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
+        return d
+    }
 
     init() {
         let env = ProcessInfo.processInfo.environment
@@ -62,9 +71,13 @@ struct AppMain: App {
                            defaults: .standard, notifier: notifier, dataOverride: env["REVIT_DATA"].map { URL(fileURLWithPath: $0) })
             app = m
             wizard = WizardModel(app: m, system: MacSystemActions())
+            let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+            settings = SettingsModel(app: m, login: LoginItemService(), updates: UpdateChecker(repo: repo, current: version, fetch: Self.fetch),
+                                     defaults: .standard)
         } else {
             app = nil
             wizard = nil
+            settings = nil
         }
     }
 }
@@ -97,9 +110,12 @@ struct MenuLabel: View {
         } else if (app.status?.bottles ?? []).isEmpty && !app.isBusy {
             env.router.open(.wizard)
         }
+        var tick = 0
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(1))
             await app.poll()
+            tick += 1
+            if tick % 60 == 1, !env.repo.isEmpty { await env.settings?.checkUpdatesIfDue(now: Date()) }   // once a minute; it checks once a day
         }
     }
 }

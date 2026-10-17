@@ -59,6 +59,7 @@ Usage: ./revit <command> <year> [bottle]
   report    make a report for a GitHub issue, with personal data removed (no year: this Mac and the last runs)
   addins    add RevitLookup and pyRevit (--only <add-ins>; ./revit addins list <year>)
   import    add a file the install needs from your Windows PC (import msls31 <file>)
+  cache     show or clear downloaded and unpacked installer files (cache clear --yes)
   stop      quit a Revit that hangs
   logs      list the newest logs
   debug     start Revit and record a log
@@ -79,6 +80,7 @@ cx_launchers() { # apps CrossOver makes for the bottle's Start Menu entries; del
   done
 }
 size() { du -sh "$1" 2>/dev/null | cut -f1; }
+bytes_of() { local k; k="$(du -sk "$1" 2>/dev/null | cut -f1)"; [[ "$k" =~ ^[0-9]+$ ]] && echo $((k * 1024)) || echo null; }
 
 POS=()
 while [ $# -gt 0 ]; do
@@ -133,7 +135,7 @@ if [ -n "$EVENTS_DIR" ]; then
 fi
 [ -z "$FLAG_ERR" ] || die "$FLAG_ERR"
 case "$CMD" in
-  install|check|doctor|report|addins|import|stop|logs|debug|rebuild|remove|status|find-installer|link-installer|test) ;;
+  install|check|doctor|report|addins|import|cache|stop|logs|debug|rebuild|remove|status|find-installer|link-installer|test) ;;
   ""|help|-h|--help) usage; exit 0 ;;
   *) echo "Unknown command: $CMD" >&2; echo >&2; usage >&2; exit 1 ;;
 esac
@@ -179,6 +181,87 @@ if [ "$CMD" = status ]; then
     [ $busy = false ] || echo "Busy: $(lock_owner)"
   fi
   exit 0
+fi
+if [ "$CMD" = cache ]; then   # downloaded and unpacked installer files that can be deleted (the app's Settings); no year
+  [ -z "$YEAR_ARG" ] || [ "$YEAR_ARG" = clear ] || die "Usage: ./revit cache [--json], ./revit cache clear --yes"
+  RESULT_HINT=failed
+  cache_inputs() { # what an installer reads: "R <real folder>" for each installers/revit<year>, and "P <path>" for every
+    # path met while resolving each entry under it (each link's own path, each folder on the way, the end): deleting any of
+    # these would break that installer, also through a link inside a downloads folder
+    local y L rf
+    for y in "${REVIT_SUPPORTED[@]}"; do
+      L="$(revit_input "$y")"; [ -e "$L" ] || continue
+      rf="$(cd -P "$L" 2>/dev/null && pwd)" || continue; echo "R $rf"
+      find -L "$L" -maxdepth 3 2>/dev/null | /usr/bin/perl -ne 'chomp; my @todo = grep { length } split m{/}; my ($cur, $n) = ("", 0);
+        while (@todo) { my $c = shift @todo; next if $c eq "."; if ($c eq "..") { $cur =~ s{/[^/]*$}{}; next }
+          my $next = "$cur/$c"; print "P $next\n";
+          if (-l $next) { last if ++$n > 40; my $t = readlink $next; $cur = "" if $t =~ m{^/}; unshift @todo, grep { length } split m{/}, $t; next }
+          $cur = $next }
+        print "P $cur\n"'
+    done
+  }
+  cache_kept() { # $1 = a candidate folder: "your installer folder" when an installer reads it or anything in it
+    local rc kind p
+    rc="$(cd -P "$1" 2>/dev/null && pwd)" || return 0
+    while read -r kind p; do
+      case "$kind" in
+        P) if [ "$p" = "$rc" ] || [[ "$p" == "$rc"/* ]]; then echo "your installer folder"; return 0; fi ;;
+        R) if [ "$p" = "$rc" ] || [[ "$rc" == "$p"/* ]]; then echo "your installer folder"; return 0; fi ;;
+      esac
+    done <<<"$C_INPUTS"
+  }
+  cache_add() { # $1 = what, $2 = year or "", $3 = label, $4 = path, $5 = why it is kept ("" = removable)
+    local k="$5"; [ -n "$k" ] || k="$(cache_kept "$4")"
+    C_WHAT+=("$1"); C_YEAR+=("$2"); C_LABEL+=("$3"); C_PATH+=("$4"); C_KEPT+=("$k")
+  }
+  cache_plan() { # the items, made again right before deleting
+    local y p o k
+    C_WHAT=(); C_YEAR=(); C_LABEL=(); C_PATH=(); C_KEPT=(); C_INPUTS="$(cache_inputs)"
+    for y in "${REVIT_SUPPORTED[@]}"; do
+      p="$DATA/installers/revit$y-dl"; [ -d "$p" ] && cache_add downloads "$y" "installers/revit$y-dl (downloads)" "$p" ""
+      p="$(revit_extracted "$y")"
+      if [ -d "$p" ]; then
+        k=""; o="$(YEAR="$y" B="" other_bottle_of_year)" && k="bottle $o uses it"   # a bottle of that year needs it
+        cache_add extracted "$y" "installers/extracted/revit$y (unpacked files)" "$p" "$k"
+      fi
+    done
+    p="$DATA/cache/winetricks"; [ -d "$p" ] && cache_add winetricks "" "cache/winetricks (winetricks downloads)" "$p" ""
+    return 0
+  }
+  cache_print() {
+    local i rm=0
+    if [ ${#C_PATH[@]} = 0 ]; then echo "Nothing to clear."; return 0; fi
+    for i in "${!C_PATH[@]}"; do
+      printf '  %-48s %s%s\n' "${C_LABEL[$i]}" "$(size "${C_PATH[$i]}")" "${C_KEPT[$i]:+  (kept: ${C_KEPT[$i]})}"
+      [ -n "${C_KEPT[$i]}" ] || rm=1
+    done
+    if [ $rm = 1 ]; then echo "To delete them: ./revit cache clear --yes"; else echo "Nothing to clear."; fi
+  }
+  cache_plan
+  if [ "$YEAR_ARG" != clear ]; then
+    if [ "$JSON" = 1 ]; then
+      out=""; total=0
+      for i in ${C_PATH[@]+"${!C_PATH[@]}"}; do
+        b="$(bytes_of "${C_PATH[$i]}")"; [ "$b" = null ] && b=0; rmv=true; [ -z "${C_KEPT[$i]}" ] || rmv=false
+        [ "$rmv" = false ] || total=$((total + b))
+        out+="${out:+,}{\"what\":$(json_str "${C_WHAT[$i]}"),\"year\":${C_YEAR[$i]:-null},\"label\":$(json_str "${C_LABEL[$i]}"),\"bytes\":$b,\"removable\":$rmv,\"kept\":$(json_str "${C_KEPT[$i]}")}"
+      done
+      printf '{"items":[%s],"removable_bytes":%s}\n' "$out" "$total"
+    else
+      cache_print
+    fi
+    exit 0
+  fi
+  [ "$YES" = 1 ] || { cache_print; exit 1; }
+  not_busy; lock_take "./revit cache clear"
+  cache_plan; freed=0   # again, under the lock
+  for i in ${C_PATH[@]+"${!C_PATH[@]}"}; do
+    [ -z "${C_KEPT[$i]}" ] || continue
+    b="$(bytes_of "${C_PATH[$i]}")"; [ "$b" = null ] || freed=$((freed + b))
+    rm -rf "${C_PATH[$i]}" 2>/dev/null
+    [ ! -e "${C_PATH[$i]}" ] || die "Could not delete ${C_LABEL[$i]%% (*}. Delete it in Finder."
+  done
+  echo "Freed $(/usr/bin/awk -v b="$freed" 'BEGIN { printf "%.1f", b / 1e9 }') GB."; exit 0
 fi
 if [ "$CMD" = find-installer ]; then
   [ -n "$YEAR_ARG" ] || die "Which folder? Example: ./revit find-installer ~/Downloads/Revit"
@@ -316,7 +399,6 @@ docs_note() { # the bottle's Documents is normally a link to the Mac's Documents
 export_source_flags() { # --reuse-extracted / --reextract for install.sh and the unpacker
   [ "$REUSE_X" = 1 ] && export REVIT_REUSE_EXTRACTED=1; [ "$REEXTRACT" = 1 ] && export REVIT_REEXTRACT=1; return 0
 }
-bytes_of() { local k; k="$(du -sk "$1" 2>/dev/null | cut -f1)"; [[ "$k" =~ ^[0-9]+$ ]] && echo $((k * 1024)) || echo null; }
 item_json() { printf '{"label":%s,"bytes":%s}' "$(json_str "$1")" "$2"; }   # $1 = label, $2 = bytes or null
 notes_json() { # docs_note's lines without their indent, as a JSON list
   local l out=""; while IFS= read -r l; do out+="${out:+,}$(json_str "${l#  }")"; done < <(docs_note); printf '[%s]' "$out"

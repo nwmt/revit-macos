@@ -648,5 +648,59 @@ reset; bottle rvt2025-a 2025 2025; touch "$T/stamp"; sleep 1; run "" remove 2025
 newer="$(find "$T" -mindepth 1 -newer "$T/stamp" ! -path "$T/ev" ! -path "$T/ev/*" ! -path "$CALLS")"
 if [ -s "$T/ev/events.ndjson" ] && [ -z "$newer" ]; then ok "remove --dry-run with --events writes only the events folder"
 else fail "remove --dry-run with --events writes only the events folder" "$newer"; fi
+# ---- cache: downloaded and unpacked installer files the app can delete ----
+items() { jq_ 'for (@{$d->{items}}) { printf "%s|%s|%s|%s\n", $_->{label}, $_->{removable} ? "rm" : "keep", $_->{kept}, $_->{bytes} }'; }
+reset; mkdir -p "$R/installers/revit2025-dl" "$R/installers/extracted/revit2025" "$R/cache/winetricks"
+echo data > "$R/installers/revit2025-dl/RVT_2025_B_002_002.7z"; echo x > "$R/installers/extracted/revit2025/setup.xml"; echo w > "$R/cache/winetricks/f"
+run "" cache --json
+check "cache --json: downloads, a free unpacked folder and winetricks are removable" eval '[ "$(items | cut -d"|" -f1,2 | tr "\n" ";")" = "installers/revit2025-dl (downloads)|rm;installers/extracted/revit2025 (unpacked files)|rm;cache/winetricks (winetricks downloads)|rm;" ]'
+check "cache --json: sizes > 0 and their sum" jq_ 'my $s = 0; for (@{$d->{items}}) { exit 1 unless $_->{bytes} > 0; $s += $_->{bytes} } exit !($s == $d->{removable_bytes})'
+check "cache --json: winetricks has no year" jq_ 'exit !(!defined $d->{items}[2]{year} && $d->{items}[0]{year} == 2025 && $d->{items}[0]{what} eq "downloads")'
+reset; bottle rvt2025-a 2025 2025; mkdir -p "$R/installers/extracted/revit2025"; echo x > "$R/installers/extracted/revit2025/setup.xml"; run "" cache --json
+check "cache: an unpacked folder with a bottle of its year is kept" eval '[ "$(items | cut -d"|" -f1-3)" = "installers/extracted/revit2025 (unpacked files)|keep|bottle rvt2025-a uses it" ]'
+check "cache: nothing kept is removable bytes" jq_ 'exit !($d->{removable_bytes} == 0)'
+reset; mkdir -p "$T/user"; echo i > "$T/user/RVT_2025_B_002_002.7z"; ln -s "$T/user" "$R/installers/revit2025"; run "" cache --json
+check "cache: a clone's own installers folder and a linked folder are never listed" jq_ 'exit !(@{$d->{items}} == 0)'
+cache_world() { # a free unpacked 2025, an unpacked 2026 with its bottle, a linked 2027 installer folder
+  mkdir -p "$R/installers/extracted/revit2025" "$R/installers/extracted/revit2026" "$T/user27"
+  echo x > "$R/installers/extracted/revit2025/setup.xml"; echo x > "$R/installers/extracted/revit2026/setup.xml"
+  echo i > "$T/user27/RVT_2027_B_002_002.7z"; ln -s "$T/user27" "$R/installers/revit2027"; bottle rvt2026-a 2026 2026
+}
+reset; cache_world; run "" cache clear
+check "cache clear without --yes changes nothing" eval '[ "$RC" = 1 ] && [ -d "$R/installers/extracted/revit2025" ] && grep -qF "To delete them: ./revit cache clear --yes" <<<"$OUT"'
+reset; cache_world; run "" cache clear --yes
+expect "cache clear --yes deletes only the removable" 0 "Freed"
+check "cache clear --yes: the free unpacked folder is gone, the kept one and the linked folder stay" \
+  eval '[ ! -e "$R/installers/extracted/revit2025" ] && [ -f "$R/installers/extracted/revit2026/setup.xml" ] && [ -f "$T/user27/RVT_2027_B_002_002.7z" ] && [ -L "$R/installers/revit2027" ]'
+for target in "" /sub; do
+  reset; mkdir -p "$R/installers/revit2024-dl/sub"; echo b > "$R/installers/revit2024-dl/sub/RVT_2025_B_002_002.7z"
+  ln -s "$R/installers/revit2024-dl$target" "$R/installers/revit2025"; run "" cache --json
+  check "cache: a downloads folder the installer link points into is kept (revit2024-dl$target)" eval '[ "$(items | cut -d"|" -f1-3)" = "installers/revit2024-dl (downloads)|keep|your installer folder" ]'
+  run "" cache clear --yes; check "cache clear --yes leaves it (revit2024-dl$target)" test -f "$R/installers/revit2024-dl/sub/RVT_2025_B_002_002.7z"
+done
+for kind in file update chain; do
+  reset; mkdir -p "$T/user" "$R/installers/revit2024-dl/upd" "$T/outside"; echo base > "$R/installers/revit2024-dl/base.7z"
+  echo u > "$R/installers/revit2024-dl/upd/Revit_2025_5_0.exe"; echo far > "$T/outside/base.7z"
+  case "$kind" in
+    file) ln -s "$R/installers/revit2024-dl/base.7z" "$T/user/RVT_2025_B_002_002.7z" ;;
+    update) echo own > "$T/user/RVT_2025_B_002_002.7z"; ln -s "$R/installers/revit2024-dl/upd" "$T/user/update" ;;
+    chain) ln -s "$T/outside" "$R/installers/revit2024-dl/bridge"; ln -s "$R/installers/revit2024-dl/bridge/base.7z" "$T/user/RVT_2025_B_002_002.7z" ;;
+  esac
+  ln -s "$T/user" "$R/installers/revit2025"
+  run "" find-installer "$T/user" --json; before="$OUT"
+  run "" cache --json
+  check "cache: a $kind link in the installer folder protects its target" eval '[ "$(items | cut -d"|" -f1-3)" = "installers/revit2024-dl (downloads)|keep|your installer folder" ]'
+  run "" cache clear --yes; run "" find-installer "$T/user" --json
+  check "cache clear --yes: the installer folder reads the same ($kind)" eval '[ "$OUT" = "$before" ] && [ -d "$R/installers/revit2024-dl" ]'
+done
+reset; mkdir -p "$R/installers/extracted/revit2025"; fake_lock "install.sh 2026 rvt2026-a"; run "" cache clear --yes
+expect "cache clear: busy" 1 "Another task is running"
+check "cache clear: busy deletes nothing" test -d "$R/installers/extracted/revit2025"
+reset; mkdir -p "$R/installers/extracted/revit2025"; echo x > "$R/installers/extracted/revit2025/setup.xml"; bottle rvt2026-a 2026 2026
+mkdir -p "$R/installers/extracted/revit2026"; echo x > "$R/installers/extracted/revit2026/setup.xml"; run "" cache
+check "cache: the text without --json" eval '[ "$RC" = 0 ] && grep -qE "^  installers/extracted/revit2025 \(unpacked files\) +[0-9.]+[KMGB]" <<<"$OUT" \
+  && grep -qF "installers/extracted/revit2026 (unpacked files)" <<<"$OUT" && grep -qF "kept: bottle rvt2026-a uses it" <<<"$OUT" \
+  && [ "$(tail -1 <<<"$OUT")" = "To delete them: ./revit cache clear --yes" ]'
+reset; run "" cache; check "cache: nothing to clear" eval '[ "$RC" = 0 ] && [ "$OUT" = "Nothing to clear." ]'
 # ---- end ----
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]

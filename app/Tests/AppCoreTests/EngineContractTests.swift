@@ -127,6 +127,17 @@ let repoEngine = URL(fileURLWithPath: #filePath).deletingLastPathComponent().del
         #expect(none.nothing == true); #expect(none.delete.isEmpty)
     }
 
+    @Test func cacheJSONDecodesFromTheRealEngine() async throws {
+        let e = try engine()
+        let empty = try JSONDecoder.engine.decode(CachePlan.self, from: try await e.run(["cache", "--json"]).stdout)
+        #expect(empty.items.isEmpty); #expect(empty.removableBytes == 0)
+        let x = root.appending(path: "data/installers/extracted/revit2025")
+        try FileManager.default.createDirectory(at: x, withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: x.appending(path: "x"))
+        let one = try JSONDecoder.engine.decode(CachePlan.self, from: try await e.run(["cache", "--json"]).stdout)
+        #expect(one.items.count == 1); #expect(one.items.first?.removable == true); #expect(one.items.first?.year == 2025)
+    }
+
     @Test func reportJSONDecodes() async throws {
         let out = try await engine().run(["report", "--json"])
         let r = try JSONDecoder.engine.decode(ReportResult.self, from: out.stdout)
