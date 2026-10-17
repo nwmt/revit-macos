@@ -9,7 +9,8 @@ struct MenuView: View {
     let env: AppEnvironment
 
     var body: some View {
-        let m = MenuContent.make(status: app.status, watched: app.watched, failure: app.failure, busy: app.isBusy)
+        // the snapshot, not the model: it does not change while a menu is open, so an open submenu stays open
+        let m = env.menu ?? MenuContent.make(status: nil, watched: nil, failure: nil, busy: true)
         ForEach(m.bottles, id: \.bottle) { b in
             Menu(b.running ? "\(b.title)  ●" : b.title) { BottleMenu(app: app, env: env, item: b, changes: m.changesEnabled) }
         }

@@ -1,6 +1,7 @@
 // The app model against the Swift fake engine: starting runs, following their events, deciding when a run without an
 // end is still finishing or was interrupted, reattaching after a restart, and when Cancel may send its signal.
 import Foundation
+import Observation
 import Testing
 @testable import AppCore
 
@@ -271,6 +272,21 @@ let endOK = #"{"event":"end","exit_code":0,"result":"ok","failed_action":"","fai
         let gone = run(install, phase: .interrupted, events: [startInstall])
         #expect(ok.succeeded); #expect(stopped.succeeded); #expect(!partial.succeeded); #expect(!gone.succeeded)
         #expect(!run(install, events: [startInstall]).succeeded)
+    }
+
+    @Test func aPollWithNothingNewChangesNothingObservable() async throws {
+        let h = Harness()
+        await h.fake.setStatus([statusOut()])
+        await h.model.refresh()
+        try await h.model.start(install)
+        await h.fake.emit(Array(eventLines("install-ok.ndjson")[0..<4])); await h.model.poll()
+        final class Flag: @unchecked Sendable { var on = false }
+        let changed = Flag()
+        withObservationTracking { _ = h.model.watched; _ = h.model.status; _ = h.model.failure } onChange: { changed.on = true }
+        await h.model.poll(now: Date().addingTimeInterval(60))   // no new events, the same status: the menu must not rebuild
+        #expect(!changed.on)
+        await h.fake.emit([#"{"event":"action","id":"revit","state":"done","exit":0}"#]); await h.model.poll()
+        #expect(changed.on)
     }
 
     @Test func launchLeavesAnEndedLastRunAlone() async throws {

@@ -68,7 +68,7 @@ public enum AppModelError: Error, Equatable { case busy, noDataFolder }
         lastStatus = Date()
         guard let out = await query(["status", "--json"]), out.exitCode == 0,
               let s = try? EngineStatus.decode(out.stdout) else { return false }
-        status = s
+        if status != s { status = s }   // an unchanged status is no change: the open menu must not rebuild
         return true
     }
 
@@ -151,7 +151,7 @@ public enum AppModelError: Error, Equatable { case busy, noDataFolder }
             if let s = sup, !s.start.isEmpty, s.pid > 0 { alive = await engine.processStart(pid: s.pid) == s.start }
             guard watched?.ctx == ctx else { return }
             if alive {
-                watched?.phase = .running
+                if watched?.phase != .running { watched?.phase = .running }
             } else {
                 // the supervisor is gone: a cached status may predate the lock, so read it now
                 guard await refreshed() else { return }
@@ -161,7 +161,7 @@ public enum AppModelError: Error, Equatable { case busy, noDataFolder }
                 if watched?.state.end != nil { await finish(); return }
                 let runID = watched?.record?.runID ?? ctx.lastPathComponent
                 if let b = status?.busy, b.busy, b.runId == runID {
-                    watched?.phase = .finishing
+                    if watched?.phase != .finishing { watched?.phase = .finishing }
                 } else {
                     watched?.phase = .interrupted
                     failure = .interrupted(logDir: Self.resultValue(ctx, "log_dir") ?? "")
@@ -177,6 +177,7 @@ public enum AppModelError: Error, Equatable { case busy, noDataFolder }
         guard var r = reader, var w = watched else { return }
         let events = (try? r.readNew()) ?? []
         reader = r
+        guard !events.isEmpty else { return }
         for e in events { w.state.apply(e) }
         watched = w
     }

@@ -53,6 +53,16 @@ struct AppMain: App {
     let app: AppModel?
     let wizard: WizardModel?
     let settings: SettingsModel?
+    /// What the menu shows. Rebuilding an open menu closes its submenus, so it is updated only while no menu is open
+    /// (AppKit says when menu tracking begins and ends) and only when it differs.
+    private(set) var menu: MenuContent?
+    @ObservationIgnored private var menuOpen = false
+
+    func syncMenu() {
+        guard !menuOpen, let app else { return }
+        let m = MenuContent.make(status: app.status, watched: app.watched, failure: app.failure, busy: app.isBusy)
+        if m != menu { menu = m }
+    }
 
     /// A GitHub API GET; anything but 200 is an error.
     nonisolated static func fetch(_ url: URL) async throws -> Data {
@@ -79,6 +89,11 @@ struct AppMain: App {
             wizard = nil
             settings = nil
         }
+        for (name, open) in [(NSMenu.didBeginTrackingNotification, true), (NSMenu.didEndTrackingNotification, false)] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.menuOpen = open; if !open { self?.syncMenu() } }
+            }
+        }
     }
 }
 
@@ -104,6 +119,7 @@ struct MenuLabel: View {
     private func run() async {
         guard let app = env.app else { return }
         await app.launch()
+        env.syncMenu()
         if app.status?.app?.placement == "move" { Placement.ask(name: env.name) }
         if app.watched != nil {
             env.router.open(.run)
@@ -114,6 +130,7 @@ struct MenuLabel: View {
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(1))
             await app.poll()
+            env.syncMenu()
             tick += 1
             if tick % 60 == 1, !env.repo.isEmpty { await env.settings?.checkUpdatesIfDue(now: Date()) }   // once a minute; it checks once a day
         }
