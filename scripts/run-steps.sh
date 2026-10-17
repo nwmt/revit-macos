@@ -63,6 +63,7 @@ for s in "${LIST[@]}"; do
   case "$code" in 0) st=done ;; skip) st=skipped ;; *) st=failed ;; esac
   emit step id "$(json_str "$s")" state "$(json_str "$st")" detail "$(json_str "$text")"
   [ $rc = 0 ] && continue
+  emit_error "$s" "$(grep -v '^[[:space:]]*$' "$RUN_DIR/$s.log" 2>/dev/null | tail -5)"   # the step's own words, for the app
   echo "$s" >> "$RUN_DIR/failed.txt"; failed=1
   case " $CRITICAL " in *" $s "*) echo "!! Step $s failed, and the steps after it need it: stopped." >&2; top_result failed; exit 1 ;; esac
 done

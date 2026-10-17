@@ -33,7 +33,7 @@ while IFS=$'\t' read -r _ _ role b; do [ "$role" = update ] && echo "   + update
 need=0; plan=()
 while IFS=$'\t' read -r u f _ _; do
   size="$(curl -fsSIL --retry 3 "$u" | tr -d '\r' | awk 'tolower($1)=="content-length:" {n=$2} END {print n}')"
-  [ -n "$size" ] || { echo "!! cannot reach $u (offline?)" >&2; exit 1; }
+  [ -n "$size" ] || { result_set reason download; echo "!! cannot reach $u (offline?)" >&2; exit 1; }
   have="$(stat -f %z "$f" 2>/dev/null || echo 0)"
   if [ "$have" = "$size" ]; then echo "   $(basename "$f"): already here"; continue; fi
   case "$f" in "$(revit_downloads "$YEAR")"/*) ;;   # ours: resumed or replaced below
@@ -49,7 +49,7 @@ if [ ${#plan[@]} -gt 0 ]; then
     $.NSURL.fileURLWithPath("/").getResourceValueForKeyError(r, $.NSURLVolumeAvailableCapacityForImportantUsageKey, null);
     ObjC.unwrap(r[0])' 2>/dev/null) || free=""
   [[ "$free" =~ ^[0-9]+$ ]] || free=$(df -k "$DLD" | awk 'NR==2 {print $4 * 1024}')
-  [ "$free" -gt $((need + 2000000000)) ] || { echo "!! not enough disk space: need $((need / 1000000000 + 2)) GB, free $((free / 1000000000)) GB" >&2; exit 1; }
+  [ "$free" -gt $((need + 2000000000)) ] || { result_set reason no_space; echo "!! not enough disk space: need $((need / 1000000000 + 2)) GB, free $((free / 1000000000)) GB" >&2; exit 1; }
   for p in "${plan[@]}"; do
     IFS=$'\t' read -r u f size <<<"$p"; mkdir -p "$(dirname "$f")" || exit 1
     echo ">> $(basename "$f") ($((size / 1000000)) MB)"
@@ -63,7 +63,7 @@ if [ ${#plan[@]} -gt 0 ]; then
       echo "   download interrupted, resuming ($try/5)…"; sleep 5
     done
     [ -z "$PW" ] || { kill "$PW" 2>/dev/null; wait "$PW" 2>/dev/null; PW=""; }
-    [ "$(stat -f %z "$f.part" 2>/dev/null || echo 0)" = "$size" ] || { echo "!! $(basename "$f"): incomplete; run again to resume" >&2; exit 1; }
+    [ "$(stat -f %z "$f.part" 2>/dev/null || echo 0)" = "$size" ] || { result_set reason download; echo "!! $(basename "$f"): incomplete; run again to resume" >&2; exit 1; }
     mv "$f.part" "$f"
   done
 fi

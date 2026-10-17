@@ -215,6 +215,7 @@ teststeps() { # test-only steps, in the sandbox copy only
 step_t_ok()   { echo t_ok >> "$T/order"; detail "fine"; }
 step_t_two()  { echo t_two >> "$T/order"; }
 step_t_fail() { echo t_fail >> "$T/order"; echo "it broke"; return 1; }
+step_t_why()  { echo "first line"; echo; echo "why it failed"; return 1; }
 step_t_skip() { skip "not for this version"; return 0; }
 step_t_wine() { w t-wine-call; }
 step_t_slow() { echo t_slow >> "$T/order"; w t-slow; }
@@ -703,6 +704,14 @@ check "steps emit running and a result each" eval '[ "$(grep -c "\"event\":\"ste
 check "a skipped step is skipped" grep -q '"id":"t_skip","state":"skipped"' "$T/ev"
 check "a failed step is failed" grep -q '"id":"t_fail","state":"failed"' "$T/ev"
 check "no event reaches the terminal" eval '! grep -q "\"event\"" <<<"$OUT"'
+norm_logs() { sed -e 's|logs/rvt2024-t/[^ )]*|logs/RUN|g' -e 's/([0-9]* s)/(N s)/g' <<<"$1"; }   # run folders and times differ
+reset; mkbottle rvt2024-t 2024 2024; teststeps
+OUT="$(cd / && exec 7>"$T/ev" && "${SANDBOX_ENV[@]}" REVIT_EVENTS_FD=7 /bin/bash "$R/scripts/run-steps.sh" 2024 rvt2024-t t_ok t_why 2>&1)"; with7="$OUT"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" /bin/bash "$R/scripts/run-steps.sh" 2024 rvt2024-t t_ok t_why 2>&1)"
+check "run-steps: a failed step's log tail is an error event: every line is JSON" /usr/bin/perl -MJSON::PP -ne 'JSON::PP->new->decode($_)' "$T/ev"
+check "run-steps: a failed step's log tail is an error event" /usr/bin/perl -MJSON::PP -e 'my $ok = 0; open(my $f, "<", $ARGV[0]) or exit 1;
+  while (<$f>) { my $e = decode_json($_); $ok = 1 if $e->{event} eq "message" && $e->{level} eq "error" && $e->{text} =~ /^t_why: / && $e->{text} =~ /why it failed/ } exit !$ok' "$T/ev"
+check "run-steps: the error event changes nothing on the terminal" test "$(norm_logs "$with7")" = "$(norm_logs "$OUT")"
 
 # ---- data folder ----
 reset; in_repo 'echo "$DATA"'; expect "DATA defaults to ROOT" 0 "$R"
@@ -867,6 +876,28 @@ reset; printf '#!/bin/bash\nexit 22\n' > "$T/curl"; chmod +x "$T/curl"   # never
 OUT="$(cd / && "${SANDBOX_ENV[@]}" PATH="$T:$PATH" /bin/bash "$R/scripts/get-redist.sh" 2025 2>&1)"; RC=$?
 expect "get-redist: a failed WebView2 download stops it" 1 "no fresh WebView2 runtime"
 check "get-redist: the failure says what to do" grep -qF "Check the internet connection" <<<"$OUT"
+# failure reasons for the app (the result file's reason): download (Retry resumes) and no_space; a checksum mismatch has none
+reason_of() { sed -n 's/^reason=//p' "$T/ctx/result" 2>/dev/null; }
+reset; mkdir -p "$T/ctx"; printf '#!/bin/bash\nexit 22\n' > "$T/curl"; chmod +x "$T/curl"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" PATH="$T:$PATH" REVIT_RUN_CTX="$T/ctx" /bin/bash "$R/scripts/get-redist.sh" 2025 2>&1)"; RC=$?
+check "get-redist: a failed download gives reason download" eval '[ "$RC" = 1 ] && [ "$(reason_of)" = download ]'
+reset; mkdir -p "$T/ctx"; printf '#!/bin/bash\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && echo junk > "$2"; shift; done\nexit 0\n' > "$T/curl"; chmod +x "$T/curl"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" PATH="$T:$PATH" REVIT_RUN_CTX="$T/ctx" /bin/bash "$R/scripts/get-redist.sh" 2020 2>&1)"; RC=$?
+check "get-redist: a checksum mismatch has no reason" eval '[ "$RC" = 1 ] && grep -qF "checksum mismatch" <<<"$OUT" && [ -z "$(reason_of)" ]'
+ci2025() { mkdir -p "$R/installers/revit2025"; mkzip "$R/installers/revit2025/Create_Installer_RVT_2025_5_English_WIN64.exe" \
+  "collection.xml=<C><BrowserImageUrl>https://dds.autodesk.com/x/RVT_2025_B_002_002.7z</BrowserImageUrl></C>"; }
+reset; srv_curl; ci2025; mkdir -p "$T/ctx"   # nothing on the server: the size probe fails
+OUT="$(cd / && "${SANDBOX_ENV[@]}" PATH="$T:$PATH" REVIT_RUN_CTX="$T/ctx" /bin/bash "$R/scripts/get-revit.sh" 2025 2>&1)"; RC=$?
+check "get-revit: an unreachable server gives reason download" eval '[ "$RC" = 1 ] && grep -qF "cannot reach" <<<"$OUT" && [ "$(reason_of)" = download ]'
+reset; srv_curl; ci2025; mkdir -p "$T/ctx"; mkzip "$T/srv/RVT_2025_B_002_002.7z" "setup.xml=<Setup/>"
+printf '#!/bin/bash\necho 1000\n' > "$T/osascript"; chmod +x "$T/osascript"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" PATH="$T:$PATH" REVIT_RUN_CTX="$T/ctx" /bin/bash "$R/scripts/get-revit.sh" 2025 2>&1)"; RC=$?
+check "get-revit: no space gives reason no_space" eval '[ "$RC" = 1 ] && grep -qF "not enough disk space" <<<"$OUT" && [ "$(reason_of)" = no_space ]'
+reset; srv_curl; ci2025; mkdir -p "$T/ctx"; mkzip "$T/srv/RVT_2025_B_002_002.7z" "setup.xml=<Setup/>" "x64/a.txt=1234567890"
+sed -i '' 's|^cp "\$f" "\$out"$|head -c $(( $(stat -f %z "$f") / 2 )) "$f" > "$out"|' "$T/curl"
+printf '#!/bin/bash\necho 999999999999999\n' > "$T/osascript"; printf '#!/bin/bash\nexit 0\n' > "$T/sleep"; chmod +x "$T/osascript" "$T/sleep"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" PATH="$T:$PATH" REVIT_RUN_CTX="$T/ctx" /bin/bash "$R/scripts/get-revit.sh" 2025 2>&1)"; RC=$?
+check "get-revit: a download that stays incomplete gives reason download" eval '[ "$RC" = 1 ] && grep -qF "incomplete; run again" <<<"$OUT" && [ "$(reason_of)" = download ]'
 reset; mkbottle rvt2025-t 2025 2025; mkdist 2025; mkdir -p "$R/installers/extracted/revit2025/3rdParty/x64/WebView2"
 touch "$R/installers/extracted/revit2025/3rdParty/x64/WebView2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
 run_steps 2025 rvt2025-t webview2; expect "webview2 with only the installer's runtime fails" 1 "webview2"

@@ -29,7 +29,7 @@ stub() { # a script that only records how it was called
   mkdir -p "$(dirname "$1")"
   cat > "$1" <<EOF
 #!/bin/bash
-echo "\$(basename "\$0") \$* | REVIT_YEAR=\${REVIT_YEAR:-} INSTALL_DRYRUN=\${INSTALL_DRYRUN:-} CX_RECREATE=\${CX_RECREATE:-} WINEPREFIX=\${WINEPREFIX:-} RUN_KIND=\${RUN_KIND:-} EULA=\${REVIT_ACCEPT_EULA:-}" >> "$CALLS"
+echo "\$(basename "\$0") \$* | REVIT_YEAR=\${REVIT_YEAR:-} INSTALL_DRYRUN=\${INSTALL_DRYRUN:-} CX_RECREATE=\${CX_RECREATE:-} WINEPREFIX=\${WINEPREFIX:-} RUN_KIND=\${RUN_KIND:-} EULA=\${REVIT_ACCEPT_EULA:-} REUSE=\${REVIT_REUSE_EXTRACTED:-} REEXTRACT=\${REVIT_REEXTRACT:-}" >> "$CALLS"
 EOF
   chmod +x "$1"
 }
@@ -547,5 +547,106 @@ reset; touch "$T/Enscape-4.18.2.1657-lts.exe"; run "" addins import enscape "$T/
 check "import: no shell error" eval '! grep -q "command not found" <<<"$OUT"'
 reset; run "" check 0000 --events "$T/ev"
 check "events: a year like 0000 still gives valid JSON" eval 'test -s "$T/ev/events.ndjson" && valid_ndjson "$T/ev/events.ndjson"'
+
+# ---- what the app needs (msls31, CrossOver support, ready add-ins, import msls31, reasons, dry runs) ----
+jq_() { /usr/bin/perl -MJSON::PP -e 'local $/; my $d = JSON::PP->new->decode(<STDIN>); '"$1" <<<"$OUT"; }   # $1 = perl code on $d
+run_data() { # like run, with REVIT_DATA=$1 (run's clean environment drops a REVIT_DATA set in front of it)
+  local d="$1"; shift; : > "$CALLS"
+  OUT="$(cd / && printf '\n' | env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" REVIT_DATA="$d" /bin/bash "$R/revit" "$@" 2>&1)"; RC=$?
+}
+cx_app() { # $1 = CFBundleShortVersionString: the fake CrossOver inside a CrossOver.app whose Info.plist has that version
+  local c="$T/CrossOver.app/Contents"; mkdir -p "$c/SharedSupport"; rm -rf "$c/SharedSupport/CrossOver"; cp -R "$CXF" "$c/SharedSupport/CrossOver"
+  printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>%s</string></dict></plist>\n' "$1" > "$c/Info.plist"
+}
+reset; run "" status --json; check "status --json: msls31 false, then true once the file is there (1)" grep -qE '"rosetta":(true|false),"msls31":false,' <<<"$OUT"
+mkdir -p "$R/installers/redist/win7sp1/x64"; touch "$R/installers/redist/win7sp1/x64/msls31.dll"; run "" status --json
+check "status --json: msls31 false, then true once the file is there (2)" grep -qF '"msls31":true,' <<<"$OUT"
+reset; cx_app 26.3.0; CXF="$T/CrossOver.app/Contents/SharedSupport/CrossOver" run "" status --json
+check "status --json: crossover supported for 26.3.0" grep -qE '"crossover":\{"found":true,"path":"[^"]*","version":"26.3.0","supported":true\}' <<<"$OUT"
+reset; cx_app 25.1.0; CXF="$T/CrossOver.app/Contents/SharedSupport/CrossOver" run "" status --json
+check "status --json: crossover not supported for 25.1.0" grep -qF '"version":"25.1.0","supported":false}' <<<"$OUT"
+reset; CXF="$T/none" run "" status --json
+check "status --json: crossover not supported when missing" grep -qE '"crossover":\{"found":false,[^}]*"supported":false\}' <<<"$OUT"
+ready_of() { jq_ 'for (@$d) { print $_->{ready} ? "true" : "false" if $_->{id} eq "'"$1"'" }'; }   # $1 = id
+reset; run "" addins list 2027 --json
+check "addins list --json: ready is the last key" eval 'grep -qE "\"tool_ok\":(true|false),\"ready\":(true|false)\}" <<<"$OUT"'
+check "addins list --json: enscape ready only after import (before)" test "$(ready_of enscape)" = false
+touch "$T/Enscape-4.18.2.1657-lts.exe"; run "" addins import enscape "$T/Enscape-4.18.2.1657-lts.exe"; run "" addins list 2027 --json
+check "addins list --json: enscape ready only after import (after)" test "$(ready_of enscape)" = true
+reset; run "" addins list 2025 --json; check "addins list --json: pyrevit is ready (auto)" test "$(ready_of pyrevit)" = true
+check "addins list --json: pdfprinter ready follows tool_ok" eval '[ "$(ready_of pdfprinter)" = "$(jq_ '"'"'for (@$d) { print $_->{tool_ok} ? "true" : "false" if $_->{id} eq "pdfprinter" }'"'"')" ]'
+pe_fixture() { # <file> <machine> <characteristics> <magic> [length]: a PE header (MZ, e_lfanew 0x40, PE, 1 section,
+  # SizeOfOptionalHeader 0xF0), then zeros to length (default 0x200; the declared header ends at 0x170), cut to length
+  /usr/bin/perl -e 'my ($f, $m, $c, $g, $len) = @ARGV; $len = hex($len // "0x200");
+    my $d = "MZ" . ("\0" x 58) . pack("V", 0x40) . "PE\0\0" . pack("vvVVVvv", hex $m, 1, 0, 0, 0, 0xF0, hex $c) . pack("v", hex $g);
+    $d .= "\0" x ($len - length $d) if $len > length $d; $d = substr($d, 0, $len);
+    open(my $o, ">", $f) or die; binmode $o; print $o $d; close $o' "$@"
+}
+MS="installers/redist/win7sp1/x64"
+reset; pe_fixture "$T/good.dll" 0x8664 0x2022 0x20b; run_data "$T/data" import msls31 "$T/good.dll"
+expect "import msls31: a PE32+ x64 DLL is copied into a data folder that does not exist yet" 0 "msls31.dll is ready."
+check "import msls31: the same bytes at their place, no .new left" eval 'cmp -s "$T/good.dll" "$T/data/$MS/msls31.dll" && [ ! -e "$T/data/$MS/msls31.dll.new" ]'
+for c in "x64 EXE:0x8664 0x0022 0x20b" "PE32 DLL:0x014c 0x2102 0x10b" "cut inside the PE header:0x8664 0x2022 0x20b 0x44" \
+  "cut after the magic:0x8664 0x2022 0x20b 0x5a" "cut inside the optional header:0x8664 0x2022 0x20b 0x100" \
+  "cut inside the section table:0x8664 0x2022 0x20b 0x160" "text file:"; do
+  reset; if [ -n "${c#*:}" ]; then pe_fixture "$T/bad.dll" ${c#*:}; else echo "not a dll" > "$T/bad.dll"; fi
+  run_data "$T/data" import msls31 "$T/bad.dll"
+  expect "import msls31 refuses: ${c%%:*}" 1 "This is not the 64-bit msls31.dll."
+  check "import msls31 refuses: ${c%%:*}: nothing written, no folder made" test ! -e "$T/data"
+done
+reset; pe_fixture "$T/good.dll" 0x8664 0x2022 0x20b; mkdir -p "$T/data/$MS"; chmod 555 "$T/data/$MS"
+run_data "$T/data" import msls31 "$T/good.dll"; chmod 755 "$T/data/$MS"
+expect "import msls31: a copy that fails says so" 1 "Could not copy"
+check "import msls31: a failed copy is not ready" eval '! grep -q "is ready" <<<"$OUT"'
+reset; pe_fixture "$T/good.dll" 0x8664 0x2022 0x20b; fake_lock "install.sh 2025 rvt2025-a"; run_data "$T/data" import msls31 "$T/good.dll"
+expect "import msls31: busy" 1 "Another task is running"
+reset; run "" import frob "$T/x"; expect "import: unknown kind" 1 "Unknown file: frob. Files: msls31"
+reset; run "" import msls31 "$T/nothing.dll"; expect "import msls31: a missing file" 1 "No such file"
+reset; run "" check 2025 --reextract; check "check passes the source flags (--reextract)" called "REEXTRACT=1"
+reset; run "" check 2025 --reuse-extracted; check "check passes the source flags (--reuse-extracted)" called "REUSE=1 "
+reset; printf '#!/bin/bash\nprintf "result=failed\\nfailed_action=revit\\nreason=download\\nlog_dir=/l\\n" > "$REVIT_RUN_CTX/result"; exit 1\n' > "$R/install.sh"
+run "" install 2024 --events "$T/ev"
+check "events: end carries the reason" eval 'EV | tail -1 | grep -qF "\"failed_action\":\"revit\",\"failed_steps\":[],\"log_dir\":\"/l\",\"reason\":\"download\"}"'
+# dry runs of remove and rebuild
+plan_ok() { # the JSON plan is disjoint: no delete label names a path a kept label names (path = the label up to " (")
+  jq_ 'my %k = map { (my $p = $_) =~ s/ \(.*//; ($p => 1) } @{$d->{kept}};
+    for (@{$d->{delete}}) { (my $p = $_->{label}) =~ s/ \(.*//; exit 1 if $k{$p} } exit 0'
+}
+reset; bottle rvt2025-a 2025 2025; run "" remove 2025; cancelled="$OUT"
+run "" remove 2025 --dry-run
+check "remove --dry-run: the same lines, nothing deleted" eval '[ "$OUT" = "$(sed "/^Type 2025 to continue/,\$d" <<<"$cancelled")"$'"'"'\n'"'"'"(dry run: nothing changed)" ] && [ "$RC" = 0 ]'
+check "remove --dry-run: the bottle is still there" test -d "$BOTTLES/rvt2025-a"
+check "remove --dry-run: lock.owner is not written" test ! -e "$H/Library/Application Support/revit-macos/lock.owner"
+reset; bottle rvt2025-a 2025 2025; apps 2025 rvt2025-a; mkdir -p "$R/installers/extracted/revit2025"; echo x > "$R/installers/extracted/revit2025/setup.xml"
+run "" remove 2025 --dry-run --json
+expect "remove --dry-run --json: a free unpacked folder is deleted (exit)" 0 '{"command":"remove","year":2025,"bottle":"rvt2025-a","nothing":false,"delete":[{"label":"bottle rvt2025-a","bytes":'
+check "remove --dry-run --json: a free unpacked folder is deleted" jq_ 'my @l = map { $_->{label} } @{$d->{delete}};
+  exit !(grep({ $_ eq "installers/extracted/revit2025 (unpacked files)" } @l) && grep({ $_ eq "~/Applications/Revit 2025 (rvt2025-a).app" } @l)
+    && (grep { $_->{label} =~ /^bottle / && $_->{bytes} =~ /^\d+$/ } @{$d->{delete}}) && (grep { $_->{label} =~ /^~/ && !defined $_->{bytes} } @{$d->{delete}})
+    && "@{$d->{kept}}" eq "installers/revit2025 (your downloads)"
+    && $d->{notes}[0] eq "Documents in this bottle is your Mac folder ~/Documents. It stays." && @{$d->{notes}} == 2)'
+check "remove --dry-run --json: free: delete and kept are disjoint" plan_ok
+check "remove --dry-run --json: free: nothing else on stdout" eval '[ "$(wc -l <<<"$OUT" | tr -d " ")" = 1 ]'
+check "remove --dry-run --json: free: nothing deleted" test -d "$R/installers/extracted/revit2025"
+reset; bottle rvt2025-a 2025 2025; bottle rvt2025-b 2025 2025; mkdir -p "$R/installers/extracted/revit2025"; echo x > "$R/installers/extracted/revit2025/setup.xml"
+run "" remove 2025 --dry-run --json
+check "remove --dry-run --json: a shared unpacked folder is only kept" jq_ 'exit !(@{$d->{delete}} == 1 && $d->{delete}[0]{label} eq "bottle rvt2025-a"
+  && join("|", @{$d->{kept}}) eq "installers/revit2025 (your downloads)|installers/extracted/revit2025 (bottle rvt2025-b still uses it)")'
+check "remove --dry-run --json: shared: delete and kept are disjoint" plan_ok
+reset; run "" remove 2025 --dry-run --json
+check "remove --dry-run --json: nothing" eval '[ "$RC" = 0 ] && [ "$OUT" = "{\"command\":\"remove\",\"year\":2025,\"bottle\":\"rvt2025-a\",\"nothing\":true,\"delete\":[],\"kept\":[],\"notes\":[]}" ]'
+reset; bottle rvt2025-a 2025 2025; run "" rebuild 2025 --dry-run --json
+check "rebuild --dry-run --json: add-ins reset in 2025" jq_ 'exit !($d->{command} eq "rebuild" && $d->{year} == 2025 && $d->{bottle} eq "rvt2025-a"
+  && $d->{addins_reset} && $d->{delete}[0]{label} eq "bottle rvt2025-a" && $d->{delete}[0]{bytes} =~ /^\d+$/ && @{$d->{notes}} == 2)'
+check "rebuild --dry-run --json: nothing ran" eval 'not_called install.sh && [ -d "$BOTTLES/rvt2025-a" ]'
+reset; bottle rvt2027-a 2027 2027; run "" rebuild 2027 --dry-run --json
+check "rebuild --dry-run --json: no add-ins reset in 2027" eval '[ "$RC" = 0 ] && grep -qF "\"addins_reset\":false" <<<"$OUT"'
+reset; bottle rvt2025-a 2025 2025; run "" rebuild 2025 --dry-run
+check "rebuild --dry-run: today's lines, then the dry-run line" eval '[ "$RC" = 0 ] && grep -qF "This deletes the bottle rvt2025-a" <<<"$OUT" && [ "$(tail -1 <<<"$OUT")" = "(dry run: nothing changed)" ] && not_called install.sh'
+reset; run "" install 2024 --dry-run; expect "--dry-run on install is refused" 1 "--dry-run is for ./revit remove and rebuild only."
+reset; bottle rvt2025-a 2025 2025; touch "$T/stamp"; sleep 1; run "" remove 2025 --dry-run --events "$T/ev"
+newer="$(find "$T" -mindepth 1 -newer "$T/stamp" ! -path "$T/ev" ! -path "$T/ev/*" ! -path "$CALLS")"
+if [ -s "$T/ev/events.ndjson" ] && [ -z "$newer" ]; then ok "remove --dry-run with --events writes only the events folder"
+else fail "remove --dry-run with --events writes only the events folder" "$newer"; fi
 # ---- end ----
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]

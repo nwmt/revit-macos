@@ -25,7 +25,7 @@ addin_fetch() { # $1 = id (loaded): the auto files of $YEAR that are not there y
     [ "$s" = auto ] && [ ! -f "$p" ] || continue
     mkdir -p "$(dirname "$p")" || return 1
     echo ">> $(basename "$p") from $u"
-    curl -fL --retry 3 -C - -o "$p.part" "$u" || { echo "download failed; run again to resume"; return 1; }
+    curl -fL --retry 3 -C - -o "$p.part" "$u" || { result_set reason download; echo "download failed; run again to resume"; return 1; }
     echo "$h  $p.part" | shasum -a 256 -c --quiet - || { rm -f "$p.part"; echo "checksum mismatch, download removed"; return 1; }
     mv "$p.part" "$p"
   done < <(addin_files "$YEAR")

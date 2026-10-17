@@ -104,6 +104,7 @@ in_sandbox "$A/Contents/Resources/engine/revit" status --json
 expect "status --json in the bundle" 0 ""
 check "status --json: app block" eval '[ "$(jget "$OUT" app.name)" = "Test App" ] && [ "$(jget "$OUT" app.version)" = 0.0.1 ] &&
   [ "$(jget "$OUT" app.path)" = "$A" ] && [ "$(jget "$OUT" app.placement)" = ok ]'
+check "status --json: app.data in the bundle" [ "$(jget "$OUT" app.data)" = "$H/Library/Application Support/Test App" ]
 fake_bundle "$T/Test App.app"; in_sandbox "$T/Test App.app/Contents/Resources/engine/revit" status --json
 check "status --json: an app outside Applications should move" [ "$(jget "$OUT" app.placement)" = move ]
 in_sandbox "$R/revit" status --json

@@ -90,6 +90,7 @@ Run them in Terminal, in the project folder. In a new Terminal window, first typ
 | `./revit status` | List the Revit bottles on this Mac |
 | `./revit find-installer ~/Downloads/Revit` | Say which Revit installer a folder holds |
 | `./revit link-installer 2025 ~/Downloads/Revit` | Install Revit 2025 from that folder instead of `installers/revit2025/` |
+| `./revit import msls31 <file>` | Add msls31.dll from your Windows PC |
 
 `rebuild` and `remove` show what they delete and ask you to type the year first.
 

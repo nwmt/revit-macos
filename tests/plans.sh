@@ -78,6 +78,16 @@ $OUT"; fi
   [ "$OUT" = free ] && ok "the lock is free after install.sh" || fail "the lock is free after install.sh" "$OUT"
   grep -qF "Last log:" <<<"$(cd / && "${INST_ENV[@]}" /bin/bash "$R/install.sh" 2024 rvt2024-t 2>&1)" \
     && ok "a failed action names its log" || fail "a failed action names its log" ""
+  # the engine's text for the failure reaches the app: the failed action's log tail as an error event (fd 7 only)
+  norm() { sed -e 's|logs/rvt2024-t/[^ )/]*|logs/RUN|g' <<<"$1"; }
+  prep; printf '#!/bin/bash\necho "first line"\necho "why it failed"\nexit 1\n' > "$R/scripts/get-shims.sh"
+  OUT="$(cd / && exec 7>"$T/ev" && "${INST_ENV[@]}" REVIT_EVENTS_FD=7 /bin/bash "$R/install.sh" 2024 rvt2024-t 2>&1)"; with7="$OUT"
+  rm -rf "$R/logs"; inst 2024 rvt2024-t
+  if /usr/bin/perl -MJSON::PP -e 'my $ok = 0; open(my $f, "<", $ARGV[0]) or exit 1;
+    while (<$f>) { my $e = decode_json($_); $ok = 1 if $e->{event} eq "message" && $e->{level} eq "error" && $e->{text} =~ /^shims: / && $e->{text} =~ /why it failed/ } exit !$ok' "$T/ev"
+  then ok "install: the failed action's tail is an error event"; else fail "install: the failed action's tail is an error event" "$(cat "$T/ev")"; fi
+  [ "$(norm "$with7")" = "$(norm "$OUT")" ] && ok "install: the error event changes nothing on the terminal" \
+    || fail "install: the error event changes nothing on the terminal" "$(diff <(norm "$with7") <(norm "$OUT"))"
   # a runner that stopped (or failed) without recording a failed step: install.sh stops, even with Revit.exe in place
   prep; cat > "$R/scripts/run-steps.sh" <<EOF
 #!/bin/bash
@@ -137,6 +147,11 @@ $OUT"; fi
   if [ "$RC" = 1 ] && grep -qF "bottle rvt2024-b still uses it" <<<"$OUT" && [ -f "$R/installers/extracted/revit2024/setup.xml" ]; then ok "--reextract refuses while another bottle uses it"
   else fail "--reextract refuses while another bottle uses it" "rc=$RC
 $OUT"; fi
+  OUT="$(cd / && "${INST_ENV[@]}" /bin/bash "$R/revit" check 2024 rvt2024-t --reextract --events "$T/evc" 2>&1)"; RC=$?
+  if [ "$RC" = 1 ] && tail -1 "$T/evc/events.ndjson" | grep -qF '"result":"in_use"'; then ok "check --reextract with another bottle of the year ends in_use"
+  else fail "check --reextract with another bottle of the year ends in_use" "rc=$RC
+$OUT
+$(cat "$T/evc/events.ndjson" 2>/dev/null)"; fi
   srcprep; srcrec old; mv "$R/installers/extracted/revit2024" "$R/installers/extracted/revit2024.old.77"
   sed -i '' 's|^echo "unpack-revit|echo "AGAIN=$REVIT_UNPACK_AGAIN unpack-revit|' "$R/scripts/unpack-revit.sh"
   ( cd / && "${INST_ENV[@]}" ROOT="$R" HOME="$H" /bin/bash -c '. "$ROOT/scripts/lib/common.sh"; lock_take test; REVIT_REEXTRACT=1 /bin/bash "$ROOT/install.sh" 2024 rvt2024-t' ) > "$T/out" 2>&1

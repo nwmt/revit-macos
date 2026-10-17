@@ -93,6 +93,12 @@ emit() { # $1 = event, then key and JSON value pairs (strings through json_str, 
   done
   printf '%s}\n' "$line" | emit_line ""
 }
+emit_error() { # $1 = the step or action that failed, $2 = its log's tail: the engine's text for the app (an error
+  # message event), cut to 2000 characters and made valid UTF-8 (Wine logs are not always)
+  [ -n "${REVIT_EVENTS_FD:-}" ] || return 0
+  local t; t="$( (trap '' INT TERM HUP; exec /usr/bin/perl -MEncode -e 'print encode("UTF-8", substr(decode("UTF-8", $ARGV[0]), 0, 2000))' -- "$1: $2") )"
+  emit message level "$(json_str error)" text "$(json_str "$t")"
+}
 emit_line() { # stdin = one line; $1 = "end" for the last one. Every writer takes <ctx>/.events.lock (a file of its own:
   # a flock on the shared fd 7 would be shared too) and checks .ended under it, so nothing lands after the end, not
   # even from a helper that outlived its parent (a progress poller); "end" writes the line and .ended under the lock

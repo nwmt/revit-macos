@@ -207,6 +207,7 @@ for a in "${PLAN[@]}"; do
     last="$(tail -1 "$RUN_DIR/failed.txt" 2>/dev/null)"; log="$RUN_DIR/action-$a.log"
     [ -n "$last" ] && [ -f "$RUN_DIR/$last.log" ] && log="$RUN_DIR/$last.log"   # a failed step: its own log
     echo "Last log: $(tilde "$log")" >&2; tail -15 "$log" 2>/dev/null | sed 's/^/  | /' >&2
+    n_="$(basename "$log" .log)"; emit_error "${n_#action-}" "$(tail -15 "$log" 2>/dev/null)"   # the same lines, for the app
     again="./revit install $YEAR$SFX"; [ -d "$B" ] && again="./revit rebuild $YEAR$SFX"
     echo "See docs/troubleshooting.md. To start over: $again" >&2
     result_set failed_action "$a"; result_set result failed

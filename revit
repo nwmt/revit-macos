@@ -5,21 +5,22 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"; . "$ROOT/scripts/lib/common.sh"
 YES=0; JSON=0; ALL=0; EVENTS_DIR=""; ONLY=""; EULA=""; REUSE_X=0; REEXTRACT=0; FLAG_ERR=""; SIG_GOT=""; END_DONE=0
-LOG=0; KEEP=0   # ./revit test: --log, and --keep (the maintainer's, not in the help)
+DRY=0; LOG=0; KEEP=0   # --dry-run: remove and rebuild only. ./revit test: --log, and --keep (the maintainer's, not in the help)
 RUN_ARG=""; EXCL=()   # ./revit report: --run <log_dir>, --exclude <file> (again for more files)
 RESULT_HINT=usage   # what an exit before the child means: usage until the arguments check out (Task 5 reads it)
 sup_end() { # $1 = exit status: the one end event, from the child's result file or from what an early exit means
   [ "$END_DONE" = 0 ] || return 0; END_DONE=1
   [ -n "${REVIT_EVENTS_FD:-}" ] || return 0
-  local f="$REVIT_RUN_CTX/result" r fa fs ld steps="" s
+  local f="$REVIT_RUN_CTX/result" r fa fs ld rs steps="" s
   r="$(sed -n 's/^result=//p' "$f" 2>/dev/null)"; fa="$(sed -n 's/^failed_action=//p' "$f" 2>/dev/null)"
   fs="$(sed -n 's/^failed_steps=//p' "$f" 2>/dev/null)"; ld="$(sed -n 's/^log_dir=//p' "$f" 2>/dev/null)"
+  rs="$(sed -n 's/^reason=//p' "$f" 2>/dev/null)"   # why it failed (no_space, download), when a script knew
   if [ -z "$r" ]; then
     if [ "$1" -gt 128 ]; then r=stopped; elif [ "$1" = 0 ]; then r=ok; else r="$RESULT_HINT"; fi
   fi
   for s in $fs; do steps+="${steps:+,}$(json_str "$s")"; done
-  printf '{"event":"end","exit_code":%s,"result":%s,"failed_action":%s,"failed_steps":[%s],"log_dir":%s}\n' \
-    "$1" "$(json_str "$r")" "$(json_str "$fa")" "$steps" "$(json_str "$ld")" | emit_line end
+  printf '{"event":"end","exit_code":%s,"result":%s,"failed_action":%s,"failed_steps":[%s],"log_dir":%s%s}\n' \
+    "$1" "$(json_str "$r")" "$(json_str "$fa")" "$steps" "$(json_str "$ld")" "${rs:+,\"reason\":$(json_str "$rs")}" | emit_line end
 }
 run_ctx_new() { # the run context: the result (and the events, Task 5) of this command, in $DATA/logs/runs/<run_id>/
   [ -n "${REVIT_RUN_CTX:-}" ] && return 0   # --events gave one
@@ -57,6 +58,7 @@ Usage: ./revit <command> <year> [bottle]
   doctor    check an installed Revit, its bottle and this Mac, change nothing (no year: this Mac and CrossOver)
   report    make a report for a GitHub issue, with personal data removed (no year: this Mac and the last runs)
   addins    add RevitLookup and pyRevit (--only <add-ins>; ./revit addins list <year>)
+  import    add a file the install needs from your Windows PC (import msls31 <file>)
   stop      quit a Revit that hangs
   logs      list the newest logs
   debug     start Revit and record a log
@@ -86,6 +88,7 @@ while [ $# -gt 0 ]; do
     --all) ALL=1 ;;
     --reuse-extracted) REUSE_X=1 ;;
     --reextract) REEXTRACT=1 ;;
+    --dry-run) DRY=1 ;;
     --log) LOG=1 ;;
     --keep) KEEP=1 ;;
     --events|--only|--accept-eula|--run|--exclude)
@@ -101,6 +104,7 @@ done
 CMD="${POS[0]:-}"; YEAR_ARG="${POS[1]:-}"; NAME="${POS[2]:-}"
 [ "$REUSE_X$REEXTRACT" != 11 ] || FLAG_ERR="Use --reuse-extracted or --reextract, not both."
 [ "$LOG" = 0 ] || [ "$CMD" = test ] || FLAG_ERR="--log is for ./revit test only."
+[ "$DRY" = 0 ] || [ "$CMD" = remove ] || [ "$CMD" = rebuild ] || FLAG_ERR="--dry-run is for ./revit remove and rebuild only."
 [ "$KEEP" = 0 ] || [ "$CMD" = test ] || FLAG_ERR="Unknown option: --keep"
 [ -z "$RUN_ARG" ] || [ "$CMD" = report ] || FLAG_ERR="--run is for ./revit report only."
 [ ${#EXCL[@]} = 0 ] || [ "$CMD" = report ] || FLAG_ERR="--exclude is for ./revit report only."
@@ -129,7 +133,7 @@ if [ -n "$EVENTS_DIR" ]; then
 fi
 [ -z "$FLAG_ERR" ] || die "$FLAG_ERR"
 case "$CMD" in
-  install|check|doctor|report|addins|stop|logs|debug|rebuild|remove|status|find-installer|link-installer|test) ;;
+  install|check|doctor|report|addins|import|stop|logs|debug|rebuild|remove|status|find-installer|link-installer|test) ;;
   ""|help|-h|--help) usage; exit 0 ;;
   *) echo "Unknown command: $CMD" >&2; echo >&2; usage >&2; exit 1 ;;
 esac
@@ -156,13 +160,18 @@ if [ "$CMD" = status ]; then
   busy=false; lock_free || busy=true
   if [ "$JSON" = 1 ]; then
     cxf=false; [ -x "$CX/bin/cxbottle" ] && cxf=true; ros=false; /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null && ros=true
-    printf '{"crossover":{"found":%s,"path":%s,"version":%s},"rosetta":%s,' "$cxf" "$(json_str "$CX")" "$(json_str "$(crossover_version)")" "$ros"
+    cxv="$(crossover_version)"; cxs=false   # supported: the major version the status words were earned on
+    [ "$cxf" = true ] && [ -n "$cxv" ] && [ "${cxv%%.*}" = "${CX_TESTED%%.*}" ] && cxs=true
+    ms=false; [ -f "$DATA/installers/redist/win7sp1/x64/msls31.dll" ] && ms=true
+    printf '{"crossover":{"found":%s,"path":%s,"version":%s,"supported":%s},"rosetta":%s,"msls31":%s,' \
+      "$cxf" "$(json_str "$CX")" "$(json_str "$cxv")" "$cxs" "$ros" "$ms"
     printf '"busy":{"busy":%s,"command":%s,"run_id":%s,"pid":%s,"pid_start":%s,"pgid":%s,"ctx":%s},' "$busy" \
       "$(json_str "$([ $busy = true ] && lock_owner)")" "$(json_str "$(lock_owner_field run_id)")" "$(json_str "$(lock_owner_field pid)")" \
       "$(json_str "$(lock_owner_field pid_start)")" "$(json_str "$(lock_owner_field pgid)")" "$(json_str "$(lock_owner_field ctx)")"
     if ap="$(app_path)"; then   # only inside the app: a clone's JSON stays as it was
-      printf '"app":{"name":%s,"version":%s,"path":%s,"placement":%s},' "$(json_str "$APP_NAME")" \
-        "$(json_str "$(sed -n 's/^app_version=//p' "$ROOT/.app-bundle")")" "$(json_str "$ap")" "$(json_str "$(app_placement "$ap")")"
+      printf '"app":{"name":%s,"version":%s,"path":%s,"placement":%s,"data":%s},' "$(json_str "$APP_NAME")" \
+        "$(json_str "$(sed -n 's/^app_version=//p' "$ROOT/.app-bundle")")" "$(json_str "$ap")" "$(json_str "$(app_placement "$ap")")" \
+        "$(json_str "$DATA")"
     fi
     printf '"bottles":[%s]}\n' "$b_json"
   else
@@ -204,10 +213,31 @@ if [ "$CMD" = addins ] && [ "$YEAR_ARG" = list ]; then
     addin_load "$id"; av=false; addin_available && av=true; ins=false; [ -d "$B" ] && addin_is_installed && ins=true
     te=false; in_list "$YEAR" ${ADDIN_TESTED[@]+"${ADDIN_TESTED[@]}"} && te=true
     src="$(addin_files "$YEAR" | head -1 | cut -f1)"; tok=true; [ -z "$ADDIN_TOOL" ] || command -v "$ADDIN_TOOL" >/dev/null || [ -x "/opt/homebrew/bin/$ADDIN_TOOL" ] || tok=false
-    out+="${out:+,}{\"id\":$(json_str "$id"),\"name\":$(json_str "$ADDIN_NAME"),\"about\":$(json_str "$ADDIN_ABOUT"),\"available\":$av,\"installed\":$ins,\"tested\":$te,\"source\":$(json_str "$src"),\"eula\":$(json_str "$ADDIN_EULA"),\"tool\":$(json_str "$ADDIN_TOOL"),\"tool_ok\":$tok}"
+    rdy="$tok"   # ready: every own file imported (auto files come at install), the tool there
+    while IFS=$'\t' read -r s f _ _; do [ "$s" = own ] && [ ! -f "$DATA/installers/addins/$f" ] && rdy=false; done < <(addin_files "$YEAR")
+    out+="${out:+,}{\"id\":$(json_str "$id"),\"name\":$(json_str "$ADDIN_NAME"),\"about\":$(json_str "$ADDIN_ABOUT"),\"available\":$av,\"installed\":$ins,\"tested\":$te,\"source\":$(json_str "$src"),\"eula\":$(json_str "$ADDIN_EULA"),\"tool\":$(json_str "$ADDIN_TOOL"),\"tool_ok\":$tok,\"ready\":$rdy}"
   done
   if [ "$JSON" = 1 ]; then echo "[$out]"; else for id in "${ADDIN_IDS[@]}"; do addin_load "$id"; addin_available && echo "  $id  $ADDIN_NAME — $ADDIN_ABOUT"; done; fi
   exit 0
+fi
+pe_dll64() { # $1 = file: a 64-bit Windows DLL (PE32+, x64), its whole declared header inside the file
+  /usr/bin/perl -e 'open(my $f, "<", $ARGV[0]) or exit 1; binmode $f; local $/; my $d = <$f>; my $n = length $d;
+    exit 1 if $n < 0x40 || substr($d, 0, 2) ne "MZ"; my $e = unpack("V", substr($d, 0x3c, 4));
+    exit 1 if $e + 26 > $n || substr($d, $e, 4) ne "PE\0\0";
+    my ($m, $ns, undef, undef, undef, $so, $ch) = unpack("vvVVVvv", substr($d, $e + 4, 20)); my $mg = unpack("v", substr($d, $e + 24, 2));
+    exit !($m == 0x8664 && $ns >= 1 && $so >= 112 && ($ch & 0x2000) && $mg == 0x20b && $e + 24 + $so + 40 * $ns <= $n)' "$1"
+}
+if [ "$CMD" = import ]; then   # a file the install needs that only the user's Windows PC has; no year
+  kind="${POS[1]:-}"; file="${POS[2]:-}"
+  [ -n "$kind" ] || die "Which file? Example: ./revit import msls31 ~/Downloads/msls31.dll"
+  [ "$kind" = msls31 ] || die "Unknown file: $kind. Files: msls31"
+  [ -f "$file" ] || die "No such file: $file"
+  pe_dll64 "$file" || die "This is not the 64-bit msls31.dll. Copy C:\\Windows\\System32\\msls31.dll from a licensed Windows 7/10 x64 PC (see installers/README.md)."
+  not_busy; lock_take "./revit import msls31"
+  d="$DATA/installers/redist/win7sp1/x64"
+  { mkdir -p "$d" && cp "$file" "$d/msls31.dll.new" && mv -f "$d/msls31.dll.new" "$d/msls31.dll"; } 2>/dev/null \
+    || { rm -f "$d/msls31.dll.new" 2>/dev/null; die "Could not copy $file to installers/redist/win7sp1/x64."; }
+  echo "msls31.dll is ready."; exit 0
 fi
 if [ "$CMD" = doctor ] || [ "$CMD" = report ]; then   # read files only: no lock, no Wine; they work while another
   # task holds the lock and while Revit runs. doctor (tools/doctor.py) writes nothing; no year: the Mac and CrossOver.
@@ -286,6 +316,12 @@ docs_note() { # the bottle's Documents is normally a link to the Mac's Documents
 export_source_flags() { # --reuse-extracted / --reextract for install.sh and the unpacker
   [ "$REUSE_X" = 1 ] && export REVIT_REUSE_EXTRACTED=1; [ "$REEXTRACT" = 1 ] && export REVIT_REEXTRACT=1; return 0
 }
+bytes_of() { local k; k="$(du -sk "$1" 2>/dev/null | cut -f1)"; [[ "$k" =~ ^[0-9]+$ ]] && echo $((k * 1024)) || echo null; }
+item_json() { printf '{"label":%s,"bytes":%s}' "$(json_str "$1")" "$2"; }   # $1 = label, $2 = bytes or null
+notes_json() { # docs_note's lines without their indent, as a JSON list
+  local l out=""; while IFS= read -r l; do out+="${out:+,}$(json_str "${l#  }")"; done < <(docs_note); printf '[%s]' "$out"
+}
+dry_end() { echo "(dry run: nothing changed)"; exit 0; }   # --dry-run: everything up to the typed confirmation, then this
 extracted_plan() { # sets X, DROP_X (1 = remove deletes the unpacked files) and KEEP_X (why they stay)
   X="$(revit_extracted "$YEAR")"; DROP_X=0; KEEP_X=""
   [ -d "$X" ] || return 0
@@ -295,7 +331,7 @@ extracted_plan() { # sets X, DROP_X (1 = remove deletes the unpacked files) and 
 # ---- run the command ----
 case "$CMD" in
   install) not_busy; run_ctx_new; sup_traps; lock_take --no-trap "install.sh $YEAR $NAME"; export_source_flags; supervise "$ROOT/install.sh" "$YEAR" "$NAME" ;;
-  check)   export INSTALL_DRYRUN=1; run_ctx_new; sup_traps; supervise "$ROOT/install.sh" "$YEAR" "$NAME" ;;
+  check)   export INSTALL_DRYRUN=1; export_source_flags; run_ctx_new; sup_traps; supervise "$ROOT/install.sh" "$YEAR" "$NAME" ;;
   addins)
     if [ -n "$ONLY" ]; then
       . "$ROOT/scripts/lib/addins.sh"; ids=()
@@ -340,6 +376,12 @@ case "$CMD" in
     echo "Make the problem happen, quit Revit, then run ./revit report $YEAR$SFX." ;;
   rebuild)
     need_crossover; bottle_guard must_exist "$YEAR" "$NAME"; not_busy
+    if [ "$DRY$JSON" = 11 ]; then
+      ar=false; [ ${#ADDIN_STEPS[@]} -gt 0 ] && ar=true
+      printf '{"command":"rebuild","year":%s,"bottle":%s,"delete":[%s],"addins_reset":%s,"notes":%s}\n' "$((10#$YEAR))" \
+        "$(json_str "$NAME")" "$(item_json "bottle $NAME" "$(bytes_of "$B")")" "$ar" "$(notes_json)"
+      exit 0
+    fi
     echo "This deletes the bottle $NAME and installs Revit $YEAR into it again (10–30 minutes)."
     echo "  Revit is installed from the files already in installers/extracted/revit$YEAR. To get a newer Revit update,"
     echo "  see \"Updating\" in the README."
@@ -349,6 +391,7 @@ case "$CMD" in
       echo "  Revit settings in this bottle are reset."
     fi
     docs_note
+    [ "$DRY" = 0 ] || dry_end
     confirm
     run_ctx_new; sup_traps; lock_take --no-trap "./revit rebuild $YEAR $NAME"
     bottle_guard must_exist "$YEAR" "$NAME"   # again: the bottle may have changed, or Revit started, while the user read
@@ -376,7 +419,23 @@ case "$CMD" in
     bottle_guard allow_missing "$YEAR" "$NAME"; not_busy
     extracted_plan
     HAD_B=0; [ -d "$B" ] && HAD_B=1
-    if [ "$HAD_B" = 0 ] && [ "$NA" -eq 0 ] && [ ${#CXAPPS[@]} -eq 0 ] && [ "$DROP_X" = 0 ]; then echo "Nothing to remove for Revit $YEAR ($NAME)."; exit 0; fi
+    NOTHING=0; [ "$HAD_B" = 0 ] && [ "$NA" -eq 0 ] && [ ${#CXAPPS[@]} -eq 0 ] && [ "$DROP_X" = 0 ] && NOTHING=1
+    if [ "$DRY$JSON" = 11 ]; then   # the same plan as the lines below, as one JSON object
+      del=""; kept=""; nj="[]"
+      if [ "$NOTHING" = 0 ]; then
+        [ "$HAD_B" = 1 ] && del+="${del:+,}$(item_json "bottle $NAME" "$(bytes_of "$B")")"
+        [ "$DROP_X" = 1 ] && del+="${del:+,}$(item_json "installers/extracted/revit$YEAR (unpacked files)" "$(bytes_of "$X")")"
+        for a in ${APPS[@]+"${APPS[@]}"}; do del+="${del:+,}$(item_json "$(tilde "$a")" null)"; done
+        [ ${#CXAPPS[@]} -eq 0 ] || del+="${del:+,}$(item_json "${#CXAPPS[@]} CrossOver menu apps of $NAME in ~/Applications/CrossOver" null)"
+        kept="$(json_str "installers/revit$YEAR (your downloads)")"
+        [ -n "$KEEP_X" ] && kept+=",$(json_str "installers/extracted/revit$YEAR ($KEEP_X)")"
+        [ "$HAD_B" = 0 ] || nj="$(notes_json)"
+      fi
+      printf '{"command":"remove","year":%s,"bottle":%s,"nothing":%s,"delete":[%s],"kept":[%s],"notes":%s}\n' "$((10#$YEAR))" \
+        "$(json_str "$NAME")" "$([ "$NOTHING" = 1 ] && echo true || echo false)" "$del" "$kept" "$nj"
+      exit 0
+    fi
+    if [ "$NOTHING" = 1 ]; then echo "Nothing to remove for Revit $YEAR ($NAME)."; exit 0; fi
     echo "This deletes:"
     [ "$HAD_B" = 1 ] && printf '  %-48s %s\n' "bottle $NAME" "$(size "$B")"
     [ "$DROP_X" = 1 ] && printf '  %-48s %s\n' "installers/extracted/revit$YEAR (unpacked files)" "$(size "$X")"
@@ -385,6 +444,7 @@ case "$CMD" in
     [ "$HAD_B" = 1 ] && docs_note
     echo "Kept: installers/revit$YEAR (your downloads)."
     [ -n "$KEEP_X" ] && echo "Kept: installers/extracted/revit$YEAR ($KEEP_X)."
+    [ "$DRY" = 0 ] || dry_end
     confirm
     lock_take "./revit remove $YEAR $NAME"
     # again, right before deleting: the bottle may have changed, or Revit started, while the user was reading
