@@ -64,7 +64,7 @@ NETFX_2020_MAX = 461808   # 4.7.2: Revit 2020 crashes on it and on 4.8
 WEBVIEW2_MIN = 124        # Revit's WebView2 SDK needs a runtime about this new; the installer's 103 is too old
 FREE_MIN_GB = 10
 MACOS_TESTED = 26
-VERIFIED_BUILD_YEARS = ()   # years whose real Revit.exe matched the installer's build: then a mismatch is a ✗
+VERIFIED_BUILD_YEARS = (2027,)   # 2027.3: Revit.exe 27.3.0.28 matched, 2026-10-17; years whose real Revit.exe matched the installer's build: then a mismatch is a ✗
 APP_SCRIPT = re.compile(r"'([^']*/bin/wine)' --bottle '([^']*)'")   # what scripts/make-apps.sh writes
 WINEISH = re.compile(r"wine|crossover|\.exe\b", re.I)   # processes that may hold a bottle's files
 HOSTS_FIX = "H=\"$(hostname)\"; sudo sh -c \"printf '127.0.0.1\\t$H\\n::1\\t$H\\n' >> /etc/hosts\""
