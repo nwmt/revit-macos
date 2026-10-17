@@ -243,6 +243,36 @@ let endOK = #"{"event":"end","exit_code":0,"result":"ok","failed_action":"","fai
         #expect(h.notifier.posts.count == 1)
     }
 
+    @Test func anInterruptedInstallWhoseBottleExistsRecoversByRebuild() async throws {
+        let h = Harness()
+        await h.fake.setStatus([statusOut()])
+        try await h.model.start(install.with(.reextract))
+        await h.fake.emit(eventLines("no-end.ndjson")); await h.fake.setStarts([:])
+        let withBottle = try JSONSerialization.jsonObject(with: statusOut().stdout) as! [String: Any]
+        var s = withBottle; s["bottles"] = [["name": "rvt2025-a", "year": "2025", "revit": false, "running": false, "addins": []]]
+        await h.fake.setStatus([EngineOutput(stdout: try JSONSerialization.data(withJSONObject: s), stderr: "", exitCode: 0)])
+        await h.model.poll()
+        #expect(h.model.watched?.phase == .interrupted)
+        #expect(h.model.recoveryRequest == .rebuild(year: 2025, bottle: "rvt2025-a", source: .reextract))
+    }
+
+    @Test func aRetryWithoutTheBottleRepeatsTheRequest() async throws {
+        let h = Harness()
+        await h.fake.setStatus([statusOut()])
+        try await h.model.start(install)
+        await h.fake.emit(eventLines("no-end.ndjson")); await h.fake.setStarts([:]); await h.model.poll()
+        #expect(h.model.recoveryRequest == install)
+    }
+
+    @Test func onlyAnOkOrStoppedEndIsASuccess() {
+        let ok = run(install, phase: .ended, events: [startInstall, .end(EndInfo(exitCode: 0, result: "ok", failedAction: "", failedSteps: [], logDir: "", reason: nil))])
+        let stopped = run(install, phase: .ended, events: [startInstall, .end(EndInfo(exitCode: 130, result: "stopped", failedAction: "", failedSteps: [], logDir: "", reason: nil))])
+        let partial = run(install, phase: .ended, events: [startInstall, .end(EndInfo(exitCode: 1, result: "partial", failedAction: "", failedSteps: ["dynamo"], logDir: "", reason: nil))])
+        let gone = run(install, phase: .interrupted, events: [startInstall])
+        #expect(ok.succeeded); #expect(stopped.succeeded); #expect(!partial.succeeded); #expect(!gone.succeeded)
+        #expect(!run(install, events: [startInstall]).succeeded)
+    }
+
     @Test func launchLeavesAnEndedLastRunAlone() async throws {
         let h = Harness()
         let c = h.folder("app-done", eventLines("install-ok.ndjson"))

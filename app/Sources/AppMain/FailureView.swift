@@ -9,6 +9,7 @@ struct FailureView: View {
     let env: AppEnvironment
     let run: WatchedRun
     let failure: Failure
+    @Environment(\.dismissWindow) private var dismissWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -66,7 +67,7 @@ struct FailureView: View {
                 Button("Copy diagnostic report") {
                     Task { await Report.copy(app: app, year: run.state.year ?? run.record?.request.year, bottle: run.state.bottle ?? run.record?.request.bottle, logDir: logDir) }
                 }
-                Button("Close") { app.dismissFailure() }
+                Button("Close") { app.dismissFailure(); dismissWindow(id: Route.run.id) }
             }
         }
         .textSelection(.enabled)
@@ -93,7 +94,7 @@ struct FailureView: View {
         HStack {
             Button("Show log") { showLog(log) }
             if retry {
-                if let r = app.retryRequest { Button("Retry") { self.retry(r) } } else { elsewhere }
+                if let r = app.recoveryRequest { Button(isRebuild(r) ? String(localized: "Rebuild…") : String(localized: "Retry")) { self.retry(r) } } else { elsewhere }
             }
         }
     }
@@ -104,7 +105,10 @@ struct FailureView: View {
     }
 
     private func retry(_ r: RunRequest) {
+        if isRebuild(r) { Task { await Confirm.plan(app: app, env: env, r) }; return }   // deletes the bottle: confirm first
         app.dismissFailure()
         Task { await Confirm.start(app: app, env: env, r) }
     }
+
+    private func isRebuild(_ r: RunRequest) -> Bool { if case .rebuild = r { true } else { false } }
 }

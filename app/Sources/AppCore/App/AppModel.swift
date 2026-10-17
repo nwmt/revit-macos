@@ -12,6 +12,8 @@ public struct WatchedRun: Equatable, Sendable {
     public var state: RunState
     public var phase: RunPhase
     public let record: RunRecord?          // non-nil: started by this app (now or before a restart)
+    /// Ended well: ok, or stopped on purpose. A failure stays a failure when its details are closed.
+    public var succeeded: Bool { phase == .ended && (state.end?.kind == .ok || state.end?.kind == .stopped) }
 }
 
 public enum CancelOutcome: Equatable, Sendable { case sent, refused(String) }
@@ -48,6 +50,15 @@ public enum AppModelError: Error, Equatable { case busy, noDataFolder }
 
     public var isBusy: Bool { starting || watchedIsActive || (status?.busy.busy ?? false) }
     public var retryRequest: RunRequest? { watched?.record?.request }
+    /// What Retry runs: the same request, except that an install interrupted after its bottle was made is a rebuild
+    /// (the engine refuses to install into an existing bottle; Rebuild goes through its confirmation).
+    public var recoveryRequest: RunRequest? {
+        guard let r = retryRequest else { return nil }
+        if case .interrupted = failure, case let .install(y, b, s) = r, status?.bottles.contains(where: { $0.name == b }) == true {
+            return .rebuild(year: y, bottle: b, source: s)
+        }
+        return r
+    }
     public var dataFolder: URL? { dataOverride ?? status?.app.map { URL(fileURLWithPath: $0.data) } }
 
     public func refresh() async { _ = await refreshed() }

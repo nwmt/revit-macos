@@ -106,7 +106,7 @@ struct ResultView: View {
     let run: WatchedRun
 
     var body: some View {
-        if run.phase == .ended, app.failure == nil {
+        if run.succeeded {
             let kind = run.state.end?.kind
             VStack(alignment: .leading, spacing: 8) {
                 Text(kind == .stopped ? "Stopped." : "Done.").font(.headline)
@@ -121,6 +121,8 @@ struct ResultView: View {
             }
         } else if let f = app.failure {
             FailureView(app: app, env: env, run: run, failure: f)
+        } else {
+            Text("The task did not end well. Its log has the details.").foregroundStyle(.secondary)   // details closed
         }
     }
 }
