@@ -49,7 +49,7 @@ struct WizardView: View {
                 Spacer()
                 Text(summary(s)).foregroundStyle(.secondary).lineLimit(2)
             }
-            if expanded || row == .check || row == .install { controls(row, s) }
+            if expanded || row == .installer || row == .check || row == .install { controls(row, s) }
             if s == .waiting, (row == .check || row == .install), let b = wizard.busyText { Text("Busy: \(b)").foregroundStyle(.secondary) }
         }
     }
@@ -69,9 +69,13 @@ struct WizardView: View {
             dropZone(String(localized: "Drop msls31.dll here")) { u in Task { await wizard.importMsls31(u) } }
             Button("Choose file…") { pickFile = true }
         case .installer:
-            Text("The folder with your Revit installer from your Autodesk Account (it is only read).").font(.callout).foregroundStyle(.secondary)
-            dropZone(String(localized: "Drop the installer folder here")) { u in Task { await wizard.chooseInstaller(u) } }
-            Button("Choose folder…") { pickFolder = true }
+            if wizard.installer == nil {
+                Text("The folder with your Revit installer from your Autodesk Account (it is only read).").font(.callout).foregroundStyle(.secondary)
+                dropZone(String(localized: "Drop the installer folder here")) { u in Task { await wizard.chooseInstaller(u) } }
+                Button("Choose folder…") { pickFolder = true }
+            } else {
+                Button("Choose another folder…") { pickFolder = true }   // another installer, another year
+            }
         case .check:
             if wizard.installer != nil {
                 HStack {

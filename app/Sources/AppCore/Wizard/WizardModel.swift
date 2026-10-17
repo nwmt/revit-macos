@@ -190,6 +190,14 @@ struct CheckKey: Equatable { let year: Int; let folder: String; let bottle: Stri
     public func install() async throws {
         guard case .open = state(.install), let i = installer else { throw WizardError.notReady }
         try await app.start(.install(year: i.year, bottle: bottleName, source: source))
+        reset()   // the install runs in the progress window; the wizard is ready for the next version
+    }
+
+    /// Back to the start: no installer, no name, no source choice, no check.
+    public func reset() {
+        installer = nil; source = nil; crossoverNote = nil; errors = [:]
+        bottleName = ""
+        forgetCheck()
     }
 
     private func act(_ row: WizardRow, _ f: () async throws -> Void) async {

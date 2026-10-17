@@ -215,6 +215,16 @@ let mismatchEnd = #"{"event":"end","exit_code":1,"result":"source_mismatch","fai
         if c == .source { await w.h.fake.openGate() }
     }
 
+    @Test func installResetsTheWizardForTheNextVersion() async throws {
+        let w = WizardHarness()
+        await w.status(wizardStatus())
+        await w.installerReady()
+        await w.check([checkEnd])
+        try await w.wizard.install()
+        #expect(w.wizard.installer == nil); #expect(w.wizard.bottleName == ""); #expect(w.wizard.source == nil)
+        #expect(w.wizard.state(.installer) == .open); #expect(w.wizard.state(.check) == .waiting)
+    }
+
     @Test func busyKeepsCheckAndInstallWaiting() async {
         let w = WizardHarness()
         await w.status(wizardStatus())
