@@ -2,6 +2,7 @@
 // after an alert): the menu bar label observes them and opens the window.
 import AppCore
 import Observation
+import SwiftUI
 
 enum Route: Equatable {
     case run, wizard, settings
@@ -15,4 +16,11 @@ enum Route: Equatable {
 @MainActor @Observable final class WindowRouter {
     var pending: Route?
     func open(_ r: Route) { pending = r }
+}
+
+extension View {
+    /// A window of the app: counted, so the app shows in the Dock and in Cmd-Tab while any is open.
+    func appWindow(_ env: AppEnvironment) -> some View {
+        onAppear { env.windowAppeared() }.onDisappear { env.windowGone() }
+    }
 }

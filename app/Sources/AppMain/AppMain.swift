@@ -23,22 +23,22 @@ struct AppMain: App {
         .menuBarExtraStyle(.menu)
 
         Window("Progress", id: Route.run.id) {
-            if let app = env.app { RunWindow(app: app, env: env) }
+            if let app = env.app { RunWindow(app: app, env: env).appWindow(env) }
         }
         .windowResizability(.contentSize)
 
         Window("Add Revit", id: Route.wizard.id) {
-            if let app = env.app { WizardWindow(app: app, env: env) }
+            if let app = env.app { WizardWindow(app: app, env: env).appWindow(env) }
         }
         .windowResizability(.contentSize)
 
         WindowGroup("Add-ins", id: "addins", for: BottleRef.self) { $ref in
-            if let app = env.app, let ref { AddinsWindow(app: app, env: env, ref: ref) }
+            if let app = env.app, let ref { AddinsWindow(app: app, env: env, ref: ref).appWindow(env) }
         }
         .windowResizability(.contentSize)
 
         Window("Settings", id: Route.settings.id) {
-            if let app = env.app { SettingsWindow(app: app, env: env) }
+            if let app = env.app { SettingsWindow(app: app, env: env).appWindow(env) }
         }
         .windowResizability(.contentSize)
     }
@@ -57,6 +57,20 @@ struct AppMain: App {
     /// (AppKit says when menu tracking begins and ends) and only when it differs.
     private(set) var menu: MenuContent?
     @ObservationIgnored private var menuOpen = false
+    @ObservationIgnored private var openWindows = 0
+
+    /// While a window of the app is open the app is a regular one (a Dock icon, Cmd-Tab), so another app's dialog cannot
+    /// bury its window; when the last one closes it is a menu bar app again.
+    func windowAppeared() {
+        openWindows += 1
+        if openWindows == 1 { NSApp.setActivationPolicy(.regular) }
+        NSApp.activate()
+    }
+
+    func windowGone() {
+        openWindows = max(0, openWindows - 1)
+        if openWindows == 0 { NSApp.setActivationPolicy(.accessory) }
+    }
 
     func syncMenu() {
         guard !menuOpen, let app else { return }

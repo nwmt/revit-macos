@@ -24,7 +24,7 @@ struct RunWindow: View {
                 }
                 if !w.state.steps.isEmpty {
                     GroupBox("Steps") {
-                        ScrollView {
+                        ScrollViewReader { proxy in ScrollView {
                             VStack(alignment: .leading, spacing: 2) {
                                 ForEach(w.state.steps, id: \.id) { s in
                                     Label {
@@ -33,9 +33,13 @@ struct RunWindow: View {
                                             if let d = s.detail { Text(d).foregroundStyle(.secondary) }
                                         }
                                     } icon: { Image(systemName: symbol(s.state)) }
+                                    .lineLimit(1).id(s.id)
                                 }
                             }.frame(maxWidth: .infinity, alignment: .leading)
-                        }.frame(maxHeight: 180)
+                        }
+                        // a fixed height: a window sized to its content gives a bare ScrollView none at all
+                        .frame(height: min(CGFloat(w.state.steps.count) * 22 + 6, 200))
+                        .onChange(of: w.state.steps.count) { proxy.scrollTo(w.state.steps.last?.id, anchor: .bottom) } }
                     }
                 }
                 ForEach(Array(w.state.messages.enumerated()), id: \.offset) { _, msg in
