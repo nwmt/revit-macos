@@ -755,8 +755,11 @@ def collect_logs(ctx, bottle_dir, records):
                 if LOG_NAME.match(n) and regular(os.path.join(d, n)):
                     scan(LOG_LABEL[kind], os.path.join(d, n), t, show(os.path.join(d, n), ctx))
     j = bottleread.newest_journal(bottle_dir, ctx.year)
-    if j and regular(j):
-        t = os.path.getmtime(j)
+    try:   # Revit deletes old journals as it starts: this one can be gone already
+        t = os.path.getmtime(j) if j and regular(j) else None
+    except OSError:
+        t = None
+    if t is not None:
         if end is not None and t < end:
             out["skipped"].append({"label": "Revit journal", "time": t})
         else:

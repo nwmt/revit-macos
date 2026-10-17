@@ -158,6 +158,33 @@ class Journals(Tmp):
         self.assertEqual(os.path.basename(br.newest_journal(self.d, 2027)), "journal.0002.txt")
         self.assertIsNone(br.newest_journal(self.d, 2020))
 
+    def test_a_journal_deleted_while_looked_at(self):
+        # Revit deletes old journals as it starts: one listed can be gone when its time is read
+        d = br.journals_dir(self.d, 2027)
+        os.makedirs(d)
+        for i, n in enumerate(["journal.0001.txt", "journal.0003.txt", "journal.0002.txt"]):
+            p = os.path.join(d, n)
+            with open(p, "w") as f:
+                f.write(n)
+            os.utime(p, (time.time() - 100 + i * 10,) * 2)
+        real, gone = os.listdir, []
+
+        def listdir(path, names=None):
+            out = real(path)
+            for n in names or ["journal.0002.txt"]:
+                if os.path.exists(os.path.join(path, n)):
+                    os.remove(os.path.join(path, n))
+                    gone.append(n)
+            return out
+        os.listdir = listdir
+        try:
+            self.assertEqual(os.path.basename(br.newest_journal(self.d, 2027)), "journal.0003.txt")
+            os.listdir = lambda path: listdir(path, ["journal.0001.txt", "journal.0003.txt"])
+            self.assertIsNone(br.newest_journal(self.d, 2027))
+        finally:
+            os.listdir = real
+        self.assertEqual(gone, ["journal.0002.txt", "journal.0001.txt", "journal.0003.txt"])
+
     def test_read_lines_binary_long_and_capped(self):
         data = b"one\r\n" + b"\xff\xfe bad \x00 bytes\n" + b"x" * 200000 + b"\nlast\n" + b"after the cap\n"
         p = self.write("j.txt", data)

@@ -259,14 +259,21 @@ def journals_dir(bottle, year):
 
 
 def newest_journal(bottle, year):
-    """The newest journal.NNNN.txt Revit wrote in the bottle (by modification time), or None."""
+    """The newest journal.NNNN.txt Revit wrote in the bottle (by modification time), or None. Revit deletes old
+    journals as it starts: one that is gone by the time it is looked at is left out."""
     d = journals_dir(bottle, year)
     try:
         names = [n for n in os.listdir(d) if re.match(r"^journal\.\d+\.txt$", n)]
     except OSError:
         return None
-    paths = [os.path.join(d, n) for n in names]
-    return max(paths, key=lambda p: (os.path.getmtime(p), p)) if paths else None
+    seen = []
+    for n in names:
+        p = os.path.join(d, n)
+        try:
+            seen.append((os.path.getmtime(p), p))
+        except OSError:
+            continue
+    return max(seen)[1] if seen else None
 
 
 def read_lines(path, max_bytes=None, max_line=4000, start=0):
