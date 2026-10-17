@@ -36,5 +36,5 @@ body:
     id: log
     attributes:
       label: Report (optional)
-      description: Paste report.txt from ./revit report <year>, and attach report.zip below the form.
+      description: "Paste report.txt from `./revit report <year>`. To attach report.zip, drag it into the field above, \"What worked, what did not\"."
       render: shell

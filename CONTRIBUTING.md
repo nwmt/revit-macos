@@ -11,9 +11,11 @@ using the sign-in you made there, and deletes the copy afterwards; Autodesk file
 copy it plays short journals: start and quit, a new project from a template saved with Save As, then that file
 opened again and saved under a new name. It reports each one as passed or failed, with times. It does not check
 sign-in, add-ins, web panels, exports or how Revit looks. Before it runs: sign in once by starting Revit from
-`~/Applications`, quit Revit, and leave the Mac alone while Revit opens and closes. Then run `./revit report <year>`:
-the report includes the test result. Revit starts as usual, so Autodesk's sign-in check and usage reporting run as
-they do when you start it yourself.
+`~/Applications`, quit Revit, run `./revit stop <year>` (Autodesk's background services keep the bottle busy for hours),
+and leave the Mac alone while Revit opens and closes. Then run `./revit report <year>`: the report includes the test
+result. Revit starts as usual, so Autodesk's sign-in check and usage reporting run as they do when you start it
+yourself. Not tested yet: whether a test run can make Revit 2024 or newer ask you to sign in again in your own
+bottle.
 
 ## Pull requests
 
@@ -80,7 +82,8 @@ Wording:
 1. `python3 -I -B tools/installer_drift.py packages installers/extracted/revit<year>` lists the installer's packages
    against the nearest year's `PKGS`.
 2. Add `scripts/profiles/<year>.sh` (copy the nearest year) and the year's cases in `tests/steps.sh` and the add-in
-   catalogs in `scripts/addins/`; `UPDATE=1 tests/plans.sh` writes `tests/plans/<year>.txt`.
+   catalogs in `scripts/addins/`; `UPDATE=1 tests/plans.sh` writes `tests/plans/<year>.txt`. Add the year's journal
+   version to the table in `tools/smoke.py` (from a journal Revit wrote for that year).
 3. Install it, sign in once, then `./revit doctor <year>`, `./revit test <year>` and `./revit report <year>`.
 4. Add the README row and `versions/<year>.md` only with what a real run showed.
 

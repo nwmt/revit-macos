@@ -10,7 +10,7 @@ Find what you see. Each entry says which Revit versions it applies to. `<year>` 
 All versions
 
 **Solution:** `./revit doctor <year>`. It checks this Mac, CrossOver and the bottle, changes nothing and lists each
-problem with what to do. `./revit doctor` without a year checks only the Mac and CrossOver.
+problem with what to do. `./revit doctor` without a year checks the Mac and CrossOver and lists the Revit bottles.
 
 ### Start over
 
@@ -39,7 +39,9 @@ All versions
 To remove personal data, `./revit report` reads your Mac user name, computer name and serial number, and the Autodesk
 user name and ID that Revit keeps in the bottle (Revit.ini, journals). It keeps them in memory only and puts
 placeholders such as `<USER>` in their place. It never opens sign-in, licensing or browser data, and uploads nothing.
-It removes what it recognizes. A file it cannot clean is left out, and `report.txt` says so.
+It removes what it recognizes. A file it cannot clean is left out, and `report.txt` says so. To leave out a file
+yourself: `./revit report <year> --exclude <file>`. Words that must never appear, such as a client or project name: one
+per line in a file named `.report-denylist` in the project folder.
 
 A Revit bug that also happens on Windows goes to Autodesk. A CrossOver problem that also happens in other apps goes
 to CodeWeavers.
