@@ -64,7 +64,7 @@ NETFX_2020_MAX = 461808   # 4.7.2: Revit 2020 crashes on it and on 4.8
 WEBVIEW2_MIN = 124        # Revit's WebView2 SDK needs a runtime about this new; the installer's 103 is too old
 FREE_MIN_GB = 10
 MACOS_TESTED = 26
-VERIFIED_BUILD_YEARS = (2027,)   # 2027.3: Revit.exe 27.3.0.28 matched, 2026-10-17; years whose real Revit.exe matched the installer's build: then a mismatch is a ✗
+VERIFIED_BUILD_YEARS = (2025, 2027)   # 2026-10-17: 2025.5 and 2027.3 matched; years whose real Revit.exe matched the installer's build: then a mismatch is a ✗
 APP_SCRIPT = re.compile(r"'([^']*/bin/wine)' --bottle '([^']*)'")   # what scripts/make-apps.sh writes
 WINEISH = re.compile(r"wine|crossover|\.exe\b", re.I)   # processes that may hold a bottle's files
 HOSTS_FIX = "H=\"$(hostname)\"; sudo sh -c \"printf '127.0.0.1\\t$H\\n::1\\t$H\\n' >> /etc/hosts\""
@@ -73,6 +73,7 @@ DOC = {"start-over": TS + "start-over", "report": TS + "report-a-problem",
        "rosetta": TS + "revit-does-not-start-from-applications-nothing-happens",
        "hosts": TS + "revit-pauses-for-about-5-seconds",
        "signin": TS + "after-sign-in-the-browser-shows-opening-product-and-nothing-happens",
+       "signin-other": TS + "revit-hangs-on-its-loading-window-after-you-sign-in-in-the-browser",
        "web": TS + "start-screen-manage-links-or-project-browser-is-white-a-browser-process-uses-a-lot-of-cpu",
        "netfx2020": TS + "revit-2020-crashes-on-start-after-installing-net-framework-472-or-48"}
 # logs/<bottle>/<time>-<kind>[-n] (run_dir_new: a second run of the same second gets -2, -3, ...); older clones wrote
@@ -570,6 +571,12 @@ def apps(ctx):
             if m:
                 a["wine"], a["bottle"], a["wine_exists"] = m.group(1), m.group(2), os.path.isfile(m.group(1))
         out[key] = a
+    others = []   # the Sign-In apps of other bottles: every one of them takes the same adskidmgr:// link
+    for app in sorted(glob.glob(os.path.join(ctx.home, "Applications", "Autodesk Sign-In (*).app"))):
+        n = os.path.basename(app)[len("Autodesk Sign-In ("):-len(").app")]
+        if n != ctx.bottle:
+            others.append(n)
+    out["signin_others"] = others
     return out
 
 
@@ -1014,6 +1021,12 @@ def app_checks(f, b):
                              doc=doc))
         else:
             out.append(Check(cid, "ok", f"{title} starts this bottle"))
+    others = b["apps"].get("signin_others") or []
+    if f["profile"].get("SIGNIN") == "idmgr" and others:
+        out.append(Check("bottle.app.signin-others", "info",
+                         f"other bottles take the sign-in link too ({', '.join(others[:4])}): when the browser asks "
+                         f"after you sign in, choose Autodesk Sign-In ({name}), or Revit hangs on its loading window",
+                         doc=DOC["signin-other"]))
     if y >= 2027 and (b["apps"].get("viewer") or {}).get("exists"):
         out.append(Check("bottle.app.viewer", "info", f"there is a Revit Viewer {y} app; Revit {y} has no Viewer mode",
                          show=False))

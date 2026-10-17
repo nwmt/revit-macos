@@ -473,7 +473,7 @@ WORDS = {"passed": "passed", "failed": "FAILED", "needs_person": "needs you", "s
 NOT_CHECKED = ["sign-in", "add-ins", "web panels", "how Revit looks"]
 # the years whose start, core and reopen passed on a real Revit (a person adds a year after such a run); for any other
 # year a failure can be the journal's own
-REAL_REVIT = (2027,)   # 2027.3 (build 27.3.0.28), 2026-10-17: all three passed
+REAL_REVIT = (2025, 2027)   # 2026-10-17, all three passed: 2025.5 (25.5.0.57), 2027.3 (27.3.0.28)
 
 
 def _conf_escape(s):

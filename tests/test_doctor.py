@@ -390,9 +390,11 @@ class Bottle(Sandbox):
     def test_build(self):
         self.assertEqual(self.by_id(self.checks())["install.build"].status, "ok")
         self.write(os.path.join(self.b, dr.rd(self.year), "Revit.exe"), pe("25.5.0.58"))
-        self.assertEqual(self.by_id(self.checks())["install.build"].status, "warn")
-        old, dr.VERIFIED_BUILD_YEARS = dr.VERIFIED_BUILD_YEARS, (self.year,)
+        old = dr.VERIFIED_BUILD_YEARS
         try:
+            dr.VERIFIED_BUILD_YEARS = ()   # a year not matched on a real bottle yet: a warning
+            self.assertEqual(self.by_id(self.checks())["install.build"].status, "warn")
+            dr.VERIFIED_BUILD_YEARS = (self.year,)   # matched once: a mismatch is a ✗
             self.assertEqual(self.by_id(self.checks())["install.build"].status, "fail")
         finally:
             dr.VERIFIED_BUILD_YEARS = old
@@ -435,6 +437,16 @@ class Bottle(Sandbox):
         c = self.by_id(self.checks())["bottle.app.signin"]
         self.assertEqual((c.status, c.doc), ("warn", dr.DOC["signin"]))
         self.assertNotIn("bottle.app.signin", self.by_id(self.checks(profile=dict(PROFILE, SIGNIN="adsso"))))
+
+    def test_other_bottles_that_take_the_sign_in_link(self):
+        self.assertNotIn("bottle.app.signin-others", self.by_id(self.checks()))
+        os.makedirs(os.path.join(self.home, "Applications", "Autodesk Sign-In (rvt2027-a).app"))
+        c = self.by_id(self.checks())["bottle.app.signin-others"]
+        self.assertEqual((c.status, c.doc), ("info", dr.DOC["signin-other"]))
+        self.assertIn("(rvt2027-a)", c.title)
+        self.assertIn("choose Autodesk Sign-In (%s)" % self.name, c.title)
+        self.assertNotIn("bottle.app.signin-others",
+                         self.by_id(self.checks(profile=dict(PROFILE, SIGNIN="adsso"))))   # signs in in Revit's window
 
     def test_bottle_that_cannot_be_checked(self):
         cs = self.checks(bottle="rvt2025-x")

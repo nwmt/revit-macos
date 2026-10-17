@@ -81,6 +81,18 @@ Revit 2024 and newer
 **Solution:** The browser must hand the link to the bottle. When it asks which app to use, choose
 **Autodesk Sign-In (rvt2025-a)**, with your bottle's name. If that app is missing: `./revit rebuild <year>`.
 
+### Revit hangs on its loading window after you sign in in the browser
+
+Revit 2024 and newer, when another Revit year that signs in through the browser is installed too
+
+Each of those bottles has its own **Autodesk Sign-In** app, and all of them take the same sign-in link. If the browser
+hands the link to the app of another bottle (for example because it remembered your choice from the other year),
+Revit waits for a sign-in that never comes.
+
+**Solution:** `./revit stop <year>`, start Revit again, sign in, and when the browser asks which app should open the
+link, choose **Autodesk Sign-In (rvt2025-a)** with the bottle of the Revit you started. If the browser does not ask,
+it remembered the other app: in Firefox, Settings → General → Applications, set `adskidmgr` to "Always ask".
+
 ## Speed
 
 ### Revit pauses for about 5 seconds
