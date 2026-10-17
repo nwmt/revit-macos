@@ -19,8 +19,10 @@ gate checks finished files (a zip member by member; JSON by its string values to
 value class and length, never the value; exit 1 on any hit.
 
 What it learns about this Mac and the bottle (user name, computer name, serial number, the Autodesk user name and ID)
-stays in memory: it is never written or printed. Nothing is sent anywhere. A library too: learn_identity, redact,
-gate, journal_extract, error_extract, msi_extract, cxlog_extract, build. Run with python3 -I -B.
+stays in memory: it is never written or printed. It learns every bottle name the parts hold (a report without a year
+reads the runs of all), and the Autodesk identity of each bottle. Nothing is sent anywhere. A library too:
+learn_identity, learn_bottles, redact, gate, journal_extract, journal_file, error_extract, msi_extract, cxlog_extract,
+build. Run with python3 -I -B.
 """
 import argparse
 import bisect
@@ -54,6 +56,9 @@ MEMBER_MAX = 256 * 1024
 LINE_MAX = 2000
 ERROR_LINES = 100               # error lines kept of one log: the first and the last half when there are more
 JOURNAL_MAX = 1000              # kept journal lines
+JOURNAL_READ = 64 << 20         # a bigger journal is read by its start and its end
+JRN_CONT = 40                   # kept lines of one journal statement with '_' continuations
+READ_LINE = 4000                # a line read from a log is cut to this many characters
 NUL_MAX = 0.01
 SCAN_BLOCK, SCAN_MAX = 16 << 20, 4 << 30   # a big log is searched in blocks, up to its length when opened
 CX_HEAD_LINES = 600             # the start of a cxlog read line by line: its header
@@ -118,9 +123,13 @@ ADSK_SERIAL_RX = re.compile(r"(?i)(serial(?:[ _]?(?:number|no))?|csn|sn|adlm_ser
                             r"(\d{3}-\d{8})(?!\d)")
 VOL_RX = re.compile(r"(?i)(" + SEP + r"Volumes" + SEP + r")((?:" + _NOSEP + r"[^\\/\r\n\"'<>|*?:\t" + S_ANY + r"])+)")
 MODEL_EXT = r"rvt|rfa|rte|rft|rvg|ifc|dwg|nwc|nwd"
-_STEM = _NOSEP + r"[^\\/\[\]\"'=<>|\t:*?\r\n" + S_ANY + r"]"
-MODEL_RX = re.compile(r"(^|[\\/\[\]\"'=<>|\t:*?" + S_ANY + r"]|%2[Ff]|%5[Cc])((?:" + _STEM + r")*?)(\.(?:" +
-                      MODEL_EXT + r"))(?![A-Za-z0-9])", re.I | re.M)
+# A model's name: in a path, all of it back to the separator (' [ ] : = are part of a name there: O'Brien House (v2):
+# final.rvt); elsewhere back to a quote, bracket or the like, an apostrophe between letters still part of it
+_PSTEM = _NOSEP + r"[^\\/\"<>|\t*?\r\n" + S_ANY + r"]"
+_STEM = _NOSEP + r"(?:[^\\/\[\]\"'=<>|\t:*?\r\n" + S_ANY + r"]|(?<=[^\W\d_])'(?=[^\W\d_]))"
+MODEL_RX = re.compile(r"(?:(?P<sep>[\\/]|%2[Ff]|%5[Cc])(?P<pstem>(?:" + _PSTEM + r")*?)|(?P<lead>^|[\[\]\"'=<>|\t:*?" +
+                      S_ANY + r"])(?P<stem>(?:" + _STEM + r")*?))(?P<ext>\.(?:" + MODEL_EXT + r"))(?![A-Za-z0-9])",
+                      re.I | re.M)
 # Autodesk templates and samples, Revit's default document names, our own smoke output: not personal
 AUTODESK_STEMS = {
     "default", "defaultmetric", "defaultus-canada", "default_m_enu", "default_i_enu", "default-multi-discipline",
@@ -141,8 +150,15 @@ AUTODESK_STEM_RX = re.compile(r"^(?:project|family|untitled)\d*$", re.I)
 # Mac home as ~ or CrossOver's Y: drive, except its standard folders
 USER_FOLDERS = ("documents", "desktop", "downloads")
 HOME_STANDARD = ("library", "applications", "movies", "music", "pictures", "public", ".trash")
+# ~/Library is not the user's, except the cloud folders in it (OneDrive, Dropbox, Google Drive, iCloud Drive): there
+# an account folder and all below it are; an app's own folder in iCloud Drive (com~apple~CloudDocs) is not
+CLOUD_ROOTS = ("cloudstorage", "mobile documents")
+CLOUD_CONTAINER = re.compile(r"(?i)(?:com|icloud)~[a-z0-9._~-]+")   # fullmatch
 SEP_RX = re.compile(SEP)
-SEG_RX = re.compile(r"(?:" + _NOSEP + r"[^\\/\r\n\"'<>|*?\t\[\]:" + S_ANY + r"])+")
+SEG_STOP = frozenset("\r\n\"<>|*?\t")   # no path segment has these; ' [ ] : and spaces it can have
+NEW_PATH_RX = re.compile(r"\s+['\"\[(]?(?:[A-Za-z]:|~)" + SEP)   # a space before another path ends a segment
+# the extension of a path's last part: at its end, or (starting with a letter) before a : , ; ) ' ] or "
+LAST_EXT = re.compile(r"\.(?:[A-Za-z0-9]{1,5}(?=\s*$)|[A-Za-z][A-Za-z0-9]{0,4}(?=[:,;)'\]\"]))")
 DIR_ROOT_RX = re.compile(r"(?i)(?:(?P<wine>(?<![^\W_])[a-z]:" + SEP + r"users" + SEP + r"crossover)|(?<![^\W_])y:|"
                          r"(?<![\w~])~|" + S_HOME + r")(?=" + SEP + r")")
 
@@ -161,8 +177,18 @@ OWNER_RX = re.compile(r"(?i)\b(RegOwner|RegCompany|COMPANYNAME|RegisteredOwner|R
                       r"([ \t]*[=:][ \t]*\"?)([^\r\n\"" + S_ANY + r"]*[^\s\"" + S_ANY + r"])")
 BENIGN_USERS = ("crossover", "system", "root", "administrator", "default", "public")
 # Words in these contexts are Autodesk's or font names, not the user's (letters-only values only)
+# (the path only: its folders, then a last part up to its extension, or to the first space)
+_XSEG = _NOSEP + r"[^\\/\r\n\"'<>|\t;,=:()\[\]" + S_ANY + r"]"
+_XEND = _NOSEP + r"[^\\/\s\"'<>|;,=:()\[\]" + S_ANY + r"]"
 EXEMPT_RX = re.compile(r"(?i)(?:program files(?: \(x86\))?" + SEP + r"autodesk" + SEP + r"|" + SEP + r"fonts" + SEP +
-                       r")[^\r\n\"'<>|\t;,=()\[\]" + S_ANY + r"]*")
+                       r")(?:(?:" + _XSEG + r")*" + _XEND + SEP + r")*(?:(?:" + _XSEG + r")*?\.[A-Za-z0-9]{1,5}"
+                       r"(?![A-Za-z0-9])|(?:" + _XEND + r")*)")
+# Wine's escapes in its own log lines: \x00fc (a wide string), \xc3\xbc (the UTF-8 bytes of a narrow one); not an
+# escaped backslash and an x
+WINE_LINE = re.compile(r"(?:^|[\s:])[0-9a-f]{4}:(?:[0-9a-f]{4}:)?(?:err|warn|fixme|trace|info|Call|Ret):")
+XESC_RX = re.compile(r"(?<!\\)((?:\\\\)*)((?:\\x[89a-fA-F][0-9a-fA-F]){2,}|\\x[0-9a-fA-F]{4})")
+# a backslash that is neither doubled nor one of Wine's escapes: a raw path (C:\users\...), where \x2026 is a folder
+RAW_BACKSLASH = re.compile(r"(?<!\\)(?:\\\\)*\\(?![\\xnrt\"0])")
 
 # ---- files: never opened, never a member ----
 REFUSE_RX = re.compile(r"(?i)\.(dll|exe|msi|msp|cab|7z|rvt|rfa|rte|rft|rvg|dmp|reg|lic|dat|data|cxlog)$|"
@@ -375,15 +401,21 @@ def learn_identity(facts):
     return ident
 
 
-def _run(cmd):
+def _run(cmd, env=None):
     exe = cmd[0]
     if not os.path.isabs(exe):
         exe = shutil.which(exe) or exe
     try:
         return subprocess.run([exe] + list(cmd[1:]), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                              stderr=subprocess.DEVNULL, timeout=15, universal_newlines=True).stdout
+                              stderr=subprocess.DEVNULL, timeout=15, universal_newlines=True, env=env).stdout
     except (OSError, subprocess.SubprocessError, ValueError):
         return ""
+
+
+def _git(root, *args):
+    """git in the clone, read only: no optional locks, so git status never refreshes and writes the index."""
+    return _run(["git", "--no-optional-locks", "-C", root] + list(args),
+                env=dict(os.environ, GIT_OPTIONAL_LOCKS="0"))
 
 
 def _both(p):
@@ -449,8 +481,8 @@ def machine_facts(root, data):
         f[key] = m.group(1) if m else None
     f["macs"] = re.findall(r"^\s*ether\s+([0-9a-fA-F:]{17})\b", _run(["/sbin/ifconfig"]), re.M)
     if _git_dir(root):   # a clone: git is there (asking a Mac without it would offer to install the tools)
-        f["git_name"] = _run(["git", "-C", root, "config", "user.name"]).strip()
-        f["git_email"] = _run(["git", "-C", root, "config", "user.email"]).strip()
+        f["git_name"] = _git(root, "config", "user.name").strip()
+        f["git_email"] = _git(root, "config", "user.email").strip()
     f["denylist"] = _denylist(root, data)
     return f
 
@@ -488,12 +520,66 @@ def bottle_facts(bottle_dir, year):
     return f
 
 
-def collect_identity(root, data, bottle_dir=None, year=None, bottle=None):
-    """learn_identity over this Mac, the bottle and the denylists."""
+BOTTLE_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")   # fullmatch: what ./revit takes as a bottle name
+NOT_BOTTLES = re.compile(r"(?i)mac|runs|default|revit\d{4}")   # fullmatch: the other folders of logs/
+BOTTLES_MAX = 64
+
+
+def _bottle_name(n):
+    """A bottle name (of a test copy: its source's), or None."""
+    n = (n or "").strip()
+    n = n[:-len(".test")] if n.endswith(".test") else n
+    return n if BOTTLE_NAME.fullmatch(n) and not NOT_BOTTLES.fullmatch(n) else None
+
+
+def _bottle_years(bottle_dir):
+    """The Revit years of a bottle, by the names of its folders only (no file is opened): Program Files\\Autodesk\\
+    Revit <year>, the user's Revit folders and ProgramData\\Autodesk\\RVT <year>."""
+    ys, dc = set(), os.path.join(bottle_dir, "drive_c")
+    adsk = os.path.join(dc, "users", "crossover", "AppData", "%s", "Autodesk", "Revit")
+    for d, rx in ((os.path.join(dc, "Program Files", "Autodesk"), r"Revit (\d{4})"),
+                  (adsk % "Roaming", r"Autodesk Revit (\d{4})"), (adsk % "Local", r"Autodesk Revit (\d{4})"),
+                  (os.path.join(dc, "ProgramData", "Autodesk"), r"RVT (\d{4})")):
+        for n in _listdir(d):
+            m = re.fullmatch(rx, n)
+            if m:
+                ys.add(m.group(1))
+    return sorted(ys)[-8:]
+
+
+def learn_bottles(ident, data, bottles, names=()):
+    """Every bottle a report can name, added to ident: the bottles in the Bottles folder, the folders of DATA/logs and
+    names (from doctor's checks, run records, test results). A name that is not rvt<year>-<x> is learned, and the
+    Autodesk user name and ID of each bottle in the Bottles folder (its Revit.ini and newest journal of each Revit
+    year). For a report without a year, which reads the runs and the checks of every bottle."""
+    found, dirs = list(names), []
+    if data:
+        found += _listdir(os.path.join(data, "logs"))
+    for n in (_listdir(bottles) if bottles else [])[:4 * BOTTLES_MAX]:
+        p = os.path.join(bottles, n)
+        if os.path.isdir(p) and not os.path.islink(p) and not NEVER_OPEN_RX.search(p):
+            found.append(n)
+            dirs.append(p)
+    for n in found:
+        b = _bottle_name(n)
+        if b and not DEFAULT_BOTTLE_RX.match(b):
+            ident.add_word("bottle", b)
+    for p in dirs[:BOTTLES_MAX]:
+        for y in _bottle_years(p):
+            f = bottle_facts(p, y)
+            for key, cls in (("adsk_user", "adsk_user"), ("journal_user", "adsk_user"), ("adsk_id", "adsk_id")):
+                for v in _as_list(f.get(key)):
+                    ident.add_word(cls, v)
+    return ident
+
+
+def collect_identity(root, data, bottle_dir=None, year=None, bottle=None, bottles=None):
+    """learn_identity over this Mac, the bottle and the denylists; with bottles (the Bottles folder), learn_bottles."""
     facts = machine_facts(root, data)
     facts.update(bottle_facts(bottle_dir, year))
     facts["bottle"] = bottle
-    return learn_identity(facts)
+    ident = learn_identity(facts)
+    return learn_bottles(ident, data, bottles) if bottles else ident
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -526,14 +612,88 @@ def _real(v):
 
 
 def _model(t, ident, m):
-    stem = m.group(2)
+    path = m.group("sep") is not None
+    stem = m.group("pstem") if path else m.group("stem")
     if not stem or stem[-1].isspace():
         return m.group(0)   # ".rvt files", "*.rvt": no name there
     core = stem.strip()
     if not core or core.lower() in AUTODESK_STEMS or AUTODESK_STEM_RX.match(core):
         return m.group(0)
     lead = stem[:len(stem) - len(stem.lstrip())]
-    return m.group(1) + lead + t.tok("<MODEL-%d>" % ident.number("model", core), "model") + m.group(3)
+    return (m.group("sep") if path else m.group("lead")) + lead + \
+        t.tok("<MODEL-%d>" % ident.number("model", core), "model") + m.group("ext")
+
+
+def _is_sep(text, j):
+    return j < len(text) and text[j] in "\\/%" and SEP_RX.match(text, j) is not None
+
+
+def _goes_on(text, j, is_sep, new_path):
+    """Whether a path goes on after j: a separator before the end of the line, a character no path has, or another
+    path (at most 400 characters on)."""
+    for k in range(j, min(len(text), j + 400)):
+        ch = text[k]
+        if ch in SEG_STOP or "\ue000" <= ch <= "\ue1ff" or (ch.isspace() and new_path.match(text, k)):
+            return False
+        if is_sep(text, k):
+            return True
+    return False
+
+
+def _seg_end(text, i, opener, is_sep=_is_sep, new_path=NEW_PATH_RX):
+    """Where a path segment that starts at i ends: at a separator, at a character no path has, at a space before
+    another path, or where a quote or bracket opened right before the path closes (a ' or ] that a word does not
+    follow and after which the path does not go on). ' [ ] : and spaces are part of a name."""
+    closer = {"'": "'", "[": "]"}.get(opener)
+    depth, j, n = 0, i, len(text)
+    while j < n:
+        ch = text[j]
+        if ch in SEG_STOP or "\ue000" <= ch <= "\ue1ff" or is_sep(text, j) or \
+                (ch.isspace() and new_path.match(text, j)):
+            break
+        if ch == "[":
+            depth += 1
+        elif ch == "]" and depth:
+            depth -= 1
+        elif ch == closer and not (j + 1 < n and (text[j + 1].isalnum() or text[j + 1] == "_")) and \
+                not _goes_on(text, j + 1, is_sep, new_path):
+            break
+        j += 1
+    return j
+
+
+def _last_split(name):
+    """The last part of a path -> (its name, what follows that is not the name: an extension and any words after
+    it, a closing quote, bracket or full stop)."""
+    rest = ""
+    k = re.search(r"[,;=]", name)
+    if k:
+        name, rest = name[:k.start()], name[k.start():]
+    stripped = name.rstrip()
+    name, rest = stripped, name[len(stripped):] + rest
+    exts = [e for e in LAST_EXT.finditer(name) if e.start() > 0]
+    if exts:
+        return name[:exts[-1].start()], name[exts[-1].start():] + rest
+    while name and (name[-1] in "'\".,:;" or (name[-1] == ")" and name.count("(") < name.count(")")) or
+                    (name[-1] == "]" and name.count("[") < name.count("]"))):
+        name, rest = name[:-1], name[-1] + rest
+    return name, rest
+
+
+def _user_seg(step, mode, low, last, wine):
+    """A path segment under a user root, the step-th: 'keep' (a standard folder on the way), 'stop' (what follows is
+    not the user's) or 'dir' (the user's folder or file name) -> (what, mode). low: the segment stripped, lower case."""
+    if step == 0:
+        if low in USER_FOLDERS and not last:
+            return "keep", None
+        if low == "library" and not wine and not last:
+            return "keep", "library"
+        return ("stop" if wine or low in HOME_STANDARD or low in USER_FOLDERS else "dir"), None
+    if mode == "library":
+        return ("keep", low) if step == 1 and low in CLOUD_ROOTS and not last else ("stop", None)
+    if mode == "mobile documents" and step == 2 and CLOUD_CONTAINER.fullmatch(low):
+        return "keep", mode
+    return "dir", mode
 
 
 def _dirs(t, ident):
@@ -542,43 +702,53 @@ def _dirs(t, ident):
     for m in DIR_ROOT_RX.finditer(text):
         if m.start() < pos:
             continue
-        wine = m.group("wine") is not None
+        wine, opener = m.group("wine") is not None, text[m.start() - 1:m.start()]
         out.append(text[pos:m.end()])
-        i, first = m.end(), True
+        i, step, mode = m.end(), 0, None
         while True:
             s = SEP_RX.match(text, i)
-            g = SEG_RX.match(text, s.end()) if s else None
-            if not g:
+            e = _seg_end(text, s.end(), opener) if s else 0
+            if not s or e == s.end():
                 break
-            seg, last = g.group(0), not SEP_RX.match(text, g.end())
-            if first:
-                first = False
-                low = seg.strip().lower()
-                if low in USER_FOLDERS and not last:
-                    out.append(text[i:g.end()])
-                    i = g.end()
-                    continue
-                if wine or low in HOME_STANDARD or low in USER_FOLDERS:
-                    break
-            name, rest = seg, ""
-            if last:
-                k = re.search(r"[,;=]", name)
-                if k:
-                    name, rest = name[:k.start()], name[k.start():]
-                stripped = name.rstrip()
-                name, rest = stripped, name[len(stripped):] + rest
-                e = re.search(r"\.[A-Za-z0-9]{1,5}$", name)
-                if e and e.start() > 0:
-                    name, rest = name[:e.start()], name[e.start():] + rest
+            seg, last = text[s.end():e], not _is_sep(text, e)
+            what, mode = _user_seg(step, mode, seg.strip().lower(), last, wine)
+            step += 1
+            if what == "stop":
+                break
+            if what == "keep":
+                out.append(text[i:e])
+                i = e
+                continue
+            name, rest = _last_split(seg) if last else (seg, "")
             if not name.strip():
                 break
             out.append(text[i:s.end()] + t.tok("<DIR-%d>" % ident.number("dir", name), "dir") + rest)
-            i = g.end()
+            i = e
             if last:
                 break
         pos = i
     out.append(text[pos:])
     t.text = "".join(out)
+
+
+def _xesc(m):
+    s = m.group(2)
+    if s.count("\\x") == 1:   # \xXXXX: one character of a wide string
+        n = int(s[2:], 16)
+        return m.group(0) if n < 0x80 or 0xD800 <= n < 0xE000 else m.group(1) + chr(n)
+    try:   # \xHH\xHH...: the UTF-8 bytes of a narrow string
+        return m.group(1) + bytes.fromhex(s.replace("\\x", "")).decode("utf-8")
+    except ValueError:
+        return m.group(0)
+
+
+def _wine_unescape(text, every_line=False):
+    """Wine's \\x escapes of non-ASCII characters decoded, in its own log lines that hold no raw path (every_line: in
+    all), so a learned value is found whole. Linear in the text; a decoded character is never a line end."""
+    if "\\x" not in text:
+        return text
+    return "\n".join(XESC_RX.sub(_xesc, ln) if every_line or (WINE_LINE.search(ln) and not RAW_BACKSLASH.search(ln))
+                     else ln for ln in text.split("\n"))
 
 
 def _words(t, ident, rx, classes):
@@ -652,7 +822,7 @@ def _rel_forms(rel, ident):
 def redact(text, identity, rel=None):
     """text with the learned values and known patterns replaced by placeholders -> (text, {class: count}).
     rel: a run folder whose paths become relative ("see rvt.log"). Running it again changes nothing."""
-    t, ident = _Text(text), identity
+    t, ident = _Text(_wine_unescape(text)), identity
     paths, words, login_rx = ident._compiled()
     if rel:
         for rx in _rel_forms(rel, ident):
@@ -834,10 +1004,18 @@ GATE_EMAIL = re.compile(r"[^\s@<>()\[\],;:\"'/\\]{1,64}@[\w-]+(?:\.[\w-]+)*\.[^\
 GATE_EMAIL_OK = re.compile(r"[a-z0-9_.%+-]+@example\.(?:com|org|net)")   # fullmatch
 GATE_URL = re.compile(r"\bhttps?:/+[^\s?#\"']+([?#][^\s\"']*)")
 GATE_MODEL = re.compile(r"\.(?:" + MODEL_EXT + r")(?![a-z0-9])")
-GATE_STEM = re.compile(r"[^/\[\]\"'=<>|\t:*?\r\n]*$")
+GATE_STEM = re.compile(r"(?:[^/\[\]\"'=<>|\t:*?\r\n]|(?<=[^\W\d_])'(?=[^\W\d_]))*$")   # as _STEM
+GATE_PSTEM = re.compile(r"/([^/\"<>|\t*?\r\n]*)$")                                     # as _PSTEM, after a /
 GATE_DIR_ROOT = re.compile(r"(?:(?P<wine>(?<![^\W_])[a-z]:/users/crossover)|(?<![^\W_])y:|(?<![\w~])~)(?=/)")
-GATE_SEG = re.compile(r"[^/\r\n\"'<>|*?\t\[\]:]+")
-GATE_EXEMPT = re.compile(r"(?:program files(?: \(x86\))?/autodesk/|/fonts/)[^\r\n\"'<>|\t;,=()\[\]]*")
+GATE_NEW_PATH = re.compile(r"\s+['\"\[(]?(?:[a-z]:|~)/")
+GATE_GLUED = re.compile(r"[\['(-]?[^\W_]")   # a name glued to a placeholder: <DIR-1>'Brien, <DIR-1>x
+GATE_EXEMPT = re.compile(r"(?:program files(?: \(x86\))?/autodesk/|/fonts/)(?:[^/\r\n\"'<>|\t;,=:()\[\]]*"
+                         r"[^/\s\"'<>|;,=:()\[\]]/)*(?:[^/\r\n\"'<>|\t;,=:()\[\]]*?\.[a-z0-9]{1,5}(?![a-z0-9])|"
+                         r"[^/\s\"'<>|;,=:()\[\]]*)")
+
+
+def _gate_sep(text, j):
+    return j < len(text) and text[j] == "/"
 
 
 def _email_ok(a):
@@ -876,33 +1054,44 @@ def _gate_text(norm, light, ident, name):
                 hit("url-query", "token", m.start(), len(v))
     for m in GATE_MODEL.finditer(norm):
         before = norm[max(0, m.start() - 400):m.start()]
-        if re.search(r"<model-\d+>$", before):
+        tm = re.search(r"<model-\d+>$", before)
+        if tm:   # a placeholder, and in a path nothing of a name before it (Henderson'<MODEL-1>.rvt is a hit)
+            pm = GATE_PSTEM.search(before, 0, tm.start())
+            if pm and re.search(r"[^\W_]", pm.group(1)):
+                hit("model-file", "model", m.start(), len(pm.group(1)))
             continue
-        stem = GATE_STEM.search(before).group(0)
+        pm = GATE_PSTEM.search(before)
+        stem = pm.group(1) if pm else GATE_STEM.search(before).group(0)
         if not stem or stem[-1].isspace():
             continue
         core = stem.strip()
         if core and core not in AUTODESK_STEMS and not AUTODESK_STEM_RX.match(core):
             hit("model-file", "model", m.start(), len(core))
     for m in GATE_DIR_ROOT.finditer(norm):
-        wine, i, first = m.group("wine") is not None, m.end(), True
+        wine, opener = m.group("wine") is not None, norm[m.start() - 1:m.start()]
+        i, step, mode = m.end(), 0, None
         while norm.startswith("/", i):
             tk = TOKEN.match(norm, i + 1)
-            if tk:
-                i, first = tk.end(), False
-                continue
-            g = GATE_SEG.match(norm, i + 1)
-            if not g:
-                break
-            seg, last = g.group(0), not norm.startswith("/", g.end())
-            if first:
-                first = False
-                low = seg.strip()
-                if low in USER_FOLDERS and not last:
-                    i = g.end()
-                    continue
-                if wine or low in HOME_STANDARD or low in USER_FOLDERS:
+            if tk:   # what follows a placeholder up to the next / is checked too: <DIR-1>'Brien Architects/...
+                step += 1
+                j = _seg_end(norm, tk.end(), opener, _gate_sep, GATE_NEW_PATH)
+                piece = norm[tk.end():j]
+                if piece and (norm.startswith("/", j) or GATE_GLUED.match(piece)):
+                    hit("user-dir", "path", tk.end(), len(piece))
                     break
+                i = j
+                continue
+            e = _seg_end(norm, i + 1, opener, _gate_sep, GATE_NEW_PATH)
+            if e == i + 1:
+                break
+            seg, last = norm[i + 1:e], not norm.startswith("/", e)
+            what, mode = _user_seg(step, mode, seg.strip(), last, wine)
+            step += 1
+            if what == "stop":
+                break
+            if what == "keep":
+                i = e
+                continue
             hit("user-dir", "path", i + 1, len(seg))
             break
     if ident is not None:
@@ -924,8 +1113,9 @@ def _gate_text(norm, light, ident, name):
 def gate(data, identity=None, name=""):
     """Hits of the independent check in one text or file content: learned values in any form, and rules that need no
     learned value. data: bytes (read as UTF-8 and as UTF-16LE) or str -> [{rule, file, line, class, length}].
-    Each view is read as it is, with its \\uXXXX escapes decoded, and by the string values of its JSON; percent
-    escapes are decoded, Unicode is compared in NFC without case. A hit never holds the value or any part of it."""
+    Each view is read as it is, with its \\uXXXX escapes decoded, with Wine's \\x00fc escapes decoded, and by the
+    string values of its JSON; percent escapes are decoded, Unicode is compared in NFC without case. A hit never holds
+    the value or any part of it."""
     views = [data] if isinstance(data, str) else [data.decode("utf-8", "replace")]
     if isinstance(data, bytes) and len(data) >= 2:
         views += [data.decode("utf-16-le", "ignore"), data[1:].decode("utf-16-le", "ignore")]
@@ -934,6 +1124,8 @@ def gate(data, identity=None, name=""):
         texts = [(v, None)]
         if JSON_U.search(v):
             texts.append((_unescape_json(v), None))
+        if XESC_RX.search(v):   # Wine's \x00fc, in any line: a view more can only find more
+            texts.append((_wine_unescape(v, every_line=True), None))
         strings = _json_strings(v)
         if strings:   # one string a line; lines[i] is the line of the text it came from
             texts.append(("\n".join(re.sub(r"[\r\n]", " ", s) for _, s in strings), [n for n, _ in strings]))
@@ -966,44 +1158,94 @@ JRN_KEEP_DIRECTIVES = ("version", "debugmode", "screenresolution")
 JRN_ID = re.compile(r"^(?:ID_[A-Z0-9_]+|[A-Z0-9_]{3,})$")
 
 
+class Skipped:
+    """In a stream of lines: n bytes in between were not read."""
+
+    def __init__(self, n):
+        self.n = n
+
+
+def _budget(lines, limit):
+    """lines until they hold more than limit characters; then Skipped(-1), the end."""
+    for line in lines:
+        if not isinstance(line, Skipped):
+            limit -= len(line) + 1
+            if limit < 0:
+                yield Skipped(-1)
+                return
+        yield line
+
+
 def _statements(lines):
-    """Journal lines -> (first line number, [lines]) per statement: a Jrn.* line with its '_' continuations, or one
-    other line."""
-    cur, start = None, 0
+    """Journal lines -> (first line number, [lines], number of lines) per statement: a Jrn.* line with its '_'
+    continuations (at most JRN_CONT of them kept, all counted), or one other line. A Skipped passes through as
+    (0, Skipped, 0)."""
+    cur, start, n = None, 0, 0
     for i, line in enumerate(lines, 1):
+        if isinstance(line, Skipped):
+            if cur is not None:
+                yield start, cur, n
+                cur = None
+            yield 0, line, 0
+            continue
         if cur is not None:
-            cur.append(line)
+            n += 1
+            if len(cur) < JRN_CONT:
+                cur.append(line)
             if not line.rstrip().endswith("_"):
-                yield start, cur
+                yield start, cur, n
                 cur = None
             continue
         if re.match(r"^\s*Jrn\.", line) and line.rstrip().endswith("_"):
-            cur, start = [line], i
+            cur, start, n = [line], i, 1
             continue
-        yield i, [line]
+        yield i, [line], 1
     if cur is not None:
-        yield start, cur
+        yield start, cur, n
 
 
 def _joined(st):
     return " ".join(re.sub(r"\s*_\s*$", "", s.strip()) for s in st)
 
 
+def _titles_out(s):
+    """Quoted and bracketed text (a document or view title can be there) as \u2026, an unclosed one too."""
+    s = re.sub(r'"[^"]*"', '"\u2026"', s)
+    s = re.sub(r"'[^'\n]*'", "'\u2026'", s)
+    s = re.sub(r"\[[^\]]*\]", "[\u2026]", s)
+    for q in "\"'[":   # one left open (the line was cut, or a title holds an apostrophe): all after it
+        if (s.count(q) % 2 if q != "[" else s.rfind("[") > s.rfind("]")):
+            s = s[:s.rfind(q) + 1] + "\u2026"
+    return s
+
+
 def journal_extract(lines, keep=None):
     """The allowed lines of a Revit journal: Build/Release, directives Version/DebugMode/ScreenResolution, command ids,
     TaskDialog ids, license state, start/end markers and lines that report a failure (keep: an extra regex, e.g. the
-    signature catalog). Everything else becomes '... N lines dropped'; add-in lines become a count."""
-    out, dropped, addins, errors, vendors = [], 0, 0, 0, set()
+    signature catalog). Everything else becomes '... N lines dropped'; add-in lines become a count. Read as a stream,
+    with bounds: it keeps the header lines among the first 60 it keeps and its last JOURNAL_MAX lines, JRN_CONT lines
+    of a statement, and reads at most 2 x JOURNAL_READ characters. A Skipped in lines: a part not read."""
+    dropped, addins, errors, vendors = 0, 0, 0, set()
+    head, tail, kept = [], collections.deque(maxlen=JOURNAL_MAX), [0]
+
+    def emit(s):
+        if kept[0] < 60 and s.startswith(("' Build", "' Release", "Jrn.Directive")):
+            head.append(s)
+        kept[0] += 1
+        tail.append(s)
 
     def put(s):
         nonlocal dropped
         if dropped:
-            out.append("\u2026 %d lines dropped" % dropped)
+            emit("\u2026 %d lines dropped" % dropped)
             dropped = 0
-        out.append(s)
-    for _, st in _statements(lines):
+        emit(s)
+    for _, st, n in _statements(_budget(lines, 2 * JOURNAL_READ)):
+        if isinstance(st, Skipped):
+            put("\u2026 the rest of the journal not read" if st.n < 0 else
+                "\u2026 %d KB of the journal not read" % (st.n // 1024))
+            continue
         one = st[0]
-        n = len(st)
         ts = JRN_TS.match(one)
         stamp = ("'%s %s; " % (one.strip()[1], ts.group(1))) if ts else ""
         code = re.match(r"^\s*Jrn\.(\w+)", one)
@@ -1016,7 +1258,7 @@ def journal_extract(lines, keep=None):
                 cid = ids[-1] if ids and JRN_ID.match(ids[-1]) else "(id not kept)"
                 src = q[0] if q and re.fullmatch(r"[A-Za-z]+", q[0]) else "?"
                 put('Jrn.Command "%s" %s' % (src, cid))
-            elif kind == "directive" and q and q[0].lower() in JRN_KEEP_DIRECTIVES:
+            elif kind == "directive" and q and q[0].lower() in JRN_KEEP_DIRECTIVES and n < JRN_CONT:
                 put(re.sub(r"\s+", " ", j))
             elif kind == "data" and q and q[0] == "TaskDialogResult" and re.fullmatch(r"ID[A-Z]+", q[-1]):
                 put('Jrn.Data "TaskDialogResult" %s' % q[-1])
@@ -1057,21 +1299,36 @@ def journal_extract(lines, keep=None):
         elif JRN_MARKERS.search(s):
             put(stamp + JRN_MARKERS.search(s).group(0))
         elif ("0:<" in s or ts) and (JRN_FAIL.search(s) or (keep is not None and keep.search(s))):
-            mark = re.match(r"^\s*'[A-Z]?", s).group(0)   # quoted and bracketed text can be a document or view title
-            rest = re.sub(r"\[[^\]]*\]", "[…]", re.sub(r"'[^'\n]*'", "'…'", re.sub(r'"[^"]*"', '"…"',
-                                                                                           s[len(mark):])))
-            put((mark + rest).strip())
+            if len(s) >= READ_LINE:   # cut by the reader: no part of a value at its end
+                s = _trim_cut(s)
+            mark = re.match(r"^\s*'[A-Z]?", s)
+            mark = mark.group(0) if mark else ""
+            put((mark + _titles_out(s[len(mark):])).strip())
         else:
             dropped += 1
     if dropped:
-        out.append("\u2026 %d lines dropped" % dropped)
+        emit("\u2026 %d lines dropped" % dropped)
     if addins:
-        out.append("add-in lines: %d (%d errors); Autodesk vendor ids: %s" % (addins, errors,
-                                                                             ", ".join(sorted(vendors)) or "none"))
-    if len(out) > JOURNAL_MAX:
-        head = [s for s in out[:60] if s.startswith(("' Build", "' Release", "Jrn.Directive"))]
-        out = head + ["\u2026 %d kept lines cut" % (len(out) - JOURNAL_MAX)] + out[-JOURNAL_MAX:]
-    return out
+        emit("add-in lines: %d (%d errors); Autodesk vendor ids: %s" % (addins, errors,
+                                                                      ", ".join(sorted(vendors)) or "none"))
+    if kept[0] > JOURNAL_MAX:
+        return head + ["\u2026 %d kept lines cut" % (kept[0] - JOURNAL_MAX)] + list(tail)
+    return list(tail)
+
+
+def journal_file(path, keep=None):
+    """journal_extract for a journal file of any size: all of it up to JOURNAL_READ bytes, else its first
+    JOURNAL_READ / 8 bytes (Build, Release, the directives) and its last bytes, a note for the part in between."""
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return []
+    if size <= JOURNAL_READ:
+        return journal_extract(bottleread.read_lines(path, JOURNAL_READ), keep)
+    first = JOURNAL_READ // 8
+    start = size - (JOURNAL_READ - first)
+    return journal_extract(itertools.chain(bottleread.read_lines(path, first), [Skipped(start - first)],
+                                           bottleread.read_lines(path, start=start)), keep)
 
 
 # The lines of a log that may go into a report: those that report an error or a crash. (a literal every match holds:
@@ -1097,14 +1354,39 @@ def _numbered(lines):
         yield n, x
 
 
+CUT_MARK = " \u2026[cut]"
+_CUT_AT = re.compile(r"[\s\\/\"'<>|,;]")
+
+
+def _trim_cut(line):
+    """A line the reader cut (READ_LINE characters): back to the last space or separator, so no part of a value is
+    left at its end (it could no longer be recognized), and a mark."""
+    lo = max(0, len(line) - 400)   # no learned value is that long: past this, the whole end goes
+    ks = [m.start() for m in _CUT_AT.finditer(line, lo)]
+    return line[:ks[-1] if ks else lo].rstrip() + CUT_MARK
+
+
+def _cut_line(ln):
+    """A redacted line cut to LINE_MAX characters, never inside a placeholder."""
+    if len(ln) <= LINE_MAX:
+        return ln
+    cut = ln[:LINE_MAX - len(CUT_MARK)]
+    k = cut.rfind("<")
+    if k >= 0 and ">" not in cut[k:] and TOKEN.match(ln, k):
+        cut = cut[:k]
+    return cut + CUT_MARK
+
+
 def error_extract(lines, limit=ERROR_LINES):
     """The lines that report an error or a crash (ERROR_LINE), each as 'line N: text' and nothing around it: no
-    context, no tail. At most `limit`: the first and the last half when there are more. lines: str or (number, str)."""
+    context, no tail. At most `limit`: the first and the last half when there are more. lines: str or (number, str).
+    A line is not cut here: it is redacted whole, then cut (_cut_line); one the reader cut loses its last word."""
     head, tail, n = [], collections.deque(maxlen=limit - limit // 2), 0
     for i, line in _numbered(lines):
         if ERROR_RX.search(line):
             n += 1
-            s = "line %d: %s" % (i, line.rstrip("\r\n")[:LINE_MAX - 20])
+            line = line.rstrip("\r\n")
+            s = "line %d: %s" % (i, _trim_cut(line) if len(line) >= READ_LINE else line)
             if len(head) < limit // 2:
                 head.append(s)
             else:
@@ -1326,8 +1608,13 @@ def cxlog_file(path, limit=ERROR_LINES):
     return cxlog_extract(itertools.chain(head, [GAP], _scan(path, off, len(parts) + 1)), limit)
 
 
+def _whole(lines):
+    """Lines as read, one the reader cut without the part of a value at its end (_trim_cut)."""
+    return [_trim_cut(ln) if len(ln) >= READ_LINE else ln for ln in lines]
+
+
 def _text(path, keep="head", limit=MEMBER_MAX * 2):
-    lines = list(_lines(path)) if keep == "head" else _tail(path, 100000)[0]
+    lines = _whole(_lines(path)) if keep == "head" else _whole(_tail(path, 100000)[0])
     text = "\n".join(lines)
     return text[:limit] if keep == "head" else text[-limit:]
 
@@ -1335,7 +1622,8 @@ def _text(path, keep="head", limit=MEMBER_MAX * 2):
 # ---------------------------------------------------------------------------------------------------------------
 # Building the report
 # ---------------------------------------------------------------------------------------------------------------
-RUN_RE = re.compile(r"^(\d{8}-\d{6})(?:-(\d+))?-([a-z]+)$")
+# logs/<bottle>/<time>-<kind>; a second run in the same second: <time>-<kind>-2 (run_dir_new), <time>-2-<kind> before
+RUN_RE = re.compile(r"^(\d{8}-\d{6})(?:-(\d+))?-([a-z]+)(?:-(\d+))?$")
 KIND_LABEL = {"install": "install log", "steps": "steps log", "addins": "add-ins log", "debug": "debug session",
               "test": "test run"}
 ACTIONS = ("shims", "revit", "redist", "unpack", "bottle", "steps", "apps")
@@ -1391,7 +1679,7 @@ def _runs(data, bottle):
         for r in _listdir(d):
             m, p = RUN_RE.match(r), os.path.join(d, r)
             if m and m.group(3) in KIND_LABEL and os.path.isdir(p) and not os.path.islink(p):
-                out.append(((m.group(1), int(m.group(2) or 1)), m.group(3), p))
+                out.append(((m.group(1), int(m.group(4) or m.group(2) or 1)), m.group(3), p))
     return out
 
 
@@ -1532,7 +1820,7 @@ def _collect(root, data, bdir, year, bottle, run, doctor_json, now):
             ev = os.path.join(rp, "events.ndjson")
             if _regular(ev):
                 lines, cut = _tail(ev, 300)
-                c.add("run/events.ndjson", "events of the run", "\n".join(lines), src=c.label(ev),
+                c.add("run/events.ndjson", "events of the run", "\n".join(_whole(lines)), src=c.label(ev),
                       cut="to its last 300 lines" if cut else None)
             m = re.search(r"(?m)^log_dir=(.+)$", text)
             if m and os.path.isdir(m.group(1).strip()) and not os.path.islink(m.group(1).strip()):
@@ -1558,8 +1846,8 @@ def _collect(root, data, bdir, year, bottle, run, doctor_json, now):
         rn = os.path.join(bdir, "revit-macos", "runs.ndjson")
         if _regular(rn):
             lines, cut = _tail(rn, 2000)
-            c.add("bottle/runs.ndjson", "run records of the bottle", "\n".join(lines), src="bottle: runs.ndjson",
-                  cut="to its last 2000 records" if cut else None)
+            c.add("bottle/runs.ndjson", "run records of the bottle", "\n".join(_whole(lines)),
+                  src="bottle: runs.ndjson", cut="to its last 2000 records" if cut else None)
             for ln in reversed(lines):
                 try:
                     r = json.loads(ln)
@@ -1577,7 +1865,7 @@ def _collect(root, data, bdir, year, bottle, run, doctor_json, now):
                           src="bottle: Revit.ini", keep="head")
             j = bottleread.newest_journal(bdir, year)
             if j and _regular(j):
-                ex = journal_extract(bottleread.read_lines(j), keep=signatures.journal_rx())
+                ex = journal_file(j, keep=signatures.journal_rx())
                 for s in ex[:80]:
                     m = re.match(r"^' (Build|Release):\s*(.+)$", s)
                     if m:
@@ -1588,12 +1876,52 @@ def _collect(root, data, bdir, year, bottle, run, doctor_json, now):
     return c
 
 
+MATERIAL_BOTTLE_RX = re.compile(r"(?:\blogs" + SEP + r"([A-Za-z0-9_.-]{1,72})" + SEP + r"\d{8}-\d{6}|\bBottles" + SEP +
+                                r"([A-Za-z0-9_.-]{1,72})(?=" + SEP + r"|[\"'\s]|$))", re.M)
+BOTTLE_KEYS = ("bottle", "copy", "source")
+
+
+def _json_values(x, out):
+    if isinstance(x, dict):
+        for k, v in x.items():
+            if k in BOTTLE_KEYS and isinstance(v, str):
+                out.append(v)
+            else:
+                _json_values(v, out)
+    elif isinstance(x, list):
+        for v in x:
+            _json_values(v, out)
+
+
+def _material_bottles(c):
+    """The bottle names in what was collected: doctor's check ids, the bottle fields of its JSON (test result, run
+    records, events), paths through logs/<bottle>/<run> or Bottles/<bottle>."""
+    out = []
+    doc = c.facts.get("doctor")
+    checks = doc.get("checks") if isinstance(doc, dict) else None
+    for x in checks if isinstance(checks, list) else []:
+        m = re.match(r"^bottles\.(?:clone\.)?(.+)$", str(x.get("id", ""))) if isinstance(x, dict) else None
+        if m and m.group(1) != "none":
+            out.append(m.group(1))
+    for it in c.items:
+        text = it["text"]
+        out += [a or b for a, b in MATERIAL_BOTTLE_RX.findall(text)]
+        s = text.strip()
+        for doc in ([s] if s[:1] in "{[" and s[-1:] in "}]" else []) + \
+                [ln for ln in text.split("\n") if ln.strip()[:1] == "{"]:
+            try:
+                _json_values(json.loads(doc), out)
+            except (ValueError, RecursionError):
+                pass
+    return out
+
+
 def _caps(text, keep):
     """Lines of at most LINE_MAX characters, at most MEMBER_MAX bytes (the head or the tail) -> (bytes, cut)."""
     cut, lines = None, []
     for ln in text.split("\n"):
         if len(ln) > LINE_MAX:
-            ln, cut = ln[:LINE_MAX - 7] + " \u2026[cut]", "long lines cut"
+            ln, cut = _cut_line(ln), "long lines cut"
         lines.append(ln)
     data = "\n".join(lines).encode("utf-8")
     if len(data) > MEMBER_MAX:
@@ -1653,10 +1981,10 @@ def _engine(root):
             return "app"
     if not _git_dir(root):
         return "unknown"
-    sha = _run(["git", "-C", root, "rev-parse", "--short", "HEAD"]).strip()
+    sha = _git(root, "rev-parse", "--short", "HEAD").strip()
     if not sha:
         return "unknown"
-    dirty = _run(["git", "-C", root, "status", "--porcelain", "--untracked-files=no"]).strip()
+    dirty = _git(root, "status", "--porcelain", "--untracked-files=no").strip()
     return "git:" + sha + ("+dirty" if dirty else "")
 
 
@@ -1768,13 +2096,15 @@ def build(root, data, bottles, out_dir, year=None, bottle=None, run=None, doctor
           identity=None, now=None):
     """Make report.txt and report.zip in out_dir -> {report_txt, report_zip, left_out, summary, refused, hits}.
     refused (no report, nothing written) when report.txt fails the gate. identity: learned from this Mac and the
-    bottle when not given (tests pass a synthetic one)."""
+    bottle when not given (tests pass a synthetic one); either way, every bottle the collected parts name and the
+    Autodesk identity of each bottle are added to it (learn_bottles) before anything is redacted."""
     now = time.time() if now is None else now
     year = str(year) if year else None
     bdir = _bottle_dir(bottles, bottle)
     if identity is None:
         identity = collect_identity(root, data, bdir, year, bottle)
     c = _collect(root, data, bdir, year, bottle, run, doctor_json, now)
+    learn_bottles(identity, data, bottles, _material_bottles(c))
     ex = set(exclude or ())
     kept, left, counts = [], [], collections.Counter()
     for it in c.items:
@@ -1782,8 +2112,11 @@ def build(root, data, bottles, out_dir, year=None, bottle=None, run=None, doctor
             c.skipped.append((it.get("src") or it["name"], "left out on request (--exclude)"))
             continue
         text, n = redact(it["text"], identity, rel=it.get("rel"))
-        if it.get("per_line"):   # a log's lines: each one passes the gate on its own or is left out
+        if it.get("per_line"):   # a log's lines: each one, redacted whole and then cut, passes the gate or is left out
             lines = text.split("\n")
+            if any(len(ln) > LINE_MAX for ln in lines):
+                lines = [_cut_line(ln) for ln in lines]
+                it["cut"] = ", ".join(x for x in (it.get("cut"), "long lines cut") if x)
             ok = [ln for ln in lines if not gate(ln.encode("utf-8"), identity, it["name"])]
             it["dropped"] = len(lines) - len(ok)
             if it["dropped"]:
@@ -1919,7 +2252,7 @@ def main(argv=None):
         return 2
     try:
         if a.cmd == "gate":
-            ident = collect_identity(a.root, data, _bottle_dir(a.bottles, a.bottle), a.year, a.bottle)
+            ident = collect_identity(a.root, data, _bottle_dir(a.bottles, a.bottle), a.year, a.bottle, a.bottles)
             n = 0
             for f in a.files:
                 for h in _gate_file(f, ident, os.path.basename(f)):

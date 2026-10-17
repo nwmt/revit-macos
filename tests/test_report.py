@@ -593,7 +593,8 @@ class Extracts(unittest.TestCase):
             rp.SCAN_BLOCK = old
         self.assertEqual([s.split(":")[0] for s in out], ["line 18", "line 3000", "line 3001", "line 5000"])
         self.assertEqual(out[0], "line 18: !! failure at 17")
-        self.assertTrue(out[2].startswith("line 3001: xxx") and len(out[2]) <= rp.LINE_MAX)
+        self.assertTrue(out[2].endswith(" Error 1603 at the end of a long line"))   # whole: redacted, then cut
+        self.assertTrue(out[2].startswith("line 3001: xxx") and len(rp._cut_line(out[2])) <= rp.LINE_MAX)
 
     def test_error_file_cut_short_while_read(self):
         real = os.fstat
@@ -975,6 +976,322 @@ class Build(Tmp):
         rt = slurp(r["report_txt"])
         self.assertIn("Revit: no year given", rt)
         self.assertIn("install/summary.txt", self.zip_members(r["report_zip"]))
+
+
+class NoYear(Tmp):
+    """./revit report without a year: custom bottle names and the Autodesk identity of every bottle are learned from
+    the material itself; the identity given knows neither."""
+
+    def setUp(self):
+        super().setUp()
+        self.home, self.bottles = self.path("home"), self.path("Bottles")
+        self.data = self.path("home", "Work Files", "revit-macos")
+        os.makedirs(self.data)
+        for name, user, uid in (("Falcon-Tower", "alima42", "QWERTY1234567890"),
+                                ("rvt2026-a", "bwong77", "ZXCVBN0987654321")):
+            year = "2027" if name == "Falcon-Tower" else "2026"
+            b = "Bottles/%s/drive_c/" % name
+            ini = "[Partitions]\r\nUsername=%s\r\nUserId=%s\r\n" % (user, uid)
+            self.write(b + "users/crossover/AppData/Roaming/Autodesk/Revit/Autodesk Revit %s/Revit.ini" % year,
+                       b"\xff\xfe" + ini.encode("utf-16-le"))
+            self.write(b + "users/crossover/AppData/Local/Autodesk/Revit/Autodesk Revit %s/Journals/journal.0001.txt"
+                       % year, "' Build: x\nJrn.Directive  _\n        \"Username\"  , \"%s\"\n" % user)
+            os.makedirs(self.path(*(b + "Program Files/Autodesk/Revit %s" % year).split("/")))
+        logs = "home/Work Files/revit-macos/logs/"
+        self.write(logs + "Falcon-Tower/20261014-145128-install/summary.txt",
+                   "   bottle     exit=0     scripts/new-bottle.sh 2027 Falcon-Tower (23 s)\n")
+        self.write(logs + "Falcon-Tower/20261015-090000-test/result.json",
+                   json.dumps({"verdict": "pass", "bottle": "Falcon-Tower", "copy": "Falcon-Tower.test"}))
+        self.write(logs + "rvt2026-a/20261012-101010-debug/stdout.log",
+                   "Assertion failed: x for bwong77 and alima42\n!! stopped in Falcon-Tower\n")
+        self.doc = self.path("doctor.json")
+        with open(self.doc, "w") as f:
+            json.dump({"checks": [
+                {"id": "bottles.clone.Harbor-Lab.test", "status": "warn",
+                 "title": "a temporary copy of Harbor-Lab that ./revit test made was left behind: Harbor-Lab.test",
+                 "fix": "rm -rf \"$HOME/Library/Application Support/CrossOver/Bottles/Harbor-Lab.test\""},
+                {"id": "bottles.Falcon-Tower", "status": "warn", "title": "Falcon-Tower: Revit 2027"}]}, f)
+        self.ident = rp.learn_identity({"login": "design", "home": self.home, "data": self.data, "root": REPO})
+        self.secret = ["falcon-tower", "harbor-lab", "alima42", "bwong77", "qwerty1234567890", "zxcvbn0987654321"]
+
+    def test_bottle_names_and_autodesk_identity_are_learned(self):
+        r = rp.build(REPO, self.data, self.bottles, self.path("out"), doctor_json=self.doc, identity=self.ident,
+                     now=NOW)
+        self.assertIsNone(r["refused"])
+        with zipfile.ZipFile(r["report_zip"]) as z:
+            members = {n: z.read(n).decode("utf-8") for n in z.namelist()}
+        self.assertIn("test/result.json", members)
+        self.assertIn("debug/stdout-errors.txt", members)
+        everything = (slurp(r["report_txt"]) + "".join(n + "\n" + b for n, b in members.items())).lower()
+        for v in self.secret:
+            self.assertNotIn(v, everything, "a learned value is left (%d characters)" % len(v))
+        self.assertIn("<BOTTLE>", members["test/result.json"])
+        self.assertIn("<BOTTLE>.test", members["doctor.json"])
+        self.assertIn("for <ADSK-USER> and <ADSK-USER>", members["debug/stdout-errors.txt"])
+        self.assertIn("rvt2026-a", members["manifest.txt"])   # a default name is not personal
+
+    def test_gate_command_learns_them_too(self):
+        p = self.write("x.txt", "fine\nleft in Falcon-Tower by bwong77\n")
+        env = {k: v for k, v in os.environ.items() if k not in ("REVIT_DATA", "REVIT_CX")}
+        env["HOME"] = self.home
+        r = subprocess.run([sys.executable, "-I", "-B", os.path.join(TOOLS, "report.py"), "gate", "--data", self.data,
+                            "--bottles", self.bottles, p], capture_output=True, text=True, env=env, cwd="/")
+        self.assertEqual(r.returncode, 1)
+        self.assertEqual(sorted(r.stdout.split()), sorted(["learned", "x.txt", "2", "bottle", "12",
+                                                           "learned", "x.txt", "2", "adsk_user", "7"]))
+
+
+class RunFolders(Tmp):
+    def test_same_second_runs_take_the_suffixed_one(self):
+        logs = self.path("data", "logs", "rvt2027-a")
+        for n in ("20261014-145128-install", "20261014-145128-install-2", "20261014-145127-debug",
+                  "20261014-145127-3-debug", "20261014-145127-debug-2"):
+            os.makedirs(os.path.join(logs, n))
+        picked = dict(rp._pick(rp._runs(self.path("data"), None)))
+        self.assertEqual(os.path.basename(picked["install"]), "20261014-145128-install-2")
+        self.assertEqual(os.path.basename(picked["debug"]), "20261014-145127-3-debug")   # the old form still read
+        self.assertIsNotNone(rp._folder_time(os.path.join(logs, "20261014-145128-install-2")))
+        self.assertEqual(rp._folder_time(os.path.join(logs, "20261014-145128-install-2")),
+                         rp._folder_time(os.path.join(logs, "20261014-145128-install")))
+
+    def test_build_reads_the_second_run_of_a_second(self):
+        data = self.path("data")
+        base = "data/logs/rvt2027-a/20261014-145128-install"
+        self.write(base + "/summary.txt", "   rvt        exit=0     first (8 s)\n")
+        self.write(base + "-2/summary.txt", "   rvt        exit=0     second (8 s)\n")
+        r = rp.build(REPO, data, self.path("none"), self.path("out"), year="2027", bottle="rvt2027-a",
+                     identity=rp.learn_identity({}), now=NOW)
+        with zipfile.ZipFile(r["report_zip"]) as z:
+            self.assertIn("second", z.read("install/summary.txt").decode())
+
+
+class GitReadOnly(Tmp):
+    def test_every_git_call_takes_no_optional_locks(self):
+        calls, real = [], rp.subprocess.run
+
+        def spy(cmd, *a, **k):
+            calls.append((cmd, k.get("env")))
+            return subprocess.CompletedProcess(cmd, 0, stdout="abc1234\n" if "rev-parse" in cmd else "")
+        os.makedirs(self.path("repo", ".git"))
+        rp.subprocess.run = spy
+        try:
+            rp._engine(self.path("repo"))
+            rp.machine_facts(self.path("repo"), self.path("data"))
+        finally:
+            rp.subprocess.run = real
+        git = [(c, e) for c, e in calls if os.path.basename(c[0]) == "git"]
+        self.assertGreaterEqual(len(git), 4)
+        for c, e in git:
+            self.assertEqual(c[1], "--no-optional-locks", c[1:3])
+            self.assertEqual((e or {}).get("GIT_OPTIONAL_LOCKS"), "0")
+
+    @unittest.skipUnless(os.path.exists("/Library/Developer/CommandLineTools/usr/bin/git") or
+                         sys.platform != "darwin", "git from the Command Line Tools")
+    def test_engine_leaves_the_index_alone(self):
+        repo = self.path("repo")
+        os.makedirs(repo)
+        env = dict(os.environ, GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null",
+                   GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t" + AT + "example.com", GIT_COMMITTER_NAME="t",
+                   GIT_COMMITTER_EMAIL="t" + AT + "example.com")
+        for cmd in (["init", "-q"], ["add", "."], ["commit", "-qm", "x"]):
+            if cmd[0] == "add":
+                self.write("repo/f.txt", "one\n")
+            subprocess.run(["git", "-C", repo] + cmd, env=env, check=True, capture_output=True)
+        idx = os.path.join(repo, ".git", "index")
+        os.utime(idx, (1000000000, 1000000000))
+        os.utime(os.path.join(repo, "f.txt"), (1000000500, 1000000500))   # stat data that git status would refresh
+        before = os.stat(idx).st_mtime_ns
+        self.assertTrue(rp._engine(repo).startswith("git:"))
+        self.assertEqual(os.stat(idx).st_mtime_ns, before)
+
+
+class JournalBounded(unittest.TestCase):
+    def test_kept_lines_are_cut_as_before(self):
+        lines = ["' Build: 20260907_1515(x64)", "' Release: 2027.3"]
+        lines += ["'C 12-Oct-2026 23:59:%02d.000;   0:< Exception occurred %d" % (i % 60, i) for i in range(1500)]
+        out = rp.journal_extract(iter(lines))
+        self.assertEqual(out[:3], ["' Build: 20260907_1515(x64)", "' Release: 2027.3", "\u2026 502 kept lines cut"])
+        self.assertEqual(len(out), 3 + rp.JOURNAL_MAX)
+        self.assertTrue(out[-1].endswith("Exception occurred 1499"))
+
+    def test_memory_stays_bounded(self):
+        import tracemalloc
+
+        def many():
+            yield "' Build: 20260907_1515(x64)"
+            for i in range(60000):
+                yield "'C 12-Oct-2026 23:59:00.000;   0:< Exception occurred in a long line %d %s" % (i, "y" * 200)
+            yield "Jrn.Data  _"
+            for i in range(60000):   # one statement that never ends
+                yield '        "File Name"  , "IDOK" , "%s" _' % ("z" * 200)
+            yield "' 0:< finished recording journal file"
+        tracemalloc.start()
+        try:
+            out = rp.journal_extract(many())
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        self.assertLess(peak, 4 << 20)
+        self.assertEqual(out[0], "' Build: 20260907_1515(x64)")
+        self.assertLessEqual(len(out), rp.JOURNAL_MAX + 3)
+
+    def test_a_huge_journal_is_read_by_its_head_and_tail(self):
+        old = rp.JOURNAL_READ
+        rp.JOURNAL_READ = 64 << 10
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                p = os.path.join(d, "journal.0001.txt")
+                with open(p, "w") as f:
+                    f.write("' Build: 20260907_1515(x64)\n' Release: 2027.3\n")
+                    for i in range(20000):
+                        f.write("' 0:< plain line %d about nothing much\n" % i)
+                    f.write("'C 12-Oct-2026 23:59:09.000;   0:< Exception occurred at the end\n")
+                    f.write("' 0:< a plain line after it\n")
+                read, real = [], rp.bottleread.read_lines
+
+                def spy(path, max_bytes=None, max_line=4000, start=0):
+                    for ln in real(path, max_bytes, max_line, start):
+                        read.append(len(ln) + 1)
+                        yield ln
+                rp.bottleread.read_lines = spy
+                try:
+                    out = rp.journal_file(p)
+                finally:
+                    rp.bottleread.read_lines = real
+        finally:
+            rp.JOURNAL_READ = old
+        self.assertLess(sum(read), 80 << 10)
+        self.assertEqual(out[:2], ["' Build: 20260907_1515(x64)", "' Release: 2027.3"])
+        self.assertTrue(out[-2].endswith("Exception occurred at the end"))
+        self.assertTrue(any(re.match(r"^\u2026 \d+ KB of the journal not read$", s) for s in out))
+
+
+class Rev3Names(unittest.TestCase):
+    """Apostrophes, brackets and colons in folder and model names; cloud folders under ~/Library."""
+
+    def check(self, raw, want, ident=None):
+        ident = ident or rp.learn_identity({"home": U + "design", "login": "design"})
+        out = rp.redact(raw, ident)[0]
+        self.assertEqual(out, want)
+        self.assertEqual(rp.gate(out, ident, "x"), [], raw)
+        self.assertTrue(rp.gate(raw, rp.learn_identity({}), "x"), raw)   # planted past the redaction: caught
+        self.assertEqual(rp.redact(out, ident)[0], out)
+
+    def test_apostrophe_bracket_colon(self):
+        self.check("C:\\users\\crossover\\Documents\\O'Brien Architects\\Harbor Tower\\Phase 2\\notes.txt",
+                   "C:\\users\\crossover\\Documents\\<DIR-1>\\<DIR-2>\\<DIR-3>\\<DIR-4>.txt")
+        self.check("~/Desktop/Client's files/Harbor Tower/site.dwg", "~/Desktop/<DIR-1>/<DIR-2>/<MODEL-1>.dwg")
+        self.check("C:\\ProjectsX\\Henderson's Barn.rvt", "C:\\ProjectsX\\<MODEL-1>.rvt")
+        self.check("Y:\\Projects [2026]\\Harbor Tower\\x.txt", "Y:\\<DIR-1>\\<DIR-2>\\<DIR-3>.txt")
+        self.check("0024:err:eventlog:ReportEventW L\"Could not find file 'C:\\\\users\\\\crossover\\\\Documents\\\\"
+                   "O'Brien House (v2): final.rvt'.\"",
+                   "0024:err:eventlog:ReportEventW L\"Could not find file 'C:\\\\users\\\\crossover\\\\Documents\\\\"
+                   "<MODEL-1>.rvt'.\"")
+        self.check("Error: 'C:\\users\\crossover\\Desktop\\Smith: Annex [old]\\plan.txt' not found",
+                   "Error: 'C:\\users\\crossover\\Desktop\\<DIR-1>\\<DIR-2>.txt' not found")
+        self.check("'C:\\users\\crossover\\Documents\\Brothers' Work\\plan.txt'",
+                   "'C:\\users\\crossover\\Documents\\<DIR-1>\\<DIR-2>.txt'")
+        self.check("[C:\\users\\crossover\\Desktop\\Client\\notes.txt] opened",
+                   "[C:\\users\\crossover\\Desktop\\<DIR-1>\\<DIR-2>.txt] opened")
+        self.check("see ~/Documents/Client/notes.txt: no such file", "see ~/Documents/<DIR-1>/<DIR-2>.txt: no such file")
+        self.check("~/Documents/v1.2: final", "~/Documents/<DIR-1>")   # .2 is no extension: nothing of it stays
+        out = rp.redact("opened Henderson's Barn.rvt", rp.learn_identity({}))[0]
+        self.assertNotIn("Henderson", out)
+
+    def test_gate_checks_what_follows_a_placeholder(self):
+        for s in ("C:\\users\\crossover\\Documents\\<DIR-1>'Brien Architects\\Harbor Tower\\notes.txt",
+                  "~/Desktop/<DIR-2>'s files/Harbor Tower/<MODEL-1>.dwg", "C:\\ProjectsX\\Henderson'<MODEL-1>.rvt",
+                  "Y:\\<DIR-3> [2026]\\Harbor Tower\\x.txt", "~/Documents/<DIR-1>x/<DIR-2>.txt"):
+            self.assertTrue(rp.gate(s, None, "x"), s)
+        for s in ("~/Documents/<DIR-1>/<MODEL-1>.rvt and C:\\x\\<MODEL-2>.rfa", "~/Documents/<DIR-1>.txt: no such file",
+                  "'~/Documents/<DIR-1>/<DIR-2>.txt' and '~/Desktop/<DIR-3>.txt'", "~/Documents/<DIR-1>, then"):
+            self.assertEqual(rp.gate(s, None, "x"), [], s)
+
+    def test_cloud_folders_under_library(self):
+        ident = rp.learn_identity({"home": U + "design", "login": "design"})
+        cases = [
+            ("~/Library/CloudStorage/OneDrive-Harbor Architects/Projects/Smith Residence/notes.txt",
+             "~/Library/CloudStorage/<DIR-1>/<DIR-2>/<DIR-3>/<DIR-4>.txt"),
+            ("Y:\\Library\\CloudStorage\\Dropbox (Harbor)\\Clients\\Smith Residence\\a.txt",
+             "Y:\\Library\\CloudStorage\\<DIR-1>\\<DIR-2>\\<DIR-3>\\<DIR-4>.txt"),
+            ("Z:\\Users\\design\\Library\\CloudStorage\\GoogleDrive-someone\\My Drive\\Smith Residence\\a.txt",
+             "~\\Library\\CloudStorage\\<DIR-1>\\<DIR-2>\\<DIR-3>\\<DIR-4>.txt"),
+            (U + "design/Library/Mobile Documents/com~apple~CloudDocs/Clients/Smith Residence/a.dwg",
+             "~/Library/Mobile Documents/com~apple~CloudDocs/<DIR-1>/<DIR-2>/<MODEL-1>.dwg"),
+            ("Z:\\\\Users\\\\design\\\\Library\\\\CloudStorage\\\\OneDrive-Harbor\\\\Smith Residence\\\\x.txt",
+             "~\\\\Library\\\\CloudStorage\\\\<DIR-1>\\\\<DIR-2>\\\\<DIR-3>.txt"),
+            ('{"p": "\\/Users\\/design\\/Library\\/CloudStorage\\/Dropbox\\/Smith Residence\\/x.txt"}',
+             '{"p": "~\\/Library\\/CloudStorage\\/<DIR-1>\\/<DIR-2>\\/<DIR-3>.txt"}'),
+        ]
+        for raw, want in cases:
+            out = rp.redact(raw, rp.learn_identity({"home": U + "design", "login": "design"}))[0]
+            self.assertEqual(out, want)
+            self.assertEqual(rp.gate(out, ident, "x"), [], raw)
+            planted = out.replace("<DIR-1>", "Harbor Firm")
+            self.assertIn("user-dir", [h["rule"] for h in rp.gate(planted, None, "x")], raw)
+        for s in ("~/Library/Application Support/CrossOver/Bottles/rvt2027-a/x.txt", "~/Library/Logs/x.log",
+                  "~/Library/CloudStorage", "~/Library/Mobile Documents/com~apple~CloudDocs"):
+            self.assertEqual(rp.redact(s, ident)[0], s)
+            self.assertEqual(rp.gate(s, None, "x"), [], s)
+
+
+class Rev3Minor(unittest.TestCase):
+    def test_lines_are_redacted_before_they_are_cut(self):
+        ident = rp.learn_identity({})
+        mail = "mark.ostrowski" + AT + "harbor-arch.com"
+        line = "!! " + "x " * 980 + mail + " rest"
+        out = rp.redact("\n".join(rp.error_extract([line])), ident)[0]
+        self.assertNotIn("harbor", out)
+        self.assertIn("<EMAIL>", out)
+        cut = rp._cut_line(out)
+        self.assertLessEqual(len(cut), rp.LINE_MAX)
+        self.assertNotIn("harbor", cut)
+        with tempfile.TemporaryDirectory() as d:   # a line longer than the reader keeps: no part of a value left
+            p = os.path.join(d, "x.log")
+            with open(p, "w") as f:
+                f.write("!! " + "y " * 1990 + "q" + mail + " and more\n")
+            ex = rp.error_file(p)
+            whole = rp._text(p)   # summary.txt and the like: the same
+        self.assertNotIn("ostrowski", whole)
+        self.assertEqual(len(ex), 1)
+        self.assertNotIn("ostrowski", ex[0])
+        self.assertTrue(ex[0].endswith("\u2026[cut]"))
+
+    def test_a_cut_never_splits_a_placeholder(self):
+        for n in range(8):
+            line = "C:\\users\\crossover\\Documents" + "x" * n + "\\<DIR-1>" * 300
+            cut = rp._cut_line(line)
+            self.assertTrue(cut.endswith(" \u2026[cut]"))
+            self.assertLessEqual(len(cut), rp.LINE_MAX)
+            self.assertIsNone(re.search(r"<[^<>]*$", cut[:-len(" \u2026[cut]")]), n)
+
+    def test_autodesk_exemption_ends_with_the_path(self):
+        ident = rp.learn_identity({"login": "anna", "hosts": ["Annas-Studio"]})
+        raw = "!! C:\\Program Files\\Autodesk\\Revit 2027\\Revit.exe stopped for anna on Annas-Studio"
+        out = rp.redact(raw, ident)[0]
+        self.assertEqual(out, "!! C:\\Program Files\\Autodesk\\Revit 2027\\Revit.exe stopped for <USER> on <HOST>")
+        self.assertIn("user", [h["class"] for h in rp.gate(raw.replace("Annas-Studio", "x"), ident, "x")])
+        keep = ("C:\\Program Files\\Autodesk\\Revit 2027\\AddIns\\Anna Tools\\Anna.dll\n"
+                "C:\\Windows\\Fonts\\Anna Sans.ttf\n")
+        self.assertEqual(rp.redact(keep, ident)[0], keep)
+        self.assertEqual(rp.gate(keep, ident, "x"), [])
+
+    def test_wine_escapes(self):
+        ident = rp.learn_identity({"volumes": ["J\u00fcrgens SSD"], "gecos": "Zo\u00eb J\u00fcrgen"})
+        raw = "0024:err:eventlog:ReportEventW L\"Could not find file Z:\\\\Volumes\\\\J\\x00fcrgens SSD\\\\x\""
+        out = rp.redact(raw, ident)[0]
+        self.assertEqual(out, "0024:err:eventlog:ReportEventW L\"Could not find file Z:\\\\Volumes\\\\<VOLUME-1>\\\\x\"")
+        self.assertTrue([h for h in rp.gate(raw, ident, "x") if h["class"] == "volume"])
+        for raw in ("0024:err:x L\"by J\\x00fcrgen\"", "0024:warn:x \"by J\\xc3\\xbcrgen\""):
+            out = rp.redact(raw, ident)[0]
+            self.assertIn("by <NAME>", out)
+            self.assertTrue([h for h in rp.gate(raw, ident, "x") if h["class"] == "name"], raw)
+            self.assertEqual(rp.gate(out, ident, "x"), [])
+        keep = "C:\\users\\crossover\\AppData\\x2026\\y\n0024:trace:x L\"C:\\\\x2026\""
+        self.assertEqual(rp.redact(keep, rp.learn_identity({}))[0], keep)
+        raw = "0024:err:x opened C:\\users\\crossover\\Documents\\x00e9\\plan.txt"   # a raw path: \x00e9 is a folder
+        self.assertEqual(rp.redact(raw, rp.learn_identity({}))[0],
+                         "0024:err:x opened C:\\users\\crossover\\Documents\\<DIR-1>\\<DIR-2>.txt")
 
 
 class Machine(Tmp):
