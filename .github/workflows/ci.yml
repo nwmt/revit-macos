@@ -42,7 +42,14 @@ jobs:
           tests/smoke.sh
           tests/app.sh
       - name: Python helper tests
-        run: python3 -I -m unittest discover -s tests -p 'test_*.py'
+        run: python3 -I -B -m unittest discover -s tests -p 'test_*.py'
+      - name: Python helper tests under the system Python (3.9, what a Mac with only the Command Line Tools has)
+        run: |
+          if [ -x /usr/bin/python3 ] && /usr/bin/python3 -c 'import sys' 2>/dev/null; then
+            /usr/bin/python3 -I -B -m unittest discover -s tests -p 'test_*.py'
+          else
+            echo "::warning::no /usr/bin/python3 on this runner: the tests did not run under 3.9"
+          fi
       - name: Build all shims, as a release does
         run: ./scripts/build-release.sh ci
       - name: install.sh refuses cleanly without CrossOver and installers
