@@ -996,6 +996,15 @@ class NoYear(Tmp):
         self.assertEqual(rp.gate(out, ident), [])
         self.assertTrue(rp.gate(text, ident))         # the gate knows them too
 
+    def test_a_long_name_from_logs_alone_is_learned(self):
+        gone = "Removed-" + "y" * 64                  # its bottle is gone, its logs stay in logs/<name>/
+        os.makedirs(os.path.join(self.d, "logs", gone, "20261016-111128-test"))
+        ident = rp.learn_bottles(rp.learn_identity({}), self.d, os.path.join(self.d, "no such Bottles"))
+        text = '{"bottle": "%s", "copy": "%s.test"} logs/%s/20261016-111128-test' % (gone, gone, gone)
+        out = rp.redact(text, ident)[0]
+        self.assertNotIn("Removed", out)
+        self.assertEqual(rp.gate(out, ident), [])
+
     def setUp(self):
         super().setUp()
         self.home, self.bottles = self.path("home"), self.path("Bottles")

@@ -520,15 +520,15 @@ def bottle_facts(bottle_dir, year):
     return f
 
 
-BOTTLE_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")   # fullmatch: a name taken from text, as ./revit takes them
+BOTTLE_NAME = re.compile(r"[^/\x00-\x1f]{1,255}")   # fullmatch: CrossOver takes any bottle name but '/'
 NOT_BOTTLES = re.compile(r"(?i)mac|runs|default|revit\d{4}")   # fullmatch: the other folders of logs/
 BOTTLES_MAX = 64
 
 
 def _bottle_name(n, real=False):
-    """A bottle name (of a test copy: its source's), or None. real: a folder in the Bottles folder, which CrossOver
-    lets have any name but '/': learned as it is, whatever its characters or length; a name from text or from logs/
-    must look like one ./revit takes and not be another folder of logs/."""
+    """A bottle name (of a test copy: its source's), or None. real: a folder in the Bottles folder, learned as it is.
+    Otherwise (a folder of logs/, a field of a run record or test result, a doctor check id): any name CrossOver takes,
+    of any length, that is not another folder of logs/. Learning a word too many costs only readability."""
     n = (n or "").strip()
     n = n[:-len(".test")] if n.endswith(".test") else n
     if real:
@@ -1879,8 +1879,8 @@ def _collect(root, data, bdir, year, bottle, run, doctor_json, now):
     return c
 
 
-MATERIAL_BOTTLE_RX = re.compile(r"(?:\blogs" + SEP + r"([A-Za-z0-9_.-]{1,72})" + SEP + r"\d{8}-\d{6}|\bBottles" + SEP +
-                                r"([A-Za-z0-9_.-]{1,72})(?=" + SEP + r"|[\"'\s]|$))", re.M)
+MATERIAL_BOTTLE_RX = re.compile(r"(?:\blogs" + SEP + r"([^\\/\s\"'<>|]{1,255})" + SEP + r"\d{8}-\d{6}|\bBottles" + SEP +
+                                r"([^\\/\s\"'<>|]{1,255})(?=" + SEP + r"|[\"'\s]|$))", re.M)
 BOTTLE_KEYS = ("bottle", "copy", "source")
 
 
