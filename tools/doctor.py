@@ -1251,7 +1251,8 @@ def logs_checks(f, b):
         what = sig.meaning + (f" ({', '.join(details[:3])})" if details else "")
         when = f": seen in the {src['label']} of {day(src['time'])}" if src["time"] else ""
         where = "; ".join(f"{s['file']}: line {', '.join(map(str, h['lines'][:5]))}" +
-                          (f" and {h['count'] - min(5, len(h['lines']))} more" if h["count"] > 5 else "")
+                          (f" and {h['count'] - min(5, len(h['lines']))} more" if h["count"] > 5 else "") +
+                          (f" of its last {count(s['scan']['lines'], 'line')}" if s["scan"].get("relative") else "")
                           for s, h in found)
         fix = sig.fix.replace(signatures.REBUILD, rebuild(f)) if sig.fix else f"see {TS}{sig.doc}"
         out.append(Check(f"logs.{sig.id}", "warn", what + when, detail=where, fix=fix,
@@ -1271,7 +1272,7 @@ def logs_checks(f, b):
                 continue
             parts.append(f"{d}: " + ", ".join(
                 f"{n} ({sc['size']} bytes) {count(sc['lines'], 'line')}" +
-                (f" from line {sc['first_line']}" if sc["first_line"] > 1 else "") +
+                (f" from byte {sc['start']} on" if sc.get("relative") else "") +
                 (", stopped at the line cap" if sc["cut"] else "") for n, sc in files))
         out.append(Check("logs.read", "info", count(len(lg["sources"]), "log file") + " read",
                          detail="; ".join(parts), show=False))

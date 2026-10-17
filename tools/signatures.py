@@ -17,8 +17,9 @@ and ./revit report (tools/report.py takes the warn signatures into the lines of 
 scan_file() reads a file once, through bottleread.read_lines (binary-safe, up to the length the file had when it was
 looked at, long lines cut), with one combined pattern for all its signatures. Of a big file it reads its last
 LINES_MAX lines only, at most WINDOW bytes: a session that crashed ends with the crash, so the cap leaves out the start
-(the line ends are counted first, fast, to find where its last lines begin). It keeps at most HITS_MAX line numbers of
-a signature (the count goes on). A crash line names its thread ("(thread 0b18)"); the process is the one whose lines
+(the line ends are counted backwards from its end, fast, to find where its last lines begin). The part before is never
+read, so the line numbers of such a scan count from its first line read ("relative"). It keeps at most HITS_MAX line
+numbers of a signature (the count goes on). A crash line names its thread ("(thread 0b18)"); the process is the one whose lines
 of the same file carry that thread id and whose program Wine loaded, else "process unknown": no guess from a nearby
 line. Run with python3 -I -B.
 """
@@ -196,22 +197,6 @@ def _utf16_lines(path):
         yield line[:4000]
 
 
-def _newlines(path, end):
-    """The number of line ends in the first `end` bytes of a file."""
-    n = 0
-    try:
-        with open(path, "rb") as f:
-            while end > 0:
-                block = f.read(min(end, 16 << 20))
-                if not block:
-                    break
-                end -= len(block)
-                n += block.count(b"\n")
-    except OSError:
-        pass
-    return n
-
-
 def _start(path, size, lines_max, window):
     """Where to begin in a file: 0 when all of it fits, else the start of its last lines_max lines, at most window
     bytes before the end. The line ends are counted backwards from the end in blocks (bytes.count, fast), so the cap
@@ -244,13 +229,14 @@ def _start(path, size, lines_max, window):
 
 
 def scan_file(path, where=None, year=None, lines_max=LINES_MAX, window=WINDOW, hits_max=HITS_MAX, from_start=False):
-    """One pass over a log -> {"where", "size", "start", "first_line", "lines", "cut", "hits", "metrics"}.
+    """One pass over a log -> {"where", "size", "start", "relative", "lines", "cut", "hits", "metrics"}.
     hits: {id: {"count", "lines": [line numbers], "details": [process or function names]}}; metrics: counts of the
-    info signatures (ecdsa-verify: {"failed", "passed"}). start/first_line: where reading began (0/1 unless the
-    file is big); cut: "lines" when lines_max stopped it before its end. from_start: read from the start (up to
-    lines_max lines) even when the file is big."""
+    info signatures (ecdsa-verify: {"failed", "passed"}). start: the byte reading began at (0 unless the file is
+    big); relative: True when it began after 0, so the line numbers count from the first line read (line 1 is the
+    first whole line after byte start), not from the start of the file; cut: "lines" when lines_max stopped it before
+    its end. from_start: read from the start (up to lines_max lines) even when the file is big."""
     where = where or where_of(os.path.basename(path))
-    out = {"where": where, "size": 0, "start": 0, "first_line": 1, "lines": 0, "cut": None, "hits": {},
+    out = {"where": where, "size": 0, "start": 0, "relative": False, "lines": 0, "cut": None, "hits": {},
            "metrics": {}}
     sigs = of(where, year) if where in WHERE else []
     if not sigs:
@@ -262,16 +248,16 @@ def scan_file(path, where=None, year=None, lines_max=LINES_MAX, window=WINDOW, h
     out["size"] = size
     utf16 = _utf16(path)
     start = 0 if utf16 or from_start else _start(path, size, lines_max, window)
-    if start:   # read_lines skips the line that holds byte start - 1: the first one it gives is the next
-        out["start"], out["first_line"] = start, _newlines(path, start - 1) + 2
+    if start:   # read_lines skips the line that holds byte start - 1; what comes before is not counted
+        out["start"], out["relative"] = start, True
     one = re.compile("|".join("(?:%s)" % s.pattern for s in sigs))
     lines = _utf16_lines(path) if utf16 else bottleread.read_lines(path, max_bytes=size, start=start)
     threads, programs = {}, {}   # tid -> pid, pid -> the program it loaded (the latest one: pids come back)
     hits, metrics, cx = out["hits"], out["metrics"], where == "cxlog"
-    n = out["first_line"] - 1
+    n = 0
     for line in lines:
         n += 1
-        if n - out["first_line"] + 1 > lines_max:
+        if n > lines_max:
             out["cut"], n = "lines", n - 1
             break
         if cx and (":warn:seh:" in line or ":trace:loaddll:" in line):   # who runs which thread
@@ -306,7 +292,7 @@ def scan_file(path, where=None, year=None, lines_max=LINES_MAX, window=WINDOW, h
             detail = d.group(1) if d else None
         if detail and detail not in h["details"] and len(h["details"]) < 5:
             h["details"].append(detail)
-    out["lines"] = max(0, n - out["first_line"] + 1)
+    out["lines"] = n
     return out
 
 
@@ -346,8 +332,9 @@ def main(argv=None):
         print(json.dumps(res, indent=1))
         return 0
     for f, r in res.items():
-        print("%s: %s, %d lines from line %d%s" % (os.path.basename(f), r["where"], r["lines"], r["first_line"],
-                                                    ", cut at the line cap" if r["cut"] else ""))
+        print("%s: %s, %d lines%s%s" % (os.path.basename(f), r["where"], r["lines"],
+                                         " from byte %d (line numbers count from there)" % r["start"]
+                                         if r["relative"] else "", ", cut at the line cap" if r["cut"] else ""))
         for sid, h in r["hits"].items():
             print("  %-24s %d (lines %s)%s" % (sid, h["count"], " ".join(map(str, h["lines"][:5])),
                                               ("; " + ", ".join(h["details"])) if h["details"] else ""))

@@ -583,12 +583,14 @@ class Logs(Sandbox):
         took = time.monotonic() - t
         self.assertLess(took, 60, "doctor took %.1f s on a 1 GB wine.cxlog" % took)
         self.assertEqual(cs["logs.wine-crash"].status, "warn")
-        m = re.match(r"^logs/.*-debug: wine\.cxlog \((\d+) bytes\) (\d+) lines from line (\d+)$",
+        m = re.match(r"^logs/.*-debug: wine\.cxlog \((\d+) bytes\) (\d+) lines from byte (\d+) on$",
                      cs["logs.read"].detail)
         size, lines, first = (int(x) for x in m.groups())
         self.assertGreater(size, 1 << 30)
         self.assertLessEqual(lines, dr.signatures.LINES_MAX)   # its end only
-        self.assertGreater(first, 1)
+        self.assertGreaterEqual(first, size - dr.signatures.WINDOW)   # where its last lines begin
+        # the start is not read, so the line numbers count from the first line read, and say so
+        self.assertRegex(cs["logs.wine-crash"].detail, r"wine\.cxlog: line %d of its last %d lines$" % (lines, lines))
 
 
 class NetFramework(Sandbox):

@@ -208,16 +208,62 @@ class Scan(Base):
         p = self.log("wine.cxlog", lines)
         r = sg.scan_file(p, lines_max=1000)
         self.assertEqual(list(r["hits"]), ["wine-crash"])
-        self.assertEqual(r["hits"]["wine-crash"]["lines"], [4990])   # the true line number
-        self.assertEqual((r["first_line"], r["lines"], r["cut"]), (4001, 1000, None))   # its last 1000 lines
+        self.assertEqual(r["hits"]["wine-crash"]["lines"], [990])   # counted from the first line read
+        self.assertEqual((r["relative"], r["lines"], r["cut"]), (True, 1000, None))
         self.assertGreater(r["start"], 0)
         lines += ["1.0:0030:0040:trace:module:load %s" % ("w" * 3000)] * 60 + [SAMPLES["assertion"][0]]
         r = sg.scan_file(self.log("long.cxlog", lines), lines_max=1000)   # long lines at the end: still its end
-        self.assertEqual((sorted(r["hits"]), r["first_line"], r["lines"], r["cut"]),
-                         (["assertion", "wine-crash"], 4062, 1000, None))
+        self.assertEqual((sorted(r["hits"]), r["relative"], r["lines"], r["cut"]),
+                         (["assertion", "wine-crash"], True, 1000, None))
+        self.assertEqual(r["hits"]["assertion"]["lines"], [1000])
         r = sg.scan_file(p, lines_max=1000, from_start=True)
-        self.assertEqual((list(r["hits"]), r["cut"], r["lines"]), (["assertion"], "lines", 1000))
-        self.assertEqual(sorted(sg.scan_file(p)["hits"]), ["assertion", "wine-crash"])
+        self.assertEqual((list(r["hits"]), r["cut"], r["lines"], r["relative"]), (["assertion"], "lines", 1000, False))
+        r = sg.scan_file(p)
+        self.assertEqual((sorted(r["hits"]), r["relative"]), (["assertion", "wine-crash"], False))
+        self.assertEqual(r["hits"]["wine-crash"]["lines"], [4990])   # all of it read: the true line number
+
+    def test_a_big_file_reads_its_window_only(self):
+        # a big log: the bytes read are about the window, never the part before it
+        noise = b"1.0:0030:0040:trace:module:load " + b"z" * 90 + b"\n"
+        raw = noise * ((2 << 20) // len(noise)) + SAMPLES["wine-crash"][0].encode() + b"\n"
+        p = self.log("wine.cxlog", None, raw=raw)
+        window, read = 64 << 10, [0]
+
+        class Counted:
+            def __init__(self, f):
+                self.f = f
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                self.f.close()
+
+            def read(self, *a):
+                b = self.f.read(*a)
+                read[0] += len(b)
+                return b
+
+            def readline(self, *a):
+                b = self.f.readline(*a)
+                read[0] += len(b)
+                return b
+
+            def __getattr__(self, name):
+                return getattr(self.f, name)
+
+        def counted_open(path, mode="r", *a, **k):
+            return Counted(open(path, mode, *a, **k))
+        sg.open = sg.bottleread.open = counted_open
+        try:
+            r = sg.scan_file(p, window=window)
+        finally:
+            del sg.open, sg.bottleread.open
+        self.assertGreater(len(raw), 30 * window)
+        self.assertLess(read[0], 3 * window)
+        self.assertEqual(list(r["hits"]), ["wine-crash"])
+        self.assertTrue(r["relative"])
+        self.assertEqual(r["hits"]["wine-crash"]["lines"], [r["lines"]])   # the last line of what was read
 
     def test_size_fixed_when_opened(self):
         first = "one\n" + SAMPLES["wine-crash"][0] + "\n"
