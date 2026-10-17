@@ -582,7 +582,8 @@ check "doctor 2020: none of them fails" test "$(wc -l <<<"$OUT" | tr -d ' ')" = 
 reset; mkbottle rvt2026-t 2026 ""; mkdist 2026; D="$R/installers/extracted/revit2026"; C26="$BOTTLES/rvt2026-t/drive_c"
 RV26="$C26/Program Files/Autodesk/Revit 2026"; WV26="$C26/Program Files (x86)/Microsoft/EdgeWebView/Application/141.0.3537.71"
 mkdir -p "$D/3rdParty/x64/VCRedist/2022" "$D/3rdParty/x86/VCRedist/2022" "$D/3rdParty/x64/dotNet/80" "$D/3rdParty/x64/WebView2" \
-  "$D/x64/ONE" "$R/installers/redist/win7sp1/x64" "$T/bin"
+  "$D/x64/ONE" "$R/installers/redist/win7sp1/x64" "$R/installers/redist/webview2" "$T/bin"
+touch "$R/installers/redist/webview2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"   # the fresh one, as get-redist.sh leaves it
 touch "$D/3rdParty/x64/VCRedist/2022/VC_redist.x64.exe" "$D/3rdParty/x86/VCRedist/2022/VC_redist.x86.exe" "$D/x64/ONE/one.msi" \
   "$D/3rdParty/x64/dotNet/80/windowsdesktop-runtime-8.0.1-win-x64.exe" "$D/3rdParty/x64/WebView2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
 printf '<Packages><Package name="ONE" path="x64/ONE/pkg.ONE.xml"/></Packages>' > "$D/manifest/app.RVT.xml"
