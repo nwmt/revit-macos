@@ -243,7 +243,7 @@ fi
 echo
 echo "Done in $(((SECONDS - t0) / 60)) min."
 echo "Start Revit from ~/Applications/Revit $YEAR ($BOTTLE).app"
-[ -d "$HOME/Applications/Revit Viewer $YEAR ($BOTTLE).app" ] && echo "Revit Viewer (free, no license needed): ~/Applications/Revit Viewer $YEAR ($BOTTLE).app"
+[ -d "$HOME/Applications/Revit Viewer $YEAR ($BOTTLE).app" ] && echo "Revit Viewer: ~/Applications/Revit Viewer $YEAR ($BOTTLE).app"
 if [ "$SIGNIN" = adsso ]; then
   echo "First launch: sign in to Autodesk. If Revit hangs on the splash screen, quit it and start again."
 else

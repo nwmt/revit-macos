@@ -849,4 +849,26 @@ printf 'junk' > "$R/installers/revit2025/Create_Installer_RVT_2025_5_English_WIN
 OUT="$(cd / && "${SANDBOX_ENV[@]}" /bin/bash "$R/scripts/unpack-revit.sh" 2025 2>&1)"; RC=$?
 expect "an unrecorded unpacked folder with a broken Create Installer: used as before" 0 "ready"
 
+# make-apps: Revit Viewer only when the installer made its shortcut (2027 has none); an old Viewer app goes. osacompile,
+# codesign, PlistBuddy, lsregister and the shortcut reader are stubs, so nothing is registered with macOS
+make_apps_sandbox() { # $1 = year, $2 = bottle, $3… = Start Menu shortcut titles
+  local y="$1" b="$2" menu t; shift 2
+  mkbottle "$b" "$y" "$y"; mkdir -p "$BOTTLES/$b/drive_c/Program Files/Autodesk/AdskIdentityManager/1.0.0"
+  menu="$BOTTLES/$b/drive_c/users/crossover/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Autodesk/Revit $y"
+  mkdir -p "$menu" "$T/stubs"; for t in "$@"; do : > "$menu/$t.lnk"; done
+  printf '#!/bin/bash\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && mkdir -p "$2/Contents/Resources"; shift; done\n' > "$T/stubs/osacompile"
+  printf '#!/bin/bash\nexit 0\n' > "$T/stubs/codesign"; cp "$T/stubs/codesign" "$T/stubs/PlistBuddy"; cp "$T/stubs/codesign" "$T/stubs/lsregister"
+  chmod +x "$T/stubs/"*
+  printf 'import sys\nprint("C:\\\\Program Files\\\\Autodesk\\\\Revit %s\\\\Revit.exe\\t%s\\t", end="")\n' \
+    "$y" '/language ENU' > "$R/tools/win_shortcut.py"
+  /usr/bin/perl -pi -e 's{^LSREGISTER=.*}{LSREGISTER="\$STUBS/lsregister"}; s{/usr/libexec/PlistBuddy}{"\$STUBS/PlistBuddy"}g' \
+    "$R/scripts/make-apps.sh"
+}
+run_make_apps() { OUT="$(cd / && "${SANDBOX_ENV[@]}" STUBS="$T/stubs" PATH="$T/stubs:$PATH" /bin/bash "$R/scripts/make-apps.sh" "$@" 2>&1)"; RC=$?; }
+reset; make_apps_sandbox 2027 rvt2027-t "Revit 2027"; mkdir -p "$H/Applications/Revit Viewer 2027 (rvt2027-t).app"
+run_make_apps 2027 rvt2027-t; expect "make-apps 2027: the Revit app" 0 "done: ~/Applications/Revit 2027 (rvt2027-t).app"
+check "make-apps 2027: no Revit Viewer app, the old one removed" test ! -e "$H/Applications/Revit Viewer 2027 (rvt2027-t).app"
+reset; make_apps_sandbox 2026 rvt2026-t "Revit 2026" "Revit Viewer 2026"
+run_make_apps 2026 rvt2026-t; expect "make-apps 2026: the Revit Viewer app from its shortcut" 0 "done: ~/Applications/Revit Viewer 2026 (rvt2026-t).app"
+
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]

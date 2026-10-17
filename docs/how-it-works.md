@@ -25,7 +25,8 @@ Revit is a Windows x64 program. On an Apple Silicon Mac it runs like this:
 5. Creates the bottle.
 6. Runs the steps below.
 7. Creates the **Autodesk Sign-In** app for the sign-in link (2024 and newer).
-8. Creates the Revit and Revit Viewer apps in `~/Applications`.
+8. Creates the Revit app in `~/Applications`, and the Revit Viewer app when the installer made its Start Menu
+   shortcut (2026 and older).
 
 Each install and `./revit addins` run adds one line to `revit-macos/runs.ndjson` in the bottle: the steps, the result,
 the CrossOver build, the project version, the shims and the Revit build the installer names. `./revit doctor` reads it.

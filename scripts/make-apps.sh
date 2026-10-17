@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Creates the macOS apps for a Revit bottle in ~/Applications:
-#   Revit <year> (<bottle>).app and Revit Viewer <year> (<bottle>).app (Revit started with /viewer), with their icons;
+#   Revit <year> (<bottle>).app and, when the installer made its shortcut, Revit Viewer <year> (<bottle>).app (Revit
+#   started with /viewer), with their icons;
 #   Autodesk Sign-In (<bottle>).app when Revit signs in through the browser (profile SIGNIN=idmgr): the handler for
 #   adskidmgr:// and adsk.idmgr:// links, which passes them to AdskIdentityManager.exe in the bottle.
 # Usage: ./scripts/make-apps.sh <year> <bottle>
@@ -67,7 +68,7 @@ end open location" || return 1
   echo "done: $(tilde "$app") (AdskIdentityManager $ver)"
 }
 
-made=0; viewer=0; r_target=""; r_args=""; r_icon=""
+made=0; viewer=0
 for title in "Revit $YEAR" "Revit Viewer $YEAR"; do
   lnk="$MENU/$title.lnk"
   [ -f "$lnk" ] || continue
@@ -76,13 +77,11 @@ for title in "Revit $YEAR" "Revit Viewer $YEAR"; do
   IFS=$'\037' read -r target args icon <<<"$(printf '%s' "$info" | tr '\t' '\037')"
   [ -n "$target" ] || die "The shortcut $(tilde "$lnk") names no program."
   make_app "$title" "$target" "$args" "$icon" || exit 1; made=$((made + 1))
-  if [ "$title" = "Revit $YEAR" ]; then r_target="$target"; r_args="$args"; r_icon="$icon"; else viewer=1; fi
+  [ "$title" = "Revit $YEAR" ] || viewer=1
 done
 # no Start Menu shortcuts (unusual install): plain Revit without an icon
-if [ $made -eq 0 ]; then r_target="C:\\Program Files\\Autodesk\\Revit $YEAR\\Revit.exe"; make_app "Revit $YEAR" "$r_target" "" "" || exit 1; fi
-# Revit Viewer is Revit started with /viewer; not every installer creates its shortcut. Its icon sits next to Revit's.
-if [ $viewer = 0 ]; then
-  v_icon="${r_icon%\\*}\\RevitViewer.ico"; [ -f "$(unix_path "$v_icon")" ] || v_icon="$r_icon"
-  make_app "Revit Viewer $YEAR" "$r_target" "/viewer${r_args:+ $r_args}" "$v_icon" || exit 1
-fi
+if [ $made -eq 0 ]; then make_app "Revit $YEAR" "C:\\Program Files\\Autodesk\\Revit $YEAR\\Revit.exe" "" "" || exit 1; fi
+# Revit Viewer only where the installer made its shortcut: 2027 has no Viewer mode (its /viewer starts full Revit).
+# An app left from an earlier run goes.
+[ $viewer = 1 ] || rm -rf "$HOME/Applications/Revit Viewer $YEAR ($NAME).app"
 [ "$SIGNIN" != idmgr ] || make_signin || exit 1

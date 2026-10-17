@@ -60,8 +60,8 @@ The script first checks everything and tells you what is missing. Then it instal
 named `rvt2025-a`. This takes 10–30 minutes, plus the time to download Revit (11–15 GB) for 2024 and newer. Keep the
 Mac plugged in and Terminal open.
 
-Revit and Revit Viewer appear in the Applications folder of your home folder (in Finder: Go → Home → Applications),
-for example **Revit 2025 (rvt2025-a)**.
+Revit appears in the Applications folder of your home folder (in Finder: Go → Home → Applications), for example
+**Revit 2025 (rvt2025-a)**. Revit 2026 and older also get Revit Viewer there; Revit 2027 has no Viewer mode.
 
 ## First launch
 
