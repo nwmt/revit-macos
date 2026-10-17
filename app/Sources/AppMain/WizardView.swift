@@ -17,6 +17,7 @@ struct WizardView: View {
     let env: AppEnvironment
     @State private var pickFile = false
     @State private var pickFolder = false
+    @Environment(\.dismissWindow) private var dismissWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -24,7 +25,7 @@ struct WizardView: View {
                 Text("\(env.name) for Autodesk® Revit® on Apple Silicon Macs").font(.headline)
                 Text("Not affiliated with or endorsed by Autodesk.").font(.caption).foregroundStyle(.secondary)
                 Text("Autodesk and Revit are registered trademarks or trademarks of Autodesk, Inc., in the USA and other countries.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Divider()
             ForEach(WizardRow.allCases, id: \.self) { row in rowView(row) }
@@ -94,7 +95,9 @@ struct WizardView: View {
         case .install:
             if s == .open {
                 Button("Install") {
-                    Task { if (try? await wizard.install()) != nil { env.router.open(.run) } }
+                    Task {   // the install goes on in the progress window; this window is done
+                        if (try? await wizard.install()) != nil { dismissWindow(id: Route.wizard.id); env.router.open(.run) }
+                    }
                 }.keyboardShortcut(.defaultAction)
             }
         }

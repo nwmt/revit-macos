@@ -44,7 +44,7 @@ struct SettingsView: View {
                 Text("for Autodesk® Revit® on Apple Silicon Macs")
                 Text("Not affiliated with or endorsed by Autodesk.").font(.caption).foregroundStyle(.secondary)
                 Text("Autodesk and Revit are registered trademarks or trademarks of Autodesk, Inc., in the USA and other countries.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 HStack {
                     if !env.repo.isEmpty, let u = URL(string: "https://github.com/\(env.repo)") { Link("Project page", destination: u) }
                     Button("Licenses") {
