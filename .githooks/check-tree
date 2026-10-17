@@ -9,6 +9,7 @@ REV="${1:-}"
 if [ -n "$REV" ]; then SRC=("$REV"); PFX="$REV:"; LABEL="commit $(git rev-parse --short "$REV")"
 else SRC=(--cached); PFX=":"; LABEL="staged files"; fi
 rc=0
+NAME_THEN_UTF8='\$[A-Za-z_][A-Za-z0-9_]*[^'$'\x01''-'$'\x7f'']'
 bad() { echo "$LABEL: $1" >&2; [ -n "${2:-}" ] && printf '%s\n' "$2" | head -10 | sed 's/^/  /' >&2; rc=1; }
 
 if [ -n "$REV" ]; then files="$(git ls-tree -r --name-only "$REV")"; else files="$(git ls-files --cached)"; fi
@@ -29,7 +30,10 @@ while IFS= read -r f; do
   size="$(git cat-file -s "$PFX$f")"
   [ "$size" -gt 1048576 ] && bad "file over 1 MB: $f ($size bytes)"
   if [ "$size" -gt 0 ] && ! grep -qxF -- "$f" <<<"$text"; then bad "binary content: $f"; fi
-  case "$f" in *.sh|revit|.githooks/*|scripts/lib/cxwine) git show "$PFX$f" | bash -n 2>/dev/null || bad "bash syntax error: $f" ;; esac
+  case "$f" in *.sh|revit|.githooks/*|scripts/lib/cxwine) git show "$PFX$f" | bash -n 2>/dev/null || bad "bash syntax error: $f"
+    # bash 3.2 in a UTF-8 locale reads a letter such as … after $name as part of the name: write ${name}…
+    hits="$(git show "$PFX$f" | LC_ALL=C grep -nE "$NAME_THEN_UTF8")" && bad "\$name before a non-ASCII letter, use \${name}: $f" "$hits" ;;
+  esac
 done <<<"$files"
 
 # every line of every text file as path:line:text

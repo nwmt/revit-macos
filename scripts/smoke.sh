@@ -283,7 +283,7 @@ RUN_DIR="$(run_dir_new "$NAME" test)" || { RUN_DIR=""; die "Cannot create a log 
 result_set log_dir "$RUN_DIR"
 meta run_id "$RUN_ID"; meta time "$T_START"; meta year "$YEAR"; meta bottle "$NAME"; meta copy "$CLONE"
 meta crossover "$(crossover_build)"; meta engine "$(runlog_engine 7>&- 9>&-)"; meta scenarios "${SCEN[*]}"
-echo "Making the temporary copy $CLONE…"
+echo "Making the temporary copy ${CLONE}…"
 mkdir "$C" 2>/dev/null || fail_run "could not make the folder of the copy"
 OURS=1   # from here the cleanup deletes the copy: the marker comes first, before anything is copied into it
 mkdir "$C/revit-macos" && marker_write creating || fail_run "could not write the marker of the copy"
@@ -338,7 +338,7 @@ run_scenario() { # $1 = scenario, $2 = its number: plays its journal in the copy
   local s="$1" j="$WD/$1.txt" mark="$STATE/$1.since" t0 tw r jp="" js="" ji=0 last="" grown alive seen=0 idle=0
   local wd=none signin=0 nostart=0 worker=0 v why envs=()
   RUNF="$STATE/$s.run"; OUTLOG="$RUN_DIR/$s-stdout.log"; : > "$RUNF"
-  echo "Scenario $2 of ${#SCEN[@]}: $s…"
+  echo "Scenario $2 of ${#SCEN[@]}: ${s}…"
   case "$s" in
     core)
       if [ -z "$TPL" ]; then kv seconds 0; kv error "no project template of Revit $YEAR in the bottle"; echo "  no project template"; return 1; fi
