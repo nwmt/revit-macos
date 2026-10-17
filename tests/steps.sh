@@ -884,6 +884,16 @@ check "get-redist: a failed download gives reason download" eval '[ "$RC" = 1 ] 
 reset; mkdir -p "$T/ctx"; printf '#!/bin/bash\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && echo junk > "$2"; shift; done\nexit 0\n' > "$T/curl"; chmod +x "$T/curl"
 OUT="$(cd / && "${SANDBOX_ENV[@]}" PATH="$T:$PATH" REVIT_RUN_CTX="$T/ctx" /bin/bash "$R/scripts/get-redist.sh" 2020 2>&1)"; RC=$?
 check "get-redist: a checksum mismatch has no reason" eval '[ "$RC" = 1 ] && grep -qF "checksum mismatch" <<<"$OUT" && [ -z "$(reason_of)" ]'
+# Cancel during the unpack (install.sh passes TERM on to unpack-revit): 7zz ends, nothing half-unpacked is left
+reset; mkdir -p "$T/ctx" "$T/stub7" "$R/installers/revit2025"; mkzip "$R/installers/revit2025/RVT_2025_NA_win_db_002_002.zip" "setup.xml=<Setup/>"
+printf '#!/bin/bash\n[ "$1" = x ] || exit 0\ntouch "%s/7z-started"; sleep 30\n' "$T" > "$T/stub7/7zz"; chmod +x "$T/stub7/7zz"
+( cd / && exec "${SANDBOX_ENV[@]}" PATH="$T/stub7:$PATH" REVIT_RUN_CTX="$T/ctx" /bin/bash "$R/scripts/unpack-revit.sh" 2025 ) > "$T/out" 2>&1 & ur=$!
+for i in $(seq 1 100); do [ -f "$T/7z-started" ] && break; sleep 0.1; done
+t0=$SECONDS; kill -TERM "$ur"; wait "$ur"; RC=$?
+check "unpack-revit: TERM during the unpack stops it at once" eval '[ -f "$T/7z-started" ] && [ "$RC" = 1 ] && [ $((SECONDS - t0)) -lt 10 ] && grep -qF "Stopped." "$T/out"'
+check "unpack-revit: a stopped unpack is result stopped and leaves no unpacked folder" eval 'grep -qx "result=stopped" "$T/ctx/result" && [ ! -e "$R/installers/extracted/revit2025" ] && [ ! -e "$R/installers/extracted/revit2025.partial" ]'
+check "unpack-revit: no 7zz is left running" eval '! pgrep -f "sand box/stub7/7zz" >/dev/null'
+pkill -f "sand box/stub7/7zz" 2>/dev/null
 # Cancel during the download (install.sh passes TERM on to get-revit): curl ends, get-revit stops at once as stopped,
 # the .part stays for the next run
 reset; srv_curl; mkdir -p "$T/ctx" "$R/installers/revit2025"; mkzip "$T/srv/RVT_2025_B_002_002.7z" "setup.xml=<Setup/>" "x64/a.txt=1234567890"

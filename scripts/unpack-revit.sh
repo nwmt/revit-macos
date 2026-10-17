@@ -54,14 +54,14 @@ apply_updates() { # $1 = installer root: the list's updates, in order, each once
   for u in ${ups[@]+"${ups[@]}"}; do
     grep -qxF "$(basename "$u")" "$1/applied-updates.txt" 2>/dev/null && continue
     echo "== applying update $(basename "$u")"
-    7zz x -y -o"$1" "$u" x64 3rdParty >/dev/null 7>&- || return 1
+    run_child 7zz x -y -o"$1" "$u" x64 3rdParty >/dev/null 7>&- || return 1   # run_child: a stop ends it now
     basename "$u" >> "$1/applied-updates.txt"
   done
 }
 if [ -d "$DST" ] && [ "${REVIT_UNPACK_AGAIN:-}" != 1 ]; then
   echo "== already unpacked: installers/extracted/revit$YEAR"
   # made before .source existed: as before, the (now checked) updates go on top; a recorded one stays as recorded
-  [ -f "$DST/.source" ] || apply_updates "$(revit_dist "$YEAR")" || die "!! update failed"
+  [ -f "$DST/.source" ] || apply_updates "$(revit_dist "$YEAR")" || { stop_check; die "!! update failed"; }
   if [ -f "$DST/.source" ]; then keep_build "$DST/.source" "$(revit_dist "$YEAR")"; else keep_build "$SL" "$(revit_dist "$YEAR")"; fi
   echo "== ready: installers/extracted/revit$YEAR"; exit 0
 fi
@@ -76,13 +76,15 @@ main="$(revit_main_installer "$YEAR" "$SL")"
 echo "== unpacking $(basename "$main") into installers/extracted/revit$YEAR"
 # into a temporary folder first: a failed unpack must not look like a finished one, and must not cost the old one
 rm -rf "$DST.partial"; mkdir -p "$DST.partial" || die "!! cannot create $DST.partial"
-case "$main" in   # Autodesk multi-part downloads (2020, the 2024 base) are not 7z: tools/adsk_sfx.py reads them
-  *.sfx.exe) python3 -I "$ROOT/tools/adsk_sfx.py" "$main" "$DST.partial" ;;
-  *)         7zz x -y -o"$DST.partial" "$main" >/dev/null 7>&- ;;
-esac || { rm -rf "$DST.partial"; die "!! unpacking failed (an incomplete download or a full disk?); removed the partial files"; }
+# Autodesk multi-part downloads (2020, the 2024 base) are not 7z: tools/adsk_sfx.py reads them. Through run_child, so a
+# stop (Cancel, Ctrl-C) ends the unpack now: the partial folder goes, the old unpacked files stay
+case "$main" in
+  *.sfx.exe) run_child python3 -I "$ROOT/tools/adsk_sfx.py" "$main" "$DST.partial" ;;
+  *)         run_child 7zz x -y -o"$DST.partial" "$main" >/dev/null 7>&- ;;
+esac || { rm -rf "$DST.partial"; stop_check; die "!! unpacking failed (an incomplete download or a full disk?); removed the partial files"; }
 [ -n "$(find "$DST.partial" -maxdepth 4 \( -iname setup.xml -o -iname Setup.ini \) | head -1)" ] \
   || { rm -rf "$DST.partial"; die "!! the unpacked files have no Setup.ini or setup.xml: not a Revit installer?"; }
-apply_updates "$(revit_dist_of "$DST.partial")" || { rm -rf "$DST.partial"; die "!! an update failed; the old unpacked files are kept"; }
+apply_updates "$(revit_dist_of "$DST.partial")" || { rm -rf "$DST.partial"; stop_check; die "!! an update failed; the old unpacked files are kept"; }
 keep_build "$SL" "$(revit_dist_of "$DST.partial")"   # before the copy: .source keeps it too
 cp "$SL" "$DST.partial/.source" || die "!! cannot write $DST.partial/.source"
 bak="$DST.old.$$"   # a name of this run only
