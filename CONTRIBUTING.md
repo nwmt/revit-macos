@@ -36,6 +36,8 @@ bottle.
    `python3 -I -m unittest discover -s tests -p 'test_*.py'` must pass. After a
    deliberate change to a year's plan or steps, `UPDATE=1 tests/plans.sh` rewrites
    `tests/plans/`; review that diff.
+10. The menu bar app's Swift tests run with `app/test.sh`. The app has no UI tests: check a change to a view by
+    running the app.
 
 ## Writing docs
 

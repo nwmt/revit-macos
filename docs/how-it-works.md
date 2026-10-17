@@ -114,6 +114,11 @@ and logs in `~/Library/Application Support/<app name>`, and uses only the tools 
 winetricks, Python) and its own copy of the shims. Nothing it writes into a bottle or `~/Applications` points into the
 app, so moving the app breaks nothing. `scripts/check-bundle.sh` checks the app's tools and shims.
 
+The app does nothing itself that the engine does: it runs `revit` from its bundle for every question (with `--json`)
+and every task. A task runs with `--events` in a new folder under `<data>/logs/runs/`, in a session of its own, so it
+goes on when the app quits and the app finds it again when it opens. Cancel sends the task's process group the signal
+Ctrl-C sends in Terminal, and only to a task the app started.
+
 ## Our shims in tools/
 
 | Tool | What it fixes |

@@ -16,8 +16,9 @@ tools/              our shims in tools/shims/<name>/ (C, llvm-mingw; built by sc
 versions/<year>.md  status, what works, known issues for one Revit version
 docs/               troubleshooting, how it works
 installers/         user-supplied installers and runtimes (gitignored except README and checksums)
-app/                the menu bar app: Swift sources, the scripts that fetch its tools (pinned in app/tools.sh),
-                    assemble, sign and make the DMG (app/build.sh); its name and minimum macOS in app/app.conf
+app/                the menu bar app: AppCore (models, engine client) and AppMain (SwiftUI) in Sources/, its tests in
+                    Tests/ (app/test.sh); the scripts that fetch its tools (pinned in app/tools.sh), assemble, sign and
+                    make the DMG (app/build.sh); its name, minimum macOS and repository in app/app.conf
 tests/              sandbox tests: revit-cli.sh, plans.sh, steps.sh, shims.sh, app.sh; test_tools.py for the Python helpers
 ```
 
