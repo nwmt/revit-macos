@@ -1,0 +1,7 @@
+{"event":"start","run_id":"app-20261017-111500-cd34","command":"install","year":2025,"bottle":"rvt2025-a","pid":4243}
+{"event":"action","id":"steps","state":"running"}
+{"event":"step","id":"dynamo","state":"running"}
+{"event":"message","level":"error","text":"dynamo: msiexec exited 1603"}
+{"event":"step","id":"dynamo","state":"failed","detail":"see ~/x/dynamo.log"}
+{"event":"action","id":"steps","state":"failed","exit":1}
+{"event":"end","exit_code":1,"result":"partial","failed_action":"","failed_steps":["dynamo"],"log_dir":"/tmp/data/logs/rvt2025-a/20261017-111501-install"}

@@ -1,0 +1,5 @@
+{"event":"start","run_id":"app-20261017-131500-ab78","command":"install","year":2025,"bottle":"rvt2025-a","pid":4245}
+{"event":"plan","n":3}
+not json
+{"event":"step"}
+{"event":"end","exit_code":0,"result":"ok","failed_action":"","failed_steps":[],"log_dir":""}

@@ -1,0 +1,13 @@
+{"event":"start","run_id":"app-20261017-101500-ab12","command":"install","year":2025,"bottle":"rvt2025-a","pid":4242}
+{"event":"action","id":"shims","state":"running"}
+{"event":"action","id":"shims","state":"done","exit":0}
+{"event":"action","id":"revit","state":"running"}
+{"event":"progress","step":"download","done":0,"total":10737418240}
+{"event":"progress","step":"download","done":5368709120,"total":10737418240}
+{"event":"message","level":"warn","text":"RVT_2025_B_002_002.7z: no known checksum (a build this project has not seen); used as it is"}
+{"event":"action","id":"revit","state":"done","exit":0}
+{"event":"action","id":"steps","state":"running"}
+{"event":"step","id":"rvt","state":"running"}
+{"event":"step","id":"rvt","state":"done","detail":"Revit 2025.4 (412 s)"}
+{"event":"action","id":"steps","state":"done","exit":0}
+{"event":"end","exit_code":0,"result":"ok","failed_action":"","failed_steps":[],"log_dir":"/tmp/data/logs/rvt2025-a/20261017-101501-install"}

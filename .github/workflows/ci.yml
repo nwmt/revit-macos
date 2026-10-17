@@ -57,3 +57,15 @@ jobs:
           if INSTALL_DRYRUN=1 ./install.sh 2020 > out.txt 2>&1; then cat out.txt; exit 1; fi
           cat out.txt
           grep -q "CrossOver not found" out.txt
+
+  swift:
+    # the menu bar app's Swift tests (app/test.sh): the engine of this repo in a sandbox, no CrossOver, no Revit
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+      - name: 7-Zip for the engine's installer checks
+        run: command -v 7zz >/dev/null || brew install sevenzip
+      - name: Swift version
+        run: swift --version
+      - name: Swift tests
+        run: app/test.sh

@@ -1,6 +1,7 @@
 // A stub until the real app: a menu bar item and one window that shows whether the bundled engine, its tools and its
 // shims work (engine/scripts/check-bundle.sh) and whether the app should be moved to the Applications folder
 // (engine/revit status --json). The name comes from Info.plist (app/app.conf), never from this file.
+import AppCore
 import AppKit
 import Observation
 import SwiftUI

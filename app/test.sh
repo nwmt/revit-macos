@@ -1,0 +1,18 @@
+#!/bin/bash
+# Runs the app's Swift tests (AppCoreTests): app/test.sh [swift test arguments…], e.g. app/test.sh --filter Event.
+# No CrossOver, no Revit, no network: the tests run the engine of this repo in a sandbox. One test at a time
+# (--no-parallel): tests that start processes must not overlap.
+# With only the Command Line Tools (no Xcode): swift-testing's macros need the CLT's plugin folder, and a newer default
+# SDK than APP_MIN_MACOS may lack SwiftUI's macro plugin (an Xcode part), so the SDK of APP_MIN_MACOS is used when there.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+. "$ROOT/app/app.conf"
+args=()
+dev="$(xcode-select -p 2>/dev/null || true)"
+case "$dev" in
+  */CommandLineTools)
+    [ -d "$dev/usr/lib/swift/host/plugins/testing" ] && args+=(-Xswiftc -plugin-path -Xswiftc "$dev/usr/lib/swift/host/plugins/testing")
+    sdk="$dev/SDKs/MacOSX${APP_MIN_MACOS%%.*}.sdk"
+    [ -n "${SDKROOT:-}" ] || [ ! -d "$sdk" ] || export SDKROOT="$sdk" ;;
+esac
+exec env LANG=en_US.UTF-8 swift test --package-path "$ROOT/app" --no-parallel ${args[@]+"${args[@]}"} "$@"

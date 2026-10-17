@@ -1,0 +1,4 @@
+{"event":"start","run_id":"app-20261017-151500-ef12","command":"install","year":2025,"bottle":"rvt2025-a","pid":4247}
+{"event":"action","id":"revit","state":"running"}
+{"event":"action","id":"revit","state":"failed","exit":1}
+{"event":"end","exit_code":1,"result":"failed","failed_action":"revit","failed_steps":[],"log_dir":"/tmp/data/logs/rvt2025-a/20261017-151501-install","reason":"no_space"}
