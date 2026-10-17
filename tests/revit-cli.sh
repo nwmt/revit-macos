@@ -405,7 +405,10 @@ reset; bottle rvt2025-a 2024 2024; run "" doctor 2025; expect "doctor: a bottle 
 
 # ---- report ----
 report_dir() { ls -d "$R/logs/$1/"*-report 2>/dev/null | head -1; }   # $1 = bottle (or mac): the report folder
-zip_has() { /usr/bin/unzip -l "$1" 2>/dev/null | grep -qE " $2\$"; }   # $1 = zip, $2 = member name
+zip_has() { # $1 = zip, $2 = member name. A variable, not a pipe into grep -q: under pipefail an early grep exit gives
+  # unzip SIGPIPE, and the check failed now and then
+  local l; l="$(/usr/bin/unzip -l "$1" 2>/dev/null)"; grep -qE " $2\$" <<<"$l"
+}
 reset; run "" report 2021;           expect "report: an unsupported year" 1 "Revit 2021 is not supported yet"
 reset; run "" report rvt2025-a;      expect "report: a bottle where the year goes" 1 '"rvt2025-a" is not a Revit year'
 reset; run "" report 2025 "a b";     expect "report: a bad bottle name" 1 "Bottle name may contain only"
