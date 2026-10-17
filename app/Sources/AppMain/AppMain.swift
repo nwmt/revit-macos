@@ -51,16 +51,20 @@ struct AppMain: App {
     let name = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? ProcessInfo.processInfo.processName
     let repo = Bundle.main.object(forInfoDictionaryKey: "AppRepository") as? String ?? ""
     let app: AppModel?
+    let wizard: WizardModel?
 
     init() {
         let env = ProcessInfo.processInfo.environment
         if let engine = EngineLocator.find(resources: Bundle.main.resourceURL, env: env) {
             let notifier = UserNotifier(router: router)
             // REVIT_DATA (dev, the demo) wins over the data folder the bundled engine reports
-            app = AppModel(engine: ProcessEngine(engine: engine, environment: EngineEnvironment.make(from: env)),
+            let m = AppModel(engine: ProcessEngine(engine: engine, environment: EngineEnvironment.make(from: env)),
                            defaults: .standard, notifier: notifier, dataOverride: env["REVIT_DATA"].map { URL(fileURLWithPath: $0) })
+            app = m
+            wizard = WizardModel(app: m, system: MacSystemActions())
         } else {
             app = nil
+            wizard = nil
         }
     }
 }

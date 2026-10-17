@@ -2,12 +2,6 @@
 import AppCore
 import SwiftUI
 
-struct WizardWindow: View {
-    let app: AppModel
-    let env: AppEnvironment
-    var body: some View { Text("Add Revit version").padding().frame(width: 420) }
-}
-
 struct AddinsWindow: View {
     let app: AppModel
     let env: AppEnvironment
