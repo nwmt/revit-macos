@@ -44,7 +44,7 @@ enum TestEnv {
 var fakeEngine: URL { fixture("fake-revit.sh") }
 
 /// Polls cond every 50 ms until it holds or the time is up; true when it held.
-func waitFor(_ seconds: Double = 5, _ cond: () -> Bool) async -> Bool {
+func waitFor(_ seconds: Double = 5, isolation: isolated (any Actor)? = #isolation, _ cond: () -> Bool) async -> Bool {
     let end = Date().addingTimeInterval(seconds)
     while Date() < end {
         if cond() { return true }
