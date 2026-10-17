@@ -30,8 +30,10 @@ case "$DOTNET" in netfx*)
   get https://download.microsoft.com/download/9/5/A/95A9616B-7A37-4AF6-BC36-D6EA96C8DAAE/dotNetFx40_Full_x86_x64.exe \
       "$D/dotNetFx40_Full_x86_x64.exe" 65e064258f2e418816b304f646ff9e87af101e4c9552ab064bb74d281c38659f || exit 1 ;;
 esac
-if in_list webview2 ${STEPS[@]+"${STEPS[@]}"}; then # optional: without it the webview2 step falls back to the runtime in Revit's installer
-  get 'https://go.microsoft.com/fwlink/?linkid=2124701' "$D/webview2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe" "" \
-    || echo "!! no fresh WebView2 runtime: the start screen and Manage Links may stay white (docs/troubleshooting.md)" >&2
+# needed: with the runtime in Revit's installer the start screen and web panels stay white, and the install would say ok
+if in_list webview2 ${STEPS[@]+"${STEPS[@]}"}; then
+  get 'https://go.microsoft.com/fwlink/?linkid=2124701' "$D/webview2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe" "" || {
+    echo "!! no fresh WebView2 runtime: without it the start screen and web panels stay white." >&2
+    echo "   Check the internet connection and run the same command again." >&2; exit 1; }
 fi
 exit 0

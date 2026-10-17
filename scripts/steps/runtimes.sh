@@ -128,9 +128,11 @@ step_dotnet() { # .NET Desktop + ASP.NET Core runtimes from the installer, every
 step_webview2() { # Edge WebView2 for the sign-in window and web panels ("Web browser runtime could not be initialized"
   # without it). The installer ships runtime 103 (2022), too old for Revit's SDK (1.0.2478.35, runtime ~124+): Revit
   # gets E_NOINTERFACE, the start screen and Manage Links stay blank. A fresh Evergreen Standalone from
-  # installers/redist/webview2 (scripts/get-redist.sh) if there is one, else the installer's
-  local wv="$DATA/installers/redist/webview2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
-  [ -f "$wv" ] || wv="$DIST/3rdParty/x64/WebView2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+  # installers/redist/webview2 (scripts/get-redist.sh); without it the installer's, and the step fails, so the install
+  # does not say ok over white web panels
+  local wv="$DATA/installers/redist/webview2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe" old=0
+  [ -f "$wv" ] || { wv="$DIST/3rdParty/x64/WebView2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"; old=1; }
   install_exe webview2 "$wv" /silent /install; accept_codes $? 0 || return 1
   detail "$(ls "$B/drive_c/Program Files (x86)/Microsoft/EdgeWebView/Application/" 2>/dev/null | grep -E '^[0-9.]+$' | tr '\n' ' ')"
+  [ $old = 0 ] || { echo "no fresh WebView2 runtime (scripts/get-redist.sh $YEAR downloads it): the one in Revit's installer is too old"; return 1; }
 }

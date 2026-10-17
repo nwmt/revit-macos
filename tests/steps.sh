@@ -861,6 +861,19 @@ expect "an unrecorded unpacked folder with a broken Create Installer: used as be
 # CrossOver's wine deletes WINEDLLOVERRIDES (only its --dll sets one): a step that sets the variable changes nothing
 check "no script sets WINEDLLOVERRIDES" test -z "$(grep -rn 'WINEDLLOVERRIDES=' "$R/scripts" | grep -v '^[^:]*:[0-9]*: *#')"
 
+# WebView2: a failed download stops get-redist; the step with only the installer's old runtime installs it and fails
+reset; printf '#!/bin/bash\nexit 22\n' > "$T/curl"; chmod +x "$T/curl"   # never the real Microsoft
+OUT="$(cd / && "${SANDBOX_ENV[@]}" PATH="$T:$PATH" /bin/bash "$R/scripts/get-redist.sh" 2025 2>&1)"; RC=$?
+expect "get-redist: a failed WebView2 download stops it" 1 "no fresh WebView2 runtime"
+check "get-redist: the failure says what to do" grep -qF "Check the internet connection" <<<"$OUT"
+reset; mkbottle rvt2025-t 2025 2025; mkdist 2025; mkdir -p "$R/installers/extracted/revit2025/3rdParty/x64/WebView2"
+touch "$R/installers/extracted/revit2025/3rdParty/x64/WebView2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+run_steps 2025 rvt2025-t webview2; expect "webview2 with only the installer's runtime fails" 1 "webview2"
+check "webview2: the installer's runtime is still installed" called "[C:\\webview2.exe] [/silent] [/install]"
+check "webview2: the log says why" grep -qF "no fresh WebView2 runtime" "$RUN/webview2.log"
+mkdir -p "$R/installers/redist/webview2"; touch "$R/installers/redist/webview2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+run_steps 2025 rvt2025-t webview2; expect "webview2 with a fresh runtime" 0 ""
+
 # make-apps: Revit Viewer only when the installer made its shortcut (2027 has none); an old Viewer app goes. osacompile,
 # codesign, PlistBuddy, lsregister and the shortcut reader are stubs, so nothing is registered with macOS
 make_apps_sandbox() { # $1 = year, $2 = bottle, $3… = Start Menu shortcut titles
