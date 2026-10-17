@@ -101,6 +101,30 @@ def manifest(ci):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def build_key(b):   # "24.3.60.12" → (24, 3, 60, 12); an unknown build ("?") sorts first
+    return tuple(int(t) for t in b.split(".")) if re.fullmatch(r"\d+(\.\d+)*", b or "") else ()
+
+
+def newest(cis):
+    """(path, base, updates, note) of the Create Installer with the newest update build. Names do not order builds:
+    sort -V puts 2024_3 after 2024_3_6. One file is read as it is (an unreadable one fails); next to others it is
+    skipped. The note names the one taken when there were several."""
+    if len(cis) == 1:
+        return (cis[0],) + manifest(cis[0]) + ("",)
+    found = []
+    for c in cis:
+        try:
+            base, ups = manifest(c)
+        except SystemExit:
+            continue
+        found.append((max((build_key(b) for *_, b in ups), default=()), c, base, ups))
+    if not found:
+        return (cis[-1],) + manifest(cis[-1]) + ("",)
+    key, c, base, ups = max(reversed(found), key=lambda f: f[0])   # equal builds: the last name, as before
+    return c, base, ups, (f"several Create Installer files: using {os.path.basename(c)} (build {'.'.join(map(str, key)) or '?'}); "
+                          f"move the others out of {os.path.dirname(c)} to use another")
+
+
 def find_parts(dirs):
     """(complete parts, first incomplete parts): a complete set in input, then in downloads; any part names a set."""
     incomplete = None
@@ -131,12 +155,11 @@ def ordered(files):   # base as given, then updates as sort -V orders their name
 def resolve(year, inp, dl, checksums):
     sums = expected_sums(checksums, year)
     dirs = [inp] if os.path.realpath(inp) == os.path.realpath(dl) else [inp, dl]
-    s = {"year": year, "kind": None, "manifest_id": None, "problem": "", "files": [], "source_id": None, "unknown": [],
-         "revit_build_expected": None}
+    s = {"year": year, "kind": None, "manifest_id": None, "problem": "", "note": "", "files": [], "source_id": None,
+         "unknown": [], "revit_build_expected": None}
     cis = sorted(glob.glob(os.path.join(inp, f"Create_Installer_RVT_{year}_*.exe")), key=natural)
     if cis:
-        ci = cis[-1]
-        base, ups = manifest(ci)
+        ci, base, ups, s["note"] = newest(cis)
         names = [os.path.basename(u) for u in base]
         home = next((d for d in dirs if all(os.path.exists(os.path.join(d, n)) for n in names)), dl)
         files = [entry("create-installer", ci)]
@@ -324,6 +347,8 @@ def main(a):
             if not s["files"]:
                 sys.stderr.write(f"no Revit {a[1]} installer in {a[2]}\n"); return 3
             done = all(os.path.exists(f["path"]) for f in s["files"]) and not s["problem"] and s["kind"] != "updates-only"
+            if s["note"]:
+                sys.stderr.write(s["note"] + "\n")
             print(f"kind={s['kind']} complete={int(done)}"); return 0
         if a[:1] == ["finalize"] and len(a) == 3:
             return finalize(a[1], a[2])

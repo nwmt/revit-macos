@@ -204,15 +204,15 @@ class InstallerSource(Tmp):
         with open(p, "wb") as f: f.write(data)
         return p
 
-    def create_installer(self, d, year, base, updates=()):
+    def create_installer(self, d, year, base, updates=(), release="1", build="9"):
         """A fake Create Installer: a zip (7zz reads zips) with collection.xml and an update manifest."""
-        p = os.path.join(d, f"Create_Installer_RVT_{year}_1_English_WIN64.exe")
+        p = os.path.join(d, f"Create_Installer_RVT_{year}_{release}_English_WIN64.exe")
         with zipfile.ZipFile(p, "w") as z:
             z.writestr("collection.xml", "<C><BrowserImageUrl>" + ";".join(
                 f"https://dds.autodesk.com/x/{b}" for b in base) + "</BrowserImageUrl></C>")
             if updates:
                 z.writestr("B/setup_ext.xml", '<E><Package sourceDir="U"/></E>')
-                z.writestr("B/U/setup.xml", "<S><BuildNumber>9</BuildNumber><Payload>" + "".join(
+                z.writestr("B/U/setup.xml", f"<S><BuildNumber>{build}</BuildNumber><Payload>" + "".join(
                     f'<File checkSum="{s}" sizePacked="{n}">https://dds.autodesk.com/u/{u}</File>' for u, n, s in updates)
                     + "</Payload></S>")
         return p
@@ -251,6 +251,23 @@ class InstallerSource(Tmp):
         f = [f for f in s["files"] if f["role"] == "base"][0]
         self.assertEqual((f["path"], f["url"]), (os.path.join(self.dl, "RVT_2025_B_002_002.7z"), "https://dds.autodesk.com/x/RVT_2025_B_002_002.7z"))
         self.assertIn("complete=0", r.stdout)
+
+    def test_several_create_installers_the_newest_build_wins(self):
+        # sort -V puts 2024_3 after 2024_3_6; the update build decides
+        new = self.create_installer(self.inp, "2024", ["RVT_2024_B.7z"], [("u36.exe", 1, "ab")], "3_6", "24.3.60.12")
+        self.create_installer(self.inp, "2024", ["RVT_2024_A.7z"], [("u3.exe", 1, "cd")], "3", "24.3.0.30")
+        r, s = self.resolve("2024")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([f["path"] for f in s["files"] if f["role"] == "create-installer"], [new])
+        self.assertEqual(self.names(s, "base"), ["RVT_2024_B.7z"])
+        self.assertIn("using Create_Installer_RVT_2024_3_6_English_WIN64.exe (build 24.3.60.12)", r.stderr)
+
+    def test_an_unreadable_create_installer_next_to_a_good_one_is_skipped(self):
+        good = self.create_installer(self.inp, "2024", ["RVT_2024_B.7z"], [("u.exe", 1, "ab")], "3", "24.3.0.30")
+        self.put(self.inp, "Create_Installer_RVT_2024_9_English_WIN64.exe", b"junk")
+        r, s = self.resolve("2024")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([f["path"] for f in s["files"] if f["role"] == "create-installer"], [good])
 
     def test_create_installer_without_a_base_list_is_an_error(self):
         self.create_installer(self.inp, "2025", [])
