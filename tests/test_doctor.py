@@ -2,7 +2,7 @@
 """Unit tests for tools/doctor.py. Run: python3 -I -m unittest discover -s tests -p 'test_*.py'
 Facts, bottles, CrossOver and the Mac's commands are made here: no Autodesk or Microsoft file, no real bottle. Only
 test_cli runs doctor.py on this Mac, and checks nothing that depends on it."""
-import fcntl, glob, hashlib, importlib.util, json, os, re, struct, subprocess, sys, tempfile, threading, time, unittest
+import contextlib, fcntl, glob, io, hashlib, importlib.util, json, os, re, struct, subprocess, sys, tempfile, threading, time, unittest
 
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -984,6 +984,22 @@ class Contract(unittest.TestCase):
             r = subprocess.run(args + ["--year", "2025"], capture_output=True, text=True, env=env)
             self.assertEqual(r.returncode, 2)
             self.assertEqual(os.listdir(d), [])   # wrote nothing
+
+    def test_an_internal_error_still_answers_in_json(self):
+        def boom(ctx):
+            raise KeyError("a value that must not be printed")
+        saved, dr.collect = dr.collect, boom
+        out = io.StringIO()
+        try:
+            with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(out):
+                rc = dr.main(["--root", d, "--data", d, "--cx", d, "--bottles", d, "--json"])
+        finally:
+            dr.collect = saved
+        j = json.loads(out.getvalue())
+        self.assertEqual(rc, 1)
+        self.assertEqual([c["id"] for c in j["checks"]], ["doctor.internal"])
+        self.assertRegex(j["checks"][0]["title"], r"^doctor could not finish: KeyError at line \d+$")
+        self.assertNotIn("must not be printed", out.getvalue())
 
 
 if __name__ == "__main__":

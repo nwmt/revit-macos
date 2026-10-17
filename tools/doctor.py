@@ -1458,7 +1458,14 @@ def main(argv=None):
         p.error("the profile is a JSON object, the add-ins a JSON list")
     ctx = Ctx(o.root, o.data, o.cx, o.bottles, o.shims, o.lock, o.cx_tested, o.engine, o.shims_release,
               o.year, o.bottle, profile, addins)
-    checks = run_checks(collect(ctx))
+    try:
+        checks = run_checks(collect(ctx))
+    except Exception as e:   # still one answer, for ./revit report too: the error's kind and line, no paths or values
+        tb = e.__traceback__
+        while tb.tb_next:
+            tb = tb.tb_next
+        checks = [Check("doctor.internal", "fail", f"doctor could not finish: {type(e).__name__} at line {tb.tb_lineno}",
+                        fix="report a problem with this line")]
     s = summary(checks)
     if o.json:
         print(json.dumps({"checks": [c.json() for c in checks], "summary": s}, ensure_ascii=False,
