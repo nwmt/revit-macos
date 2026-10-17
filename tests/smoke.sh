@@ -66,12 +66,15 @@ name="$2"; b="$BOTTLES/$2"; shift 2
 if [ ! -e "$T/first-conf" ]; then   # the copy as the first wine call finds it
   cp "$b/cxbottle.conf" "$T/first-conf"; cp "$b/revit-macos/smoke-clone" "$T/first-marker" 2>/dev/null; ls -a "$b" > "$T/first-ls"
   [ ! -e "$b/drive_c/half" ] || touch "$T/first-half"
+  u="$b/drive_c/users/crossover"; [ ! -L "$u/Documents" ] || touch "$T/first-link"; [ ! -L "$u/AppData/LocalLow" ] || touch "$T/first-inner"
 fi
 [ -z "${CX_LOG:-}" ] || echo "fake log line" >> "$CX_LOG"
 case "$1" in
   --update-only)
     [ ! -f "$T/upgrade-fails" ] || { echo "the upgrade failed" >&2; exit 1; }
     [ -f "$T/upgrade-silent" ] || /usr/bin/perl -pi -e 's/^"Timestamp" = ".*"/"Timestamp" = "20260715T103801Z"/' "$b/cxbottle.conf"
+    # $T/relink: as Wine's shell32 at an upgrade, an empty Documents becomes a link to the Mac's folder again
+    if [ -f "$T/relink" ] && rmdir "$b/drive_c/users/crossover/Documents" 2>/dev/null; then ln -s "$T/userdocs" "$b/drive_c/users/crossover/Documents"; fi
     exit 0 ;;
   cmd) echo "Microsoft Windows [Version 10.0.19045]"; exit 0 ;;
   taskkill)   # taskkill /f /im <image>: the stand-ins of that image in this bottle
@@ -80,6 +83,7 @@ case "$1" in
   *'\Revit.exe')
     mode="$(cat "$T/mode" 2>/dev/null)"
     [ "$mode" != nostart ] || { echo "Expired Bottle" >&2; exit 1; }
+    [ "$mode" != earlycrash ] || { echo "wine: Unhandled page fault on read access to 0000000000000000 at address 0000000140001000 (thread 0124), starting debugger..." >&2; exit 1; }
     a="$HOME/Applications/CrossOver/Autodesk/Revit copy.app/Contents"; mkdir -p "$a"   # as if CrossOver made a menu app
     printf '<plist version="1.0"><dict><key>CXHelperAppBottleName</key><string>%s</string></dict></plist>\n' "$name" > "$a/Info.plist"
     if [ "$(cat "$T/launcher" 2>/dev/null)" = block ]; then exec /bin/bash "$T/fake-revit" "$1" "$b" "$2"; fi
@@ -130,6 +134,8 @@ case "$s" in
   reopen) [ ! -f "$b/drive_c/revit-smoke/out/smoke.rvt" ] || ole "$b/drive_c/revit-smoke/out/smoke2.rvt" ;;
 esac
 [ "$mode" != worker ] || side RevitWorker.exe
+[ "$mode" != undeletable ] || { mkdir -p "$b/drive_c/locked"; : > "$b/drive_c/locked/f"; chmod 500 "$b/drive_c/locked"; }
+[ ! -d "$b/drive_c/users/crossover/Documents" ] || : > "$b/drive_c/users/crossover/Documents/revit-wrote"
 st "JOURNAL_MARKER_TAIL_END: stopped at line $exit_at journal file playback"
 st "finished recording journal file"
 EOF
@@ -148,10 +154,14 @@ T="@T@"; BOTTLES="@BOTTLES@"
 { printf 'cxbottle'; for a in "$@"; do printf ' [%s]' "$a"; done; [ -e /dev/fd/9 ] && printf ' FD9'; [ -e /dev/fd/7 ] && printf ' FD7'; echo; } >> "$T/calls"
 [ "$1" = --bottle ] && [ "$3" = --delete ] || exit 0
 [ -f "$BOTTLES/$2/system.reg" ] || { echo "bottle $2 not found" >&2; exit 1; }
+ls -A "$BOTTLES/$2" | tr '\n' ' ' > "$T/cx-delete-ls"   # what was left for it to delete, and which signals it ignores
+/usr/bin/perl -e 'print join(" ", map { $SIG{$_} // "-" } qw(HUP INT TERM)), "\n"' > "$T/cx-delete-sig"
 rm -rf "$BOTTLES/$2"
 EOF
   fake "$T/bin/diskutil" <<'EOF'
 #!/bin/bash
+# diskutil info -plist <device>: disk9s1 (fake stat's other volume) is HFS+, any other device $T/fstype or APFS
+[ "$3" != disk9s1 ] || { printf '<plist version="1.0"><dict><key>FilesystemType</key><string>hfs</string></dict></plist>\n'; exit 0; }
 printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>FilesystemType</key><string>%s</string></dict></plist>\n' \
   "$(cat "@T@/fstype" 2>/dev/null || echo apfs)"
 EOF
@@ -213,7 +223,7 @@ hold() { # $1 = a file to hold open, $2 = a word for its command line, $3 = fold
 }
 SB_ENV=(env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" REVIT_CX_TMP="$T/cxtmp" PATH="$T/bin:$PATH" SMOKE_TIMEOUT=20
   SMOKE_START_WAIT=4 SMOKE_STALL=3 SMOKE_WORKER_WAIT=1 SMOKE_POLL=0.1 SMOKE_PREP_TIMEOUT=5)   # watchdogs that fire: XENV
-fresh() { : > "$CALLS"; rm -f "$T/first-conf" "$T/first-marker" "$T/first-ls" "$T/first-half" "$T/revit-started"; }
+fresh() { : > "$CALLS"; rm -f "$T/first-conf" "$T/first-marker" "$T/first-ls" "$T/first-half" "$T/first-link" "$T/first-inner" "$T/revit-started"; }
 ran() { RUN="$(ls -td "$R/logs/"*/*-test 2>/dev/null | head -1)"; RES="$RUN/result.json"; }
 XENV=()   # VAR=value pairs for the next smoke only
 smoke() { # scripts/smoke.sh "$@"; sets OUT, RC, RUN (the newest test log folder) and RES (its result.json)
@@ -222,6 +232,26 @@ smoke() { # scripts/smoke.sh "$@"; sets OUT, RC, RUN (the newest test log folder
 revit_test() { # ./revit test "$@" --events $T/ev, as the app runs it; sets what smoke sets, EV: the events
   fresh; rm -rf "$T/ev"; OUT="$(cd / && "${SB_ENV[@]}" /bin/bash "$R/revit" test "$@" --events "$T/ev" 2>&1)"; RC=$?; ran
   EV="$(cat "$T/ev/events.ndjson" 2>/dev/null)"
+}
+PYREAL="$(command -v python3)" || { echo "python3 not found" >&2; exit 1; }
+fake_python() { # $T/bin/python3: python3 as usual; the smoke.py command named in $T/py-int first sends a Ctrl-C to its
+  # process group (as a Ctrl-C at the terminal while it runs), the one named in $T/py-fail fails
+  fake "$T/bin/python3" <<'EOF'
+#!/bin/bash
+[ "$4" != "$(cat "@T@/py-int" 2>/dev/null)" ] || { kill -INT 0; sleep 0.5; }
+[ "$4" != "$(cat "@T@/py-fail" 2>/dev/null)" ] || exit 1
+exec "@PY@" "$@"
+EOF
+  /usr/bin/perl -pi -e 's|\@PY\@|$ENV{PYREAL}|g' "$T/bin/python3"
+}
+export PYREAL
+grouped() { # <command…> in a process group of its own, with the sandbox's environment: a Ctrl-C sent to that group
+  # stays there. Sets OUT and RC
+  fresh; rm -rf "$T/ev"
+  OUT="$(cd / && "${SB_ENV[@]}" /usr/bin/perl -e '
+    setpgrp(0, 0); $SIG{INT} = "IGNORE"; my $p = fork; if (!$p) { $SIG{INT} = "DEFAULT"; exec @ARGV }
+    waitpid($p, 0); printf "HOW exit=%d\n", $? >> 8' "$@" 2>&1)"
+  RC="$(sed -n 's/^HOW exit=//p' <<<"$OUT")"; ran; EV="$(cat "$T/ev/events.ndjson" 2>/dev/null)"
 }
 json() { # $1 = name, $2 = perl expression on $d (result.json), $3 = what it must give
   local got; got="$(/usr/bin/perl -MJSON::PP -e 'local $/; my $d = decode_json(<STDIN>); print eval $ARGV[0]' "$2" < "$RES" 2>&1)"
@@ -316,6 +346,10 @@ check "pass: the journals Revit wrote are in the log" eval 'test -f "$RUN/start-
 check "pass: no wine.cxlog without --log" test ! -e "$RUN/wine.cxlog"
 check "pass: nothing left running" no_fakes
 check "pass: the lock is free" lock_free
+check "pass: CrossOver deletes only what it needs to find the copy: the marker goes with the last files" \
+  eval '[ "$(cat "$T/cx-delete-ls")" = "cxbottle.conf revit-macos system.reg " ]'
+check "pass: the delete ignores HUP, INT and TERM (a closed Terminal does not cut it short)" \
+  eval '[ "$(cat "$T/cx-delete-sig")" = "IGNORE IGNORE IGNORE" ]'
 
 # ---- 2025: journals in AppData, a launcher that waits for Revit, a RevitWorker that stays, --log ----
 reset; mkbottle 2025; echo block > "$T/launcher"; echo worker > "$T/mode-start"
@@ -410,6 +444,62 @@ check "kept copy: still there" test -d "$BOTTLES/rvt2027-a.test/drive_c"
 reset; touch "$T/cp-fails"; smoke 2027 rvt2027-a
 expect "a copy that fails" 1 "The test did not run: copying the bottle failed."
 check "failed copy: deleted by hand" eval 'gone rvt2027-a.test && not_called "cxbottle"'
+
+# ---- the outcome of a run: a copy left behind, result.json, a crash at the start ----
+reset; echo undeletable > "$T/mode-start"; smoke 2027 rvt2027-a --scenarios start
+expect "a copy that cannot be deleted: exit 1" 1 "rvt2027-a.test was not deleted: some of its files could not be deleted. The test counts as failed."
+expect "undeletable: says what to do" 1 "Run ./revit test 2027 again: it deletes the copy first"
+json "undeletable: failed, the scenario keeps its pass" 'join " ", $d->{result}, $d->{scenarios}[0]{result}, ($d->{copy_removed} ? 1 : 0)' \
+  "failed passed 0"
+check "undeletable: what is left is still known as a copy" grep -qx smoke_clone=1 "$BOTTLES/rvt2027-a.test/revit-macos/smoke-clone"
+reset; fake_python; echo result > "$T/py-fail"; revit_test 2027
+expect "result.json not written: exit 1" 1 "result.json could not be written"
+check "result.json not written: the end event says failed" one_end failed
+reset; echo earlycrash > "$T/mode"; XENV=(SMOKE_START_WAIT=2); smoke 2027 rvt2027-a --scenarios start
+expect "a crash before Revit was seen: exit 1, not a person" 1 "Revit crashed while starting (wine reported an unhandled exception)"
+json "early crash: result.json says failed" '$d->{result}' failed
+
+# ---- a Ctrl-C while a helper runs ----
+reset; fake_python; echo verdict > "$T/py-int"; grouped /bin/bash "$R/scripts/smoke.sh" 2027 rvt2027-a --scenarios start
+expect "Ctrl-C while the verdict is made: stopped, not ok" 1 "Stopped."
+json "Ctrl-C at the verdict: result.json says stopped" '$d->{result}' stopped
+check "Ctrl-C at the verdict: the copy is gone" gone rvt2027-a.test
+reset; fake_python; echo signin > "$T/py-int"; grouped /bin/bash "$R/revit" test 2027 --events "$T/ev"
+expect "Ctrl-C during the sign-in check: stopped" 1 "Stopped."
+check "Ctrl-C at the sign-in check: no advice to sign in" eval '! grep -q "sign in, quit Revit" <<<"$OUT"'
+check "Ctrl-C at the sign-in check: one end event, stopped" one_end stopped
+refused "Ctrl-C at the sign-in check"
+
+# ---- the copy's links to folders of the Mac; a volume behind a link ----
+reset; u="$BOTTLES/rvt2027-a/drive_c/users/crossover"; mkdir -p "$u/AppData/Roaming" "$T/userdocs" "$T/userdesk"
+echo mine > "$T/userdocs/keep.txt"; ln -s "$T/userdocs" "$u/Documents"; ln -s "$T/userdesk" "$u/Desktop"
+ln -s ../Roaming "$u/AppData/LocalLow"; touch "$T/relink"; smoke 2027 rvt2027-a --scenarios start
+expect "links to the Mac's folders: the test runs" 0 "passed"
+check "links: none leads out of the copy at the first wine call" test ! -e "$T/first-link"
+check "links: a link inside the copy stays" test -e "$T/first-inner"
+check "links: Revit wrote nothing into the Mac's folder, even after the upgrade linked it again" test ! -e "$T/userdocs/revit-wrote"
+check "links: the Mac's folder and the bottle's own links are as they were" \
+  eval '[ "$(readlink "$u/Documents")" = "$T/userdocs" ] && [ "$(cat "$T/userdocs/keep.txt")" = mine ] && [ "$(readlink "$u/AppData/LocalLow")" = ../Roaming ]'
+json "links: result.json lists the links replaced" 'join " ", @{$d->{links_replaced}}' \
+  "drive_c/users/crossover/Desktop drive_c/users/crossover/Documents"
+check "links: result.json has no path of the Mac" eval '! grep -qF -e "$TOP" -e "$H" "$RES"'
+reset; u="$BOTTLES/rvt2027-a/drive_c/users"; mv "$u/crossover" "$T/user-elsewhere"; ln -s "$T/user-elsewhere" "$u/crossover"
+smoke 2027 rvt2027-a; expect "a user folder that is a link: refused" 1 "The test did not run: the user folder of the copy"
+check "user folder a link: no wine call" no_wine
+check "user folder a link: the copy is gone, the folder it led to kept" eval 'gone rvt2027-a.test && test -d "$T/user-elsewhere/AppData"'
+reset; mkdir -p "$T/ext"; mv "$BOTTLES" "$T/ext/Bottles"; ln -s "$T/ext/Bottles" "$BOTTLES"
+fake "$T/bin/stat" <<'EOF'
+#!/bin/bash
+# stat as usual, but a folder under $T/ext is on another volume, disk9s1; -L follows a link, as BSD stat does
+p="${!#}"; follow=0; dev=0
+for a in "$@"; do case "$a" in -L) follow=1 ;; %Sd) dev=1 ;; esac; done
+if [ $dev = 1 ] && { [ $follow = 1 ] || [ ! -L "$p" ]; }; then
+  case "$(cd "$p" 2>/dev/null && pwd -P)/" in "@T@/ext/"*) echo disk9s1; exit 0 ;; esac
+fi
+exec /usr/bin/stat "$@"
+EOF
+smoke 2027 rvt2027-a; expect "Bottles a link to a folder on an HFS+ disk: refused" 1 "not on an APFS volume"
+refused "Bottles on another disk"
 
 # ---- Ctrl-C through ./revit, with a Revit that ignores INT and TERM ----
 reset; echo stubborn > "$T/mode"; echo block > "$T/launcher"; fresh

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # ./revit test <year> [bottle]: Revit runs with no one at it, in a temporary copy of the bottle (<bottle>.test) that
 # this script makes and deletes, and plays the journals of scripts/smoke/: start (start and quit), core (a new project
-# from a template, Save As), reopen (that file opened again, Save As). Wine never runs in the bottle itself.
+# from a template, Save As), reopen (that file opened again, Save As). Wine never runs in the bottle itself, and the
+# copy's links to the Mac's own folders (Documents, Desktop, …) are empty folders there.
 # Usage: scripts/smoke.sh <year> <bottle> [--log] [--keep] [--scenarios start,core,reopen]
 #   --log   also CrossOver's log, wine.cxlog (hundreds of MB)     --keep   keep the copy (for the maintainer)
 # Exit: 0 every scenario passed, 3 a person must act (sign in, a question of CrossOver), 1 anything else.
@@ -48,7 +49,9 @@ OURS=0; RUN_DIR=""; LAUNCHER=""; FIN=0; WHY=""; TPL=""; RUNF=/dev/null; OUTLOG=/
 STATE="$(mktemp -d "${TMPDIR:-/tmp}/revit-smoke.XXXXXX")" || die "Cannot create a temporary folder."
 : > "$STATE/meta"
 
-py() { ( trap '' INT; exec python3 -I -B "$ROOT/tools/smoke.py" "$@" ); }   # a Ctrl-C is noted here, not in Python
+shielded() { ( trap '' INT TERM HUP; exec "$@" ); }   # <command…> that a signal does not cut short: this script
+# notes the signal (lock_take's trap) and stops at its next stop_point, with what the command gave
+py() { shielded python3 -I -B "$ROOT/tools/smoke.py" "$@"; }
 meta() { printf '%s=%s\n' "$1" "$2" >> "$STATE/meta"; }   # $1 = key, $2 = value, for result.json (smoke.py result)
 kv()   { printf '%s=%s\n' "$1" "$2" >> "$RUNF"; }          # the same for the scenario that runs
 refuse() { # $1 = result, $2 = exit code, rest = the message: a check failed before anything was made
@@ -100,11 +103,14 @@ wait_stopped() { # $1 = bottle path, $2 = seconds: 0 once nothing runs in it
     sleep 1
   done
 }
-rm_clone() { # $1 = a copy that passed clone_guard, deleted by hand: the marker last, so a delete cut short leaves a
-  # copy that the next run still knows as one of ours
-  bg_wait find "$1" -mindepth 1 -maxdepth 1 ! -name revit-macos -exec rm -rf {} + 2>/dev/null
-  bg_wait rm -rf "$1" 2>/dev/null
+rm_clone() { # $1 = a copy that passed clone_guard, deleted by hand: the marker last, and only once all else is gone,
+  # so a delete cut short or failed leaves a copy that the next run still knows as one of ours
+  bg_wait shielded find "$1" -mindepth 1 -maxdepth 1 ! -name revit-macos -exec rm -rf {} + 2>/dev/null
+  [ -z "$(find "$1" -mindepth 1 -maxdepth 1 ! -name revit-macos 2>/dev/null)" ] || return 1
+  bg_wait shielded rm -rf "$1" 2>/dev/null
 }
+KEEP_FOR_CX=(! -name revit-macos ! -name system.reg ! -name cxbottle.conf)   # find: all but our marker's folder and
+# what CrossOver needs to find the bottle and read it
 menu_apps_remove() { # $1 = bottle name: its CrossOver menu apps, then the folders they leave empty
   local a any=0
   while IFS= read -r a; do [ -n "$a" ] && rm -rf "$a" && any=1; done < <(cx_menu_apps "$1")
@@ -113,18 +119,22 @@ menu_apps_remove() { # $1 = bottle name: its CrossOver menu apps, then the folde
 }
 clone_remove() { # $1 = name of a copy of ours: ends what runs in it, then deletes it with CrossOver (a copy CrossOver
   # cannot find, one without system.reg, by hand) and its menu apps. A copy cut short while it was made (state
-  # creating) never ran Wine: by hand at once. 1 with WHY when it cannot
-  local name="$1" p state; p="$(bottle_path "$1")"
+  # creating) never ran Wine: by hand at once. CrossOver deletes in no set order, so it gets only the last few files:
+  # the bulk goes by hand first, and a delete cut short anywhere leaves a copy that still has its marker. Signals do
+  # not cut these deletes short. 1 with WHY when it cannot
+  local name="$1" p state rest; p="$(bottle_path "$1")"
   if [ -e "$p" ] || [ -L "$p" ]; then
     clone_guard "$p" || { WHY="it is not a copy made by ./revit test"; return 1; }
     state="$(marker_get "$p" state)"
     [ "$state" = creating ] || bounded 30 env WINEPREFIX="$p" "$CX/bin/wineserver" -k >/dev/null 2>&1
     wait_stopped "$p" 30 || { WHY="programs still run in it"; return 1; }
-    if [ "$state" != creating ] && [ -f "$p/system.reg" ]; then
-      bg_wait "$CX/bin/cxbottle" --bottle "$name" --delete --force >/dev/null 2>&1
+    bg_wait shielded find "$p" -mindepth 1 -maxdepth 1 "${KEEP_FOR_CX[@]}" -exec rm -rf {} + 2>/dev/null
+    rest="$(find "$p" -mindepth 1 -maxdepth 1 "${KEEP_FOR_CX[@]}" 2>/dev/null)"
+    if [ "$state" != creating ] && [ -f "$p/system.reg" ] && [ -z "$rest" ]; then
+      bg_wait shielded "$CX/bin/cxbottle" --bottle "$name" --delete --force >/dev/null 2>&1
     fi
     if [ -e "$p" ] && clone_guard "$p"; then rm_clone "$p"; fi
-    [ ! -e "$p" ] || { WHY="it could not be deleted"; return 1; }
+    [ ! -e "$p" ] || { WHY="some of its files could not be deleted"; return 1; }
   fi
   menu_apps_remove "$name"
 }
@@ -186,18 +196,24 @@ finish() { # on every exit after lock_take (whose Ctrl-C handling stays): the la
     elif clone_remove "$CLONE"; then
       meta copy_removed 1
     else
-      meta copy_removed 0
+      meta copy_removed 0; meta copy_problem "$WHY"   # the run fails (smoke.py result), whatever its scenarios gave
       echo "! Could not delete the temporary copy $CLONE: $WHY." >&2
       echo "  The next ./revit test $YEAR$SFX deletes it; or delete it in CrossOver." >&2
     fi
   fi
-  if [ -n "$RUN_DIR" ] && res="$(py result "$STATE" --out "$RUN_DIR/result.json")" && [ -n "$res" ]; then
-    result_set result "$res"
-    if [ "$res" != stopped ]; then
-      echo; py summary "$RUN_DIR/result.json" --history "$DATA/logs"
-      echo "Logs: logs/${RUN_DIR#"$DATA/logs/"}"
+  if [ -n "$RUN_DIR" ]; then
+    if res="$(py result "$STATE" --out "$RUN_DIR/result.json")" && [ -n "$res" ]; then
+      result_set result "$res"
+      if [ "$res" != stopped ]; then
+        echo; py summary "$RUN_DIR/result.json" --history "$DATA/logs"
+        echo "Logs: logs/${RUN_DIR#"$DATA/logs/"}"
+      fi
+      case "$res" in ok) rc=0 ;; needs_person) rc=3 ;; *) rc=1 ;; esac
+    else   # no result.json: never a pass
+      rc=1; [ "$STOP_REQUESTED" != 0 ] || result_set result failed
+      echo "! result.json could not be written in logs/${RUN_DIR#"$DATA/logs/"}, so the test counts as failed." >&2
+      echo "  Check the free space on this Mac, then run ./revit test $YEAR$SFX again." >&2
     fi
-    case "$res" in ok) rc=0 ;; needs_person) rc=3 ;; *) rc=1 ;; esac
   fi
   rm -rf "$STATE"
   exit "$rc"
@@ -229,14 +245,17 @@ elif [ -e "$C" ] && [ "$(marker_get "$C" state)" = kept ]; then
   refuse failed 1 "The copy $CLONE was kept by an earlier test (--keep). Delete it first:
   \"$CX/bin/cxbottle\" --bottle \"$CLONE\" --delete --force"
 fi
-on_apfs() { # cp -c makes APFS clones, which take almost no space; anywhere else it copies every byte (7–30 GB)
-  local dev; dev="$(stat -f %Sd "$BOTTLES" 2>/dev/null)" || return 1
+on_apfs() { # cp -c makes APFS clones, which take almost no space, within one APFS volume; anywhere else it copies every
+  # byte (7–30 GB). -L: the volume of the folder itself, not of a link to it (Bottles moved to a disk, linked back)
+  local dev; dev="$(stat -L -f %Sd "$BOTTLES" 2>/dev/null)" && [ -n "$dev" ] || return 1
+  [ "$(stat -L -f %Sd "$B" 2>/dev/null)" = "$dev" ] || return 1   # the bottle on that volume too, not mounted there
   [ "$(diskutil info -plist "$dev" 2>/dev/null | plutil -extract FilesystemType raw -o - - 2>/dev/null)" = apfs ]
 }
 on_apfs || refuse failed 1 "The CrossOver bottles are not on an APFS volume, so a copy would take the full size of the bottle. ./revit test needs them on APFS."
-read -r s_in s_age s_days <<<"$(py signin "$B" "$YEAR" 2>/dev/null | /usr/bin/perl -MJSON::PP -e '
+read -r s_in s_age s_days <<<"$(py signin "$B" "$YEAR" 2>/dev/null | shielded /usr/bin/perl -MJSON::PP -e '
   my $d = eval { decode_json(join "", <STDIN>) } || {};
   printf "%d %s %s\n", ($d->{signed_in} ? 1 : 0), $d->{journal_age_days} // "-", $d->{license_days_left} // "-"')"
+stop_point   # a Ctrl-C during the check: stopped, not "sign in"
 [ "${s_in:-0}" = 1 ] \
   || refuse needs_person 3 "Open Revit $YEAR ($NAME) from ~/Applications, sign in, quit Revit, then run ./revit test $YEAR$SFX again."
 case "$(bottle_activity "$B")" in
@@ -277,6 +296,12 @@ stop_point
 [ "$(bottle_activity "$B")" = stopped ] || fail_run "programs started in $NAME while it was copied; quit them with ./revit stop $YEAR$SFX and run the test again"
 cx_bottle_unlock
 rm -rf "$C/desktopdata" "$C/files"   # as cxbottle --copy: CrossOver's menu and association records of the bottle
+cut_links() { # the copy's links to the Mac's own folders (Documents, Desktop, …) become empty folders before any wine
+  # call, so Revit in the copy writes nothing outside it; their paths go to result.json
+  py cut-links "$C" >> "$STATE/links" 2>/dev/null \
+    || fail_run "the user folder of the copy (C:\\users\\crossover) is a link to another folder, or a link in it to a folder of this Mac could not be replaced"
+}
+cut_links
 [ -f "$C/system.reg" ] && [ -f "$C/cxbottle.conf" ] || fail_run "the copy has no system.reg or cxbottle.conf"
 py clone-conf "$C/cxbottle.conf" --uuid "$(uuidgen 2>/dev/null)" >/dev/null || fail_run "could not change cxbottle.conf of the copy"
 marker_write ready || fail_run "could not write the marker of the copy"
@@ -296,6 +321,7 @@ stop_point
 case $rc in 0) ;; 124) prep_fail "the upgrade took longer than $PREP_TIMEOUT s" ;; *) prep_fail "the upgrade failed (exit $rc)" ;; esac
 [ "$(py conf-get "$C/cxbottle.conf" Bottle Timestamp 2>/dev/null)" = "$cx_t" ] \
   || prep_fail "the copy is not at this CrossOver's build after the upgrade (Timestamp)"
+cut_links   # again: an upgrade may link an empty Documents to the Mac's folder (Wine's shell32)
 bounded "$(prep_left)" "$CX/bin/wine" --bottle "$CLONE" cmd /c ver >>"$RUN_DIR/prepare.log" 2>&1; rc=$?
 stop_point
 case $rc in 0) ;; 124) prep_fail "a first program took longer than $PREP_TIMEOUT s" ;; *) prep_fail "a first program did not run (cmd /c ver, exit $rc)" ;; esac
@@ -363,7 +389,7 @@ run_scenario() { # $1 = scenario, $2 = its number: plays its journal in the copy
   py verdict "$s" --journal "$j" --replayed "$jp" --since "$mark" --outputs "$WD/out" --watchdog "$wd" \
     $([ "$signin" = 1 ] && echo --signin-seen) $([ "$nostart" = 1 ] && echo --no-start) --crash-log "$OUTLOG" \
     > "$STATE/$s.verdict.json" || { kv error "no verdict"; echo "  failed: no verdict"; return 1; }
-  IFS=$'\t' read -r v why <<<"$(/usr/bin/perl -MJSON::PP -0 -ne \
+  IFS=$'\t' read -r v why <<<"$(shielded /usr/bin/perl -MJSON::PP -0 -ne \
     'my $d = eval { decode_json($_) } or exit 0; print "$d->{verdict}\t$d->{reason}\n"' "$STATE/$s.verdict.json")"
   case "$v" in
     pass) echo "  passed ($((SECONDS - t0)) s)"; return 0 ;;
@@ -372,9 +398,10 @@ run_scenario() { # $1 = scenario, $2 = its number: plays its journal in the copy
   esac
   return 1
 }
-n=0
+n=0; passed=1
 for s in "${SCEN[@]}"; do
   n=$((n + 1))
-  run_scenario "$s" "$n" || break   # the next scenario needs this one: result.json lists the rest as skipped
+  run_scenario "$s" "$n" || { passed=0; break; }   # the next one needs this one: result.json lists the rest as skipped
 done
-exit 0   # finish gives the exit code of the run
+stop_point   # a Ctrl-C noted while the last helper ran
+exit $((1 - passed))   # finish gives the exit code of the run from result.json; without one, never 0 after a failure

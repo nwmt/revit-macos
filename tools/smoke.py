@@ -18,6 +18,9 @@
 For the runner (scripts/smoke.sh):
   smoke.py clone-conf <cxbottle.conf> [--uuid UUID]
       rewrites [Bottle] of a copy: MenuMode and AssocMode ignore, a new BottleID; every other line stays
+  smoke.py cut-links <clone_dir>
+      each link under drive_c/users/crossover of a copy that leads out of it becomes an empty folder (an empty file
+      for a link to a file); prints their paths in the copy; exit 1 if C: or the user folder is a link itself
   smoke.py conf-get <file.conf> <section> <key>
       the value of one key of a CrossOver .conf file (names without case); exit 1 if it has none
   smoke.py replayed <clone_dir> <year> --since MARKER
@@ -34,8 +37,8 @@ For the runner (scripts/smoke.sh):
 what its watchdog did and whether it saw a sign-in process (--signin-seen) or no Revit at all (--no-start).
 
 Revit's journals hold the Autodesk user name and file paths, so nothing here prints a line of one: only dialog ids,
-the build, the release, line numbers and times; result.json holds no path of the Mac. Only journal, clone-conf and
-result write a file. Run with python3 -I -B.
+the build, the release, line numbers and times; result.json holds no path of the Mac. Only journal, clone-conf,
+cut-links and result write a file. Run with python3 -I -B.
 """
 import datetime
 import glob
@@ -70,9 +73,14 @@ OLE = bytes.fromhex("d0cf11e0a1b11ae1")   # a compound file: what a .rvt starts 
 
 STRONG = journal_strong()   # [(name, regex)]: the journal lines of tools/signatures.py that mean Revit crashed
 WINE_CRASH = re.compile(r"wine: Unhandled (?:page fault|exception)")
-# sign-in, licensing, EULA, trial: in a dialog id (TaskDialog_..., Dialog_...) and in a dialog's text
-PERSON_ID = re.compile(r"sign_?(?:in|out)|log_?(?:in|out|on)|licen[cs]|eula|trial|adsso|identity|entitle|subscription",
-                       re.I)
+# sign-in, licensing, EULA, trial: the words of a dialog id (TaskDialog_..., Dialog_..., split at _ and at case changes;
+# two words in a row count too: Sign+In, Log+On, Ad+SSO), and a dialog's text
+PERSON_WORDS = {"signin", "signout", "login", "logout", "logon", "eula", "trial", "adsso", "identity", "subscription"}
+PERSON_PREFIX = ("licen", "entitle")
+ID_WORD = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+")
+# the same in a line of our own journal templates (lint): any part of a word, so an answer to such a dialog stands out
+LINT_PERSON = re.compile(r"sign_?(?:in|out)|log_?(?:in|out|on)|licen[cs]|eula|trial|adsso|identity|entitle|"
+                         r"subscription", re.I)
 PERSON_TEXT = re.compile(r"\bsign(?:ed|ing)?[ -]?(?:in|out)\b|\blog(?:ged|ging)?[ -]?(?:in|out|on)\b|\blicen[cs]|"
                          r"\beula\b|\btrial\b|\bsubscription\b|\bentitle|\bautodesk (?:account|id)\b|"
                          r"\banother (?:device|computer)\b", re.I)
@@ -300,7 +308,7 @@ def scan(path):
         m = re.match(r"\s*'Id : (\S+)", line)
         if m and tasks and tasks[-1][0] is None:
             tasks[-1][0] = m.group(1)
-            tasks[-1][1] = tasks[-1][1] or bool(PERSON_ID.search(m.group(1)))
+            tasks[-1][1] = tasks[-1][1] or person_id(m.group(1))
             tasks[-1][2] = tasks[-1][2] or bool(CRASHY.search(m.group(1)))
         if "TaskDialogResult" in line and tasks:
             tasks.pop()
@@ -312,12 +320,21 @@ def scan(path):
         elif modals and modals[-1][0] is None:
             m = re.search(r"\b(Dialog_\w+)", line)
             if m:
-                modals[-1][0], modals[-1][1] = m.group(1), bool(PERSON_ID.search(m.group(1)))
+                modals[-1][0], modals[-1][1] = m.group(1), person_id(m.group(1))
     j["dialogs"] = [tuple(d) for d in tasks + modals]
     j["modal_open"] = len(modals)
     if not j["release"] and (j["branch"] or "").startswith("RELEASE_"):
         j["release"] = j["branch"][8:]   # 2020 has no Release line, only Branch: RELEASE_2020
     return j
+
+
+def person_id(did):
+    """True for a dialog id that names sign-in, licensing, a EULA or a trial, by whole words:
+    TaskDialog_License_Expired, Dialog_AdSSO; not TaskDialog_Invalid_Template (the "log" of Dialog, the "In" of
+    Invalid) or Dialog_Design_Industrial."""
+    words = [w.lower() for w in ID_WORD.findall(did or "")]
+    words += [a + b for a, b in zip(words, words[1:])]
+    return any(w in PERSON_WORDS or w.startswith(PERSON_PREFIX) for w in words)
 
 
 def output_check(scenario, out_dir, since_ns):
@@ -349,7 +366,8 @@ def output_check(scenario, out_dir, since_ns):
 def decide(j, exit_at, outputs, watchdog="none", signin_seen=False, no_start=False, crashed_wine=False, expect=None):
     """(verdict, kind, reason, fix, dialog_id). j: scan() of the replayed journal, None if Revit wrote none for this
     run; exit_at: the ID_APP_EXIT line of the played journal; outputs: output_check(); expect: the played journal's
-    file name. Order: a person must act, then pass, then fail with the first reason that applies."""
+    file name. Order: a crash before Revit was seen, a person must act, then pass, then fail with the first reason that
+    applies."""
     stuck = watchdog not in (None, "", "none")
     ended = bool(j and j["finished"] and j["stopped_at"] is not None and exit_at and j["stopped_at"] >= exit_at)
     dialogs = [d for d in (j["dialogs"] if j else []) if not d[2]]   # leave out the dialog that reports a crash
@@ -361,6 +379,9 @@ def decide(j, exit_at, outputs, watchdog="none", signin_seen=False, no_start=Fal
     def fail(kind, reason, did=None):
         return "fail", kind, reason, None, did
 
+    if no_start and (crashed_wine or (j and j["strong"])):   # crash evidence comes before the fallback below
+        why = j["strong"][0] if j and j["strong"] else "wine reported an unhandled exception"
+        return fail("crash", f"Revit crashed while starting ({why})")
     if no_start:
         return person("no_start", "Revit did not start: CrossOver stopped it or showed a question", FIX_CROSSOVER)
     if signin_seen and not licensed:
@@ -445,6 +466,7 @@ def verdict(scenario, journal, replayed, since, out_dir=None, watchdog="none", s
 SECTION_LINE = re.compile(r"^\s*\[(.*)\]\s*(?:;[^\]]*)?$")
 FIELD_LINE = re.compile(r'^(\s*)(;*\s*)"((?:[^"\\]|\\.)*)"(\s*=\s*)"((?:[^"\\]|\\.)*)"(.*)$')
 JOURNAL_NAME = re.compile(r"journal\.\d{4}\.txt")
+TEST_DIR = re.compile(r".+-test(?:-\d+)?")   # a test's log folder: <time>-test, or <time>-test-2 in the same second
 RESULTS = {"pass": "passed", "fail": "failed", "person": "needs_person"}
 WORDS = {"passed": "passed", "failed": "FAILED", "needs_person": "needs you", "skipped": "skipped",
          "stopped": "stopped"}
@@ -535,6 +557,45 @@ def conf_get(path, section, key):
     return next((v for k, v in conf_section(path, section).items() if k.lower() == key.lower()), None)
 
 
+USER_DIR = ("drive_c", "users", "crossover")
+
+
+def cut_links(clone):
+    """Replaces each link under drive_c/users/crossover of a copy that leads out of the copy (CrossOver links Documents,
+    Desktop, Downloads and the like to the Mac's own folders) with an empty folder, or an empty file for a link to a
+    file, so that Revit in the copy writes nothing outside it. Only the links themselves change: nothing is followed,
+    read or deleted through one. Returns their paths in the copy, sorted. SystemExit when drive_c, users or crossover
+    is a link itself (C: or the user folder of the copy would be another folder)."""
+    root = os.path.realpath(clone)
+    top = root
+    for part in USER_DIR:
+        top = os.path.join(top, part)
+        if os.path.islink(top):
+            raise SystemExit(f"{'/'.join(USER_DIR)} of the copy goes through a link ({part})")
+    if not os.path.isdir(top):
+        return []
+    out = []
+    for d, dirs, files in os.walk(top):   # a link to a folder is listed in dirs and never entered
+        for n in dirs + files:
+            p = os.path.join(d, n)
+            if not os.path.islink(p):
+                continue
+            target = os.path.realpath(p)   # through every link on the way; what does not exist stays as written
+            if target == root or target.startswith(root + os.sep):
+                continue
+            to_file = os.path.isfile(p)
+            try:
+                os.unlink(p)
+                if to_file:
+                    open(p, "xb").close()
+                else:
+                    os.mkdir(p)
+            except OSError as e:
+                raise SystemExit(f"could not replace a link in the copy: {e.strerror}")
+            out.append(os.path.relpath(p, root).replace(os.sep, "/"))
+    return sorted(out)
+
+
 def replayed(clone, year, since_ns):
     """(path, size, idle) of the journal Revit writes for this run: the newest journal.NNNN.txt that is not older than
     the start marker, in C:\\revit-smoke first (2026 and newer write it there while they play a journal), else in
@@ -599,8 +660,13 @@ def template_entry(path, source):
 def build_result(state):
     """result.json as a dict, from the runner's state folder: meta (key=value lines) and, per scenario that ran,
     <name>.verdict.json (smoke.py verdict) and <name>.run (seconds, watchdog, worker_killed, signin_seen, no_start,
-    stopped)."""
+    stopped), links (what cut-links printed). A copy that could not be deleted (copy_removed=0, not kept) makes the run
+    failed and keeps each scenario's result."""
     meta = read_kv(os.path.join(state, "meta"))
+    links = []   # the links of the copy that cut-links replaced, each once
+    for line in read_lines(os.path.join(state, "links")):
+        if line and line not in links:
+            links.append(line)
     names = [n for n in meta.get("scenarios", "").split() if n in SCENARIOS]
     prep = meta.get("prepare", "")
     stopped = meta.get("stopped") == "1"
@@ -635,6 +701,9 @@ def build_result(state):
     elif overall is None:
         ran = [e for e in scen if e["result"] != "skipped"]
         overall = "ok" if ran and not meta.get("error") else "failed"
+    left = meta.get("copy_removed") == "0" and meta.get("kept") != "1"
+    if left and not stopped:   # a signed-in copy left behind fails the run, whatever its scenarios gave
+        overall = "failed"
     year = _int(meta.get("year"))
     return {
         "format": 1, "tool": "./revit test", "run_id": meta.get("run_id") or None, "time": meta.get("time") or None,
@@ -645,6 +714,7 @@ def build_result(state):
                     "seconds": _int(meta.get("prepare_seconds")), "reason": meta.get("prepare_reason") or None},
         "template": template_entry(meta.get("template"), meta.get("template_source")),
         "scenarios": scen, "copy_removed": _flag(meta.get("copy_removed")), "copy_kept": meta.get("kept") == "1",
+        "copy_problem": (meta.get("copy_problem") or None) if left else None, "links_replaced": links,
         "not_checked": NOT_CHECKED, "journals_on_real_revit": year in REAL_REVIT,
     }
 
@@ -670,7 +740,9 @@ def earlier(res, history, here):
     if not history or not res.get("year"):
         return out
     seen = []
-    for p in glob.glob(os.path.join(history, "*", "*-test", "result.json")):
+    for p in glob.glob(os.path.join(history, "*", "*-test*", "result.json")):
+        if not TEST_DIR.fullmatch(os.path.basename(os.path.dirname(p))):
+            continue
         if here and os.path.realpath(p) == os.path.realpath(here):
             continue
         r = _load(p)
@@ -700,6 +772,11 @@ def summary(res, history=None, here=None):
         lines.append("  This is not a Revit failure, and your bottle is not changed.")
     elif res.get("reason"):
         lines.append(f"  The test did not run: {res['reason']}.")
+    if res.get("copy_removed") is False and not res.get("copy_kept"):
+        why = f": {res['copy_problem']}" if res.get("copy_problem") else ""
+        lines.append(f"  The temporary copy {res.get('copy') or '?'} was not deleted{why}. The test counts as failed.")
+        lines.append(f"  Run ./revit test {year}{sfx} again: it deletes the copy first (if programs still run in it, "
+                     "restart the Mac first). Or delete it in CrossOver.")
     past = earlier(res, history, here)
     for s in res.get("scenarios", []):
         word = WORDS.get(s.get("result"), s.get("result") or "?")
@@ -764,7 +841,7 @@ def lint(paths):
             code.append((n, s))
             if not (s in ("Dim Jrn", "Set Jrn = CrsJournalScript") or re.match(r"Jrn\.[A-Za-z]+\s", s)):
                 out.append(f"{name}:{n}: not a Jrn line (no VBScript beyond Dim/Set Jrn)")
-            if PERSON_ID.search(s):
+            if LINT_PERSON.search(s):
                 out.append(f"{name}:{n}: a sign-in, licensing or EULA command")
         if not any(s == 'Jrn.Directive "Version", "{{VERSION}}", "{{FORMAT}}"' for _, s in code):
             out.append(f'{name}: no Jrn.Directive "Version", "{{{{VERSION}}}}", "{{{{FORMAT}}}}"')
@@ -809,6 +886,9 @@ def main():
         if not re.fullmatch(r"[0-9A-Za-z-]{2,}", bid):   # what cxbottle --set-uuid accepts
             sys.exit("--uuid: letters, digits and -")
         clone_conf(pos[0], bid)
+    elif cmd == "cut-links" and len(a) == 2:
+        for p in cut_links(a[1]):
+            print(p)
     elif cmd == "conf-get" and len(a) == 4:
         v = conf_get(a[1], a[2], a[3])
         if v is None:

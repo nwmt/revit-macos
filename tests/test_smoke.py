@@ -353,6 +353,32 @@ class Verdict(Tmp):
             v = self.judge(lines=lines, watchdog="stall")
             self.assertEqual((v["verdict"], v["kind"], v["dialog_id"]), ("person", "license_dialog", did), v)
 
+    def test_early_crash_is_a_failure_not_a_person(self):
+        crash = self.write("stdout.txt", "wine: Unhandled page fault on read access to 0000000000000000\n")
+        v = self.judge(replayed="", no_start=True, crash_log=crash)
+        self.assertEqual((v["verdict"], v["kind"]), ("fail", "crash"), v)
+        self.assertIn("while starting", v["reason"])
+        self.assertIsNone(v["fix"])
+        quiet = self.write("quiet.txt", "Expired Bottle\n")
+        v = self.judge(replayed="", no_start=True, crash_log=quiet)   # no crash evidence: still a person
+        self.assertEqual((v["verdict"], v["kind"]), ("person", "no_start"), v)
+
+    def test_ordinary_dialog_ids_are_not_sign_in(self):
+        for did in ("TaskDialog_Invalid_Template", "TaskDialog_Out_Of_Date", "TaskDialog_On_Save"):
+            lines = replay(exit_at=self.exit, upto="playback", dialog=("Choose another file.", did))
+            v = self.judge(lines=lines, watchdog="stall")
+            self.assertEqual((v["verdict"], v["kind"], v["dialog_id"]), ("fail", "dialog", did), v)
+        lines = [x.replace("Dialog_Revit_NewProject", "Dialog_Design_Industrial")
+                 for x in replay(exit_at=self.exit, modal_open=True)]
+        v = self.judge(lines=lines, watchdog="stall")
+        self.assertEqual((v["verdict"], v["kind"], v["dialog_id"]), ("fail", "dialog", "Dialog_Design_Industrial"), v)
+        for did in ("TaskDialog_SignIn_Required", "TaskDialog_Log_In", "Dialog_AdSSO", "TaskDialog_EULA",
+                    "TaskDialog_Trial_Ended", "Dialog_Licensing_Options", "TaskDialog_LoginFailed"):
+            self.assertTrue(sm.person_id(did), did)
+        for did in ("TaskDialog_Invalid_Template", "Dialog_Design_Industrial", "TaskDialog_Logo_Missing",
+                    "Dialog_Revit_NewProject", "TaskDialog_Industrial_Design", None):
+            self.assertFalse(sm.person_id(did), did)
+
     def test_signin_process_with_license_update_is_fine(self):
         self.rvt()
         v = self.judge(lines=replay(exit_at=self.exit), signin_seen=True)
@@ -435,6 +461,103 @@ class Template(Tmp):
         self.assertTrue(sm.win_file(self.clone(), p))
         self.assertIsNone(sm.win_file(self.clone(), "D:\\x.rte"))
         self.assertIsNone(sm.win_file(self.clone(), "C:\\ProgramData\\..\\..\\x.rte"))
+
+
+PASSED = {"verdict": "pass", "kind": "pass", "reason": "Revit played the journal to its end and quit normally",
+          "fix": None, "dialog_id": None, "build": "20991231_0000(x64)", "release": "2027.3", "stopped_at": 9,
+          "exit_line": 9, "t_start_idle": 16.0, "t_total": 31.5, "longest_gap": 3.0, "outputs": {}}
+
+
+class Cleanup(Tmp):
+    """The copy's cleanup decides the run too: a copy left behind is a failure, unless --keep kept it."""
+
+    def state(self, **meta):
+        st = os.path.dirname(self.path("state", "x"))
+        base = {"run_id": "r1", "time": "2026-10-16T11:11:28Z", "year": "2027", "bottle": "rvt2027-a",
+                "copy": "rvt2027-a.test", "scenarios": "start", "prepare": "ok", "copy_removed": "1"}
+        base.update(meta)
+        with open(os.path.join(st, "meta"), "w") as f:
+            f.write("".join(f"{k}={v}\n" for k, v in base.items() if v is not None))
+        with open(os.path.join(st, "start.verdict.json"), "w") as f:
+            json.dump(PASSED, f)
+        with open(os.path.join(st, "start.run"), "w") as f:
+            f.write("seconds=35\nwatchdog=none\n")
+        return st
+
+    def test_a_copy_left_behind_fails_the_run(self):
+        res = sm.build_result(self.state(copy_removed="0", copy_problem="programs still run in it"))
+        self.assertEqual(res["result"], "failed")
+        self.assertEqual(res["scenarios"][0]["result"], "passed")    # the scenario keeps its own result
+        self.assertEqual((res["copy_removed"], res["copy_problem"]), (False, "programs still run in it"))
+        lines = sm.summary(res)
+        self.assertTrue(any("rvt2027-a.test was not deleted: programs still run in it." in x for x in lines), lines)
+        self.assertTrue(any("./revit test 2027" in x for x in lines), lines)
+        res = sm.build_result(self.state(copy_removed="0", kept="1"))   # --keep
+        self.assertEqual(res["result"], "ok")
+        self.assertFalse(any("was not deleted" in x for x in sm.summary(res)))
+        self.assertEqual(sm.build_result(self.state(copy_removed="0", stopped="1"))["result"], "stopped")
+        self.assertEqual(sm.build_result(self.state())["result"], "ok")
+
+    def test_history_reads_runs_of_the_same_second(self):
+        for name, t, total in (("20261001-000000-test", "2026-10-01T00:00:00Z", 30),
+                               ("20261001-000000-test-2", "2026-10-01T00:00:01Z", 33),
+                               ("20261001-000000-steps", "2026-10-01T00:00:02Z", 99)):
+            self.write(os.path.join("logs", "rvt2027-a", name, "result.json"), json.dumps(
+                {"year": 2027, "time": t, "scenarios": [{"name": "start", "result": "passed", "t_start_idle": 15,
+                                                         "t_total": total}]}))
+        res = {"year": 2027, "time": "2026-10-16T11:11:28Z"}
+        self.assertEqual(sm.earlier(res, os.path.join(self.d, "logs"), None), {"start": [(15, 33), (15, 30)]})
+
+
+class CutLinks(Tmp):
+    """Links in the copy's user folder lead to the Mac's own folders: in the copy they become empty folders."""
+
+    def setUp(self):
+        super().setUp()
+        self.mac = os.path.dirname(self.path("mac", "x"))
+        for n in ("Documents", "Desktop"):
+            self.write(os.path.join("mac", n, "keep.txt"), "the user's own file")
+        self.write(os.path.join("mac", "notes.txt"), "a file of the user")
+        self.clone = os.path.dirname(self.path("clone", "x"))
+        self.u = os.path.dirname(self.path("clone", "drive_c", "users", "crossover", "x"))
+        os.makedirs(os.path.join(self.u, "AppData", "Roaming"))
+        os.makedirs(os.path.join(self.u, "Inside"))
+        os.symlink(os.path.join(self.mac, "Documents"), os.path.join(self.u, "Documents"))
+        os.symlink(os.path.join(self.mac, "Desktop"), os.path.join(self.u, "Desktop"))
+        os.symlink(os.path.join(self.mac, "Music"), os.path.join(self.u, "Music"))        # leads nowhere yet
+        os.symlink("../../../../mac/Desktop", os.path.join(self.u, "Pictures"))        # relative, still out
+        os.symlink(os.path.join(self.mac, "notes.txt"), os.path.join(self.u, "AppData", "notes.txt"))
+        os.symlink("../Roaming", os.path.join(self.u, "AppData", "Local"))                 # inside: stays
+        os.symlink(os.path.join(self.u, "Inside"), os.path.join(self.u, "Same"))          # inside: stays
+
+    def test_links_out_become_empty_folders(self):
+        got = sm.cut_links(self.clone)
+        base = "drive_c/users/crossover/"
+        self.assertEqual(got, sorted(base + n for n in ("AppData/notes.txt", "Desktop", "Documents", "Music",
+                                                         "Pictures")))
+        for n in ("Desktop", "Documents", "Music", "Pictures"):
+            p = os.path.join(self.u, n)
+            self.assertTrue(os.path.isdir(p) and not os.path.islink(p) and not os.listdir(p), n)
+        p = os.path.join(self.u, "AppData", "notes.txt")
+        self.assertTrue(os.path.isfile(p) and not os.path.islink(p) and os.path.getsize(p) == 0)
+        self.assertTrue(os.path.islink(os.path.join(self.u, "AppData", "Local")))
+        self.assertTrue(os.path.islink(os.path.join(self.u, "Same")))
+        for n in ("Documents", "Desktop"):   # the Mac's folders are not touched
+            with open(os.path.join(self.mac, n, "keep.txt")) as f:
+                self.assertEqual(f.read(), "the user's own file")
+        self.assertFalse(os.path.exists(os.path.join(self.mac, "Music")))
+        self.assertEqual(sm.cut_links(self.clone), [])
+        r = run("cut-links", self.clone)
+        self.assertEqual((r.returncode, r.stdout), (0, ""), r.stderr)
+
+    def test_a_user_folder_that_is_a_link_is_refused(self):
+        os.rename(self.u, os.path.join(self.mac, "crossover"))
+        os.symlink(os.path.join(self.mac, "crossover"), self.u)
+        r = run("cut-links", self.clone)
+        self.assertEqual(r.returncode, 1)
+        self.assertNotIn(self.d, r.stderr)
+        self.assertTrue(os.path.islink(os.path.join(self.mac, "crossover", "Documents")))   # nothing changed there
+        self.assertEqual(sm.cut_links(os.path.join(self.d, "none")), [])
 
 
 class Signin(Tmp):
