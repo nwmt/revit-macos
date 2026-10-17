@@ -858,6 +858,9 @@ printf 'junk' > "$R/installers/revit2025/Create_Installer_RVT_2025_5_English_WIN
 OUT="$(cd / && "${SANDBOX_ENV[@]}" /bin/bash "$R/scripts/unpack-revit.sh" 2025 2>&1)"; RC=$?
 expect "an unrecorded unpacked folder with a broken Create Installer: used as before" 0 "ready"
 
+# CrossOver's wine deletes WINEDLLOVERRIDES (only its --dll sets one): a step that sets the variable changes nothing
+check "no script sets WINEDLLOVERRIDES" test -z "$(grep -rn 'WINEDLLOVERRIDES=' "$R/scripts" | grep -v '^[^:]*:[0-9]*: *#')"
+
 # make-apps: Revit Viewer only when the installer made its shortcut (2027 has none); an old Viewer app goes. osacompile,
 # codesign, PlistBuddy, lsregister and the shortcut reader are stubs, so nothing is registered with macOS
 make_apps_sandbox() { # $1 = year, $2 = bottle, $3… = Start Menu shortcut titles

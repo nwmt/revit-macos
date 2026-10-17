@@ -83,9 +83,10 @@ net_full() { # .NET Framework 4.7.2 or 4.8 over 2020's 4.7. Not default: Revit 2
   local before rc
   [ -f "$2" ] || { echo "no $2"; return 1; }
   before="$(net_release)"
-  # on Windows 10 the installer treats 4.8/4.7.2 as built in and silently exits: install as Windows 7
+  # on Windows 10 the installer treats 4.8/4.7.2 as built in and silently exits: install as Windows 7. No DLL
+  # overrides: CrossOver's wine drops WINEDLLOVERRIDES (as in netfx_as_old_windows)
   w winecfg -v win7 || return 1
-  WINEDLLOVERRIDES="fusion=b" run_exe ndp "$2" /q /norestart /log 'C:\ndp-setup'; rc=$?
+  run_exe ndp "$2" /q /norestart /log 'C:\ndp-setup'; rc=$?
   w winecfg -v win10 || return 1
   w wineboot -r   # the MSI asks for a reboot (pending file renames)
   cp "$B"/drive_c/ndp-setup* "$RUN_DIR/" 2>/dev/null; rm -f "$B"/drive_c/ndp-setup*

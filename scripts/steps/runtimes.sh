@@ -93,14 +93,16 @@ netfx_as_old_windows() { # $1 = the 4.0 installer, $2 = the 4.x one, $3 = its ve
   rm -f "$B/drive_c/windows/system32/mscoree.dll" "$B/drive_c/windows/syswow64/mscoree.dll"
   # 4.0 as Windows XP x64 installs the real mscoree.dll, which 4.5 and later lack
   w winecfg -v winxp64 || return 1
-  WINEDLLOVERRIDES="fusion=b" run_exe dotNetFx40 "$1" /q '/c:install.exe /q'; echo "4.0 installer exit=$?"
+  # no DLL overrides here: CrossOver's wine drops WINEDLLOVERRIDES (only its --dll sets one), so the fusion=b these
+  # calls had never applied, and the installs that work were made without it
+  run_exe dotNetFx40 "$1" /q '/c:install.exe /q'; echo "4.0 installer exit=$?"
   w reg add 'HKCU\Software\Wine\DllOverrides' /v mscoree /d native /f || return 1
   for k in 'HKLM\Software\Microsoft\.NETFramework' 'HKLM\Software\Wow6432Node\.NETFramework'; do
     w reg add "$k" /v OnlyUseLatestCLR /t REG_DWORD /d 1 /f || return 1
   done
   # on Windows 10 1703+ the 4.7/4.8 installers say "already installed": install as Windows 7
   w winecfg -v win7 || return 1
-  WINEDLLOVERRIDES="fusion=b" run_exe "dotNetFx${3/./}" "$2" /q /norestart /log 'C:\netfx-setup'; echo "$3 installer exit=$?"
+  run_exe "dotNetFx${3/./}" "$2" /q /norestart /log 'C:\netfx-setup'; echo "$3 installer exit=$?"
   # the installer's own logs: removed from the bottle only once they are in the run folder
   cp "$B"/drive_c/netfx-setup* "$RUN_DIR/" 2>/dev/null && rm -f "$B"/drive_c/netfx-setup*
   return 0
