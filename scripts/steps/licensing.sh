@@ -76,6 +76,6 @@ step_register() { # register the product with AdskLicensing as Setup.exe does. O
   mkdir -p "$B/drive_c/ProgramData/Autodesk/Revit/Revit $YEAR/Setup" || return 1
   cp "$src" "$B/drive_c/ProgramData/Autodesk/Revit/Revit $YEAR/Setup/" || return 1
   w "$h" register --pk "$PRODKEY" --pv "$YEAR.0.0.F" --el US --lm USER --cf "$pit" || return 1
-  w "$h" list | tr -d '\r' | head -20
+  w "$h" list | tr -d '\r'   # whole: the list is JSON, cut short it does not parse
   detail "$PRODKEY $YEAR.0.0.F USER"
 }

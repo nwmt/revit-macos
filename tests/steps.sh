@@ -441,6 +441,11 @@ reset; mkbottle rvt2024-t 2024 2024; mkdist 2024; mkdir -p "$AL2024/16.1.0.1/hel
 run_steps 2024 rvt2024-t register
 expect "register runs the licensing helper" 0 ""; check "register: in the summary" grep -qE '^   register +exit=0 +829P1 2024.0.0.F USER' "$RUN/summary.txt"
 check "register: product key and version" called "[register] [--pk] [829P1] [--pv] [2024.0.0.F]"
+# the helper's list is JSON longer than 20 lines: register.log keeps all of it, so it still parses
+reset; mkbottle rvt2024-t 2024 2024; mkdist 2024; mkdir -p "$AL2024/16.1.0.1/helper"; ln -s 16.1.0.1 "$AL2024/Current"
+rule "InstHelper.exe list" 0 'printf "[\r\n"; for i in $(seq 1 30); do printf "  {\"n\": %d},\r\n" $i; done; printf "  {\"n\": 31}\r\n]\r\n"'
+run_steps 2024 rvt2024-t register; expect "register: the list runs" 0 ""
+check "register.log holds the whole list as JSON" python3 -I -c 'import json, sys; t = open(sys.argv[1]).read(); json.loads(t[t.index("["):t.rindex("]") + 1])' "$RUN/register.log"
 AL2020="$BOTTLES/rvt2020-t/drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing"
 reset; mkbottle rvt2020-t 2020 2020; mkdist2020; lic_rule 1 2020; run_steps 2020 rvt2020-t licensing
 expect "licensing (2020): its expected 1 is success" 0 ""
