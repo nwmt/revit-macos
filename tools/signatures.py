@@ -19,9 +19,9 @@ looked at, long lines cut), with one combined pattern for all its signatures. Of
 LINES_MAX lines only, at most WINDOW bytes: a session that crashed ends with the crash, so the cap leaves out the start
 (the line ends are counted backwards from its end, fast, to find where its last lines begin). The part before is never
 read, so the line numbers of such a scan count from its first line read ("relative"). It keeps at most HITS_MAX line
-numbers of a signature (the count goes on). A crash line names its thread ("(thread 0b18)"); the process is the one whose lines
-of the same file carry that thread id and whose program Wine loaded, else "process unknown": no guess from a nearby
-line. Run with python3 -I -B.
+numbers of a signature (the count goes on). A crash line names its thread ("(thread 0b18)"); the process is the one
+whose lines of the same file carry that thread id and whose program Wine loaded, else "process unknown": no guess from
+a nearby line. Run with python3 -I -B.
 """
 import json
 import os
