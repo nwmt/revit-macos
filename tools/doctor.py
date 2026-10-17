@@ -391,11 +391,11 @@ def lock_state(lock):
     """Whether another task holds the lock (lock_free in scripts/lib/common.sh) and the command it runs. A free lock
     is taken for an instant and dropped; a busy one is only tried."""
     if not lock or not os.path.exists(lock):
-        return {"busy": False, "owner": ""}
+        return {"busy": False, "owner": "", "run_id": ""}
     try:
         fd = os.open(lock, os.O_RDONLY)
     except OSError:
-        return {"busy": None, "owner": ""}
+        return {"busy": None, "owner": "", "run_id": ""}
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         busy = False
@@ -403,15 +403,16 @@ def lock_state(lock):
         busy = True
     finally:
         os.close(fd)
-    owner = ""
+    owner = run_id = ""
     if busy:
         try:
             with open(lock + ".owner", encoding="utf-8", errors="replace") as f:
-                lines = f.read().splitlines()
+                lines = f.read(64 << 10).splitlines()
         except OSError:
             lines = []
         owner = next((x[8:] for x in lines if x.startswith("command=")), lines[0] if lines else "")
-    return {"busy": busy, "owner": owner or "another task"}
+        run_id = next((x[7:] for x in lines if x.startswith("run_id=")), "")
+    return {"busy": busy, "owner": owner or "another task", "run_id": run_id.strip()}
 
 
 def collect_host(ctx):
@@ -485,11 +486,12 @@ def bottle_years(b):
 
 
 def clone_state(b):
-    """The marker of a temporary copy that ./revit test makes ({state, source}), or None."""
+    """The marker of a temporary copy that ./revit test makes ({state, source, run_id}), or None. As is_smoke_clone
+    in scripts/lib/common.sh: the marker a file of its own, neither it nor its folder reached through a link."""
     p = os.path.join(b, CLONE_MARKER)
-    if not os.path.isfile(p):
+    if os.path.islink(os.path.dirname(p)) or os.path.islink(p) or not os.path.isfile(p):
         return None
-    out = {"state": "unknown", "source": ""}
+    out = {"state": "unknown", "source": "", "run_id": ""}
     try:
         with open(p, encoding="utf-8", errors="replace") as f:
             for line in f.read(64 << 10).splitlines():
@@ -514,6 +516,8 @@ def collect_bottles(ctx):
         clone, ys = clone_state(p), bottle_years(p)
         if clone is None and len(ys) != 1:
             continue   # not a Revit bottle
+        if clone is not None:   # whether a running test (or anything else) still uses the copy
+            clone["activity"] = activity(p, ctx.run)
         out.append({"name": name, "years": ys, "clone": clone,
                     "revit": len(ys) == 1 and os.path.isfile(os.path.join(p, rd(ys[0]), "Revit.exe"))})
     return out
@@ -767,6 +771,8 @@ def collect_bottle(ctx):
     if not b["exists"]:
         return b
     b["clone"], b["years"] = clone_state(p), bottle_years(p)
+    if b["clone"] is not None:
+        b["clone"]["activity"] = activity(p, ctx.run)
     if b["clone"] is not None or b["years"] != [y]:
         return b
     b["registry"] = {n: os.path.isfile(os.path.join(p, n)) for n in ("system.reg", "user.reg")}
@@ -809,7 +815,7 @@ def collect(ctx):
     """Every fact the checks need; the only function here that reads the Mac and the bottle."""
     f = {"year": ctx.year, "bottle": ctx.bottle, "profile": ctx.profile, "addins": ctx.addins,
          "engine": ctx.engine or "unknown", "shims_release": ctx.shims_release or "unknown",
-         "bottles_path": ctx.bottles, "home": ctx.home}
+         "bottles_path": ctx.bottles, "home": ctx.home, "cx_path": ctx.cx}
     f["sfx"] = "" if ctx.year is None or ctx.bottle == f"rvt{ctx.year}-a" else f" {ctx.bottle}"
     f["host"] = collect_host(ctx)
     f["cx"] = collect_cx(ctx)
@@ -837,13 +843,39 @@ def rebuild(f):
     return f"./revit rebuild {f['year']}{f['sfx']}: it shows what it resets and asks first"
 
 
-def remove_clone(f, name):
-    """The command that removes a leftover temporary copy (no ./revit command takes its name)."""
-    home, bottles = f["home"].rstrip("/"), f["bottles_path"]
-    where = f'"{bottles}/{name}"'
-    if bottles.startswith(home + "/"):
-        where = '"$HOME' + bottles[len(home):] + "/" + name + '"'
-    return f"quit Revit if it runs there, then delete it: rm -rf {where}"
+def clone_check(f, cid, name, years, clone):
+    """What doctor says of a temporary copy that ./revit test made. A copy a running ./revit test owns (the lock's
+    run id is the marker's; an owner file without one: its command names the copy's source), or one where programs
+    run, is in use: a note, no command. A kept one (--keep) gets the maintainer's command that ./revit test prints. Any
+    other is left behind: ./revit test removes it, with its own checks, the next time it runs; never a bare delete."""
+    src, state = clone.get("source") or "", clone.get("state")
+    of = f" of {src}" if src else ""
+    lk = f["host"].get("lock") or {}
+    words = (lk.get("owner") or "").split()
+    owned = bool(lk.get("busy")) and state in ("creating", "ready") and (
+        lk.get("run_id") == clone.get("run_id") if lk.get("run_id") else
+        bool(src) and words[:2] == ["./revit", "test"] and words[3:4] == [src])
+    if not name.endswith(".test"):
+        return Check(cid, "warn", f"{name} holds the marker of a temporary copy that ./revit test makes, but is not "
+                     "named like one: ./revit test leaves it alone",
+                     detail=f"state {state or 'unknown'}",
+                     fix="if it is your own bottle, delete the file revit-macos/smoke-clone in it; if it is a copy, "
+                         "delete it in CrossOver")
+    if owned or clone.get("activity") == "active":
+        return Check(cid, "info", f"{name}: a temporary copy{of}, in use by ./revit test",
+                     detail=f"state {state or 'unknown'}, " + ("the running ./revit test owns it" if owned else
+                                                               "programs run in it"))
+    if state == "kept":
+        home, cx = f["home"].rstrip("/"), f.get("cx_path") or ""
+        if cx.startswith(home + "/"):
+            cx = "$HOME" + cx[len(home):]
+        return Check(cid, "warn", f"a temporary copy{of} that ./revit test kept (--keep): {name}",
+                     detail="state kept", fix=f'when you no longer need it: "{cx}/bin/cxbottle" --bottle "{name}" '
+                                              "--delete --force")
+    y = years[0] if len(years) == 1 else None
+    again = "./revit test " + (f"{y}" + ("" if not src or src == f"rvt{y}-a" else f" {src}") if y else "<year>")
+    return Check(cid, "warn", f"a temporary copy{of} that ./revit test made was left behind: {name}",
+                 detail=f"state {state or 'unknown'}", fix=f"run {again} again: it removes copies left behind")
 
 
 def host_checks(f):
@@ -944,10 +976,7 @@ def bottles_checks(f):
     out, revits = [], 0
     for b in f.get("bottles", []):
         if b["clone"] is not None:
-            src = f" of {b['clone']['source']}" if b["clone"].get("source") else ""
-            out.append(Check(f"bottles.clone.{b['name']}", "warn",
-                             f"a temporary copy{src} that ./revit test made was left behind: {b['name']}",
-                             detail=f"state {b['clone'].get('state', 'unknown')}", fix=remove_clone(f, b["name"])))
+            out.append(clone_check(f, f"bottles.clone.{b['name']}", b["name"], b["years"], b["clone"]))
             continue
         revits += 1
         y = b["years"][0]
@@ -1314,8 +1343,9 @@ def bottle_checks(f):
                       fix=f"to install Revit {y}: ./revit install {y}{f['sfx']}")]
     out.append(Check("bottle.exists", "ok", f"bottle {name} exists"))
     if b.get("clone") is not None:
-        return out + [Check("bottle.clone", "fail", f"{name} is a temporary copy that ./revit test made",
-                            fix=remove_clone(f, name))]
+        c = clone_check(f, "bottle.clone", name, b.get("years") or [], b["clone"])
+        return out + [Check("bottle.clone", "fail", f"{name} is a temporary copy that ./revit test made, not a bottle "
+                            "to check", detail=c.title, fix=c.fix or "wait until ./revit test finishes")]
     ys = b.get("years") or []
     if not ys:
         return out + [Check("bottle.year", "fail", f"bottle {name} does not look like a Revit bottle",

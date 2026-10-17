@@ -445,7 +445,10 @@ class Bottle(Sandbox):
         self.assertEqual(self.problems(self.checks(year=2024, profile=dict(PROFILE, YEAR=2024))),
                          [("bottle.year", "fail")])
         self.write(os.path.join(self.b, dr.CLONE_MARKER), "state=ready\n")
-        self.assertEqual(self.problems(self.checks()), [("bottle.clone", "fail")])
+        cs = self.checks()
+        self.assertEqual(self.problems(cs), [("bottle.clone", "fail")])
+        self.assertIn("revit-macos/smoke-clone", self.by_id(cs)["bottle.clone"].fix)   # not named <bottle>.test
+        self.assertNotIn("rm ", self.by_id(cs)["bottle.clone"].fix)
 
     def test_without_revit_exe_no_fix_is_checked(self):
         os.remove(os.path.join(self.b, dr.rd(self.year), "Revit.exe"))
@@ -721,23 +724,94 @@ class Revit2020(NetFramework):
 
 
 class WithoutYear(Sandbox):
+    def copy(self, name="rvt2025-a.test", source="rvt2025-a", state="ready", run_id="20261017-100000-42"):
+        c = os.path.join(self.bottles, name)
+        self.write(os.path.join(c, dr.CLONE_MARKER),
+                   "smoke_clone=1\nrun_id=%s\nsource=%s\ntime=1\nstate=%s\n" % (run_id, source, state))
+        self.write(os.path.join(c, dr.rd(self.year), "Revit.exe"), pe("25.5.0.57"))
+        return c
+
+    def hold_lock(self, owner):
+        lock = os.path.join(self.home, "lock")
+        self.write(lock + ".owner", owner)
+        h = open(lock, "a")
+        fcntl.flock(h, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        self.addCleanup(h.close)
+
+    def copy_check(self, name="rvt2025-a.test"):
+        c = self.by_id(self.checks(year=None))["bottles.clone." + name]
+        self.assertNotIn("rm ", c.fix + c.title + c.detail)   # never a bare delete
+        self.assertNotIn(self.home, c.fix + c.title + c.detail)
+        return c
+
     def test_bottles_and_leftover_copies(self):
         os.makedirs(os.path.join(self.bottles, "exp", "drive_c"))   # not a Revit bottle
         os.symlink(self.b, os.path.join(self.bottles, "rvt2025-t"))
-        c2 = os.path.join(self.bottles, "rvt2025-a.test")
-        self.write(os.path.join(c2, dr.CLONE_MARKER), "run_id=x\nsource=rvt2025-a\nstate=ready\n")
+        self.copy()
         cs = self.checks(year=None)
         ids = self.by_id(cs)
         self.assertEqual(sorted(i for i in ids if i.startswith("bottles.")),
                          ["bottles.clone.rvt2025-a.test", "bottles.rvt2025-a"])
         self.assertEqual(ids["bottles.rvt2025-a"].title, "rvt2025-a: Revit 2025")
-        c = ids["bottles.clone.rvt2025-a.test"]
+        c = self.copy_check()
         self.assertEqual(c.status, "warn")
-        self.assertIn('rm -rf "$HOME/Library/Application Support/CrossOver/Bottles/rvt2025-a.test"', c.fix)
-        self.assertNotIn(self.home, c.fix + c.title)
+        self.assertIn("was left behind", c.title)
+        self.assertEqual(c.fix, "run ./revit test 2025 again: it removes copies left behind")
         self.assertFalse([x for x in cs if x.group in ("bottle", "install", "fixes")])
         shutil_rm(self.bottles)
         self.assertIn("bottles.none", self.by_id(self.checks(year=None)))
+
+    def test_the_copy_of_a_running_test_is_in_use(self):
+        self.copy(state="creating")
+        self.hold_lock("command=./revit test 2025 rvt2025-a\nrun_id=20261017-100000-42\npid=1\n")
+        c = self.copy_check()
+        self.assertEqual((c.status, c.show, c.fix), ("info", True, ""))
+        self.assertIn("in use by ./revit test", c.title)
+
+    def test_an_older_lock_owner_file_names_the_running_test(self):
+        self.copy()
+        self.hold_lock("./revit test 2025 rvt2025-a\n")   # an owner file of an older clone: one line of text
+        self.assertEqual(self.copy_check().status, "info")
+
+    def test_another_task_does_not_make_a_copy_in_use(self):
+        self.copy()
+        self.hold_lock("command=./revit test 2025 rvt2025-a\nrun_id=20261017-110000-7\n")   # a later test's run
+        self.assertEqual(self.copy_check().status, "warn")
+
+    def test_a_copy_where_programs_run_is_in_use(self):
+        c = self.copy()
+        self.runner.ps = "  101 /x/wineserver wineserver\n"
+        self.runner.lsof = "p101\nfcwd\nn%s\n" % c
+        x = self.copy_check()
+        self.assertEqual((x.status, x.fix), ("info", ""))
+        self.assertIn("in use by ./revit test", x.title)
+
+    def test_a_kept_copy(self):
+        self.copy(name="acme.test", source="acme", state="kept")
+        c = self.copy_check("acme.test")
+        self.assertEqual(c.status, "warn")
+        self.assertIn("kept (--keep)", c.title)
+        self.assertEqual(c.fix, 'when you no longer need it: "%s/bin/cxbottle" --bottle "acme.test" --delete --force'
+                         % self.cx)
+
+    def test_a_copy_of_a_bottle_with_its_own_name(self):
+        self.copy(name="acme.test", source="acme")
+        self.assertEqual(self.copy_check("acme.test").fix, "run ./revit test 2025 acme again: it removes copies left "
+                                                           "behind")
+
+    def test_what_is_not_a_copy(self):
+        c = self.copy()
+        m = os.path.join(c, dr.CLONE_MARKER)
+        os.rename(m, m + ".real")
+        os.symlink(m + ".real", m)   # a marker reached through a link is not ours (is_smoke_clone)
+        ids = self.by_id(self.checks(year=None))
+        self.assertNotIn("bottles.clone.rvt2025-a.test", ids)
+        own = os.path.join(self.bottles, "rvt2025-b")
+        self.write(os.path.join(own, dr.CLONE_MARKER), "smoke_clone=1\nsource=rvt2025-a\nstate=ready\n")
+        self.write(os.path.join(own, dr.rd(self.year), "Revit.exe"), pe("25.5.0.57"))
+        c = self.copy_check("rvt2025-b")   # a marker in a bottle not named <bottle>.test: ./revit test leaves it
+        self.assertEqual(c.status, "warn")
+        self.assertIn("revit-macos/smoke-clone", c.fix)
 
 
 def shutil_rm(path):
@@ -846,13 +920,14 @@ class Readers(unittest.TestCase):
 
     def test_lock(self):
         lock = os.path.join(self.d, "lock")
-        self.assertEqual(dr.lock_state(lock), {"busy": False, "owner": ""})
+        self.assertEqual(dr.lock_state(lock), {"busy": False, "owner": "", "run_id": ""})
         with open(lock + ".owner", "w") as f:
             f.write("command=./revit install 2025 rvt2025-a\nrun_id=x\n")
         h = open(lock, "a")
         try:
             fcntl.flock(h, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            self.assertEqual(dr.lock_state(lock), {"busy": True, "owner": "./revit install 2025 rvt2025-a"})
+            self.assertEqual(dr.lock_state(lock),
+                             {"busy": True, "owner": "./revit install 2025 rvt2025-a", "run_id": "x"})
         finally:
             h.close()
         self.assertFalse(dr.lock_state(lock)["busy"])
