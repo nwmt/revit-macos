@@ -976,6 +976,13 @@ check "webview2: the installer's runtime is still installed" called "[C:\\webvie
 check "webview2: the log says why" grep -qF "no fresh WebView2 runtime" "$RUN/webview2.log"
 mkdir -p "$R/installers/redist/webview2"; touch "$R/installers/redist/webview2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
 run_steps 2025 rvt2025-t webview2; expect "webview2 with a fresh runtime" 0 ""
+WVA="$BOTTLES/rvt2025-t/drive_c/Program Files (x86)/Microsoft/EdgeWebView/Application"
+rule "webview2.exe" 13; mkdir -p "$WVA/103.0.1264.37"
+run_steps 2025 rvt2025-t webview2; expect "webview2: exit 13 over only the installer's runtime 103 fails" 1 "webview2"
+mkdir -p "$WVA/155.0.4283.62"   # idmgr fetched a newer runtime: "Higher version of WebView is already installed"
+run_steps 2025 rvt2025-t webview2; expect "webview2: exit 13 over a current runtime is ok" 0 ""
+rm "$R/installers/redist/webview2/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+run_steps 2025 rvt2025-t webview2; expect "webview2: the installer's runtime over a current one is ok" 0 ""
 
 # make-apps: Revit Viewer only when the installer made its shortcut (2027 has none); an old Viewer app goes. osacompile,
 # codesign, PlistBuddy, lsregister and the shortcut reader are stubs, so nothing is registered with macOS
