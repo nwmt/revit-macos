@@ -12,7 +12,7 @@ No virtual machine, no Windows installation.
 | [2024](versions/2024.md) | ✅ Works | 2024.3.6 | First PDF print may produce nothing |
 | [2025](versions/2025.md) | ✅ Works | 2025.5 | First PDF print may produce nothing |
 | [2026](versions/2026.md) | ⚠️ Mostly works | 2026.5 | PDF, Dynamo, exports not tested |
-| [2027](versions/2027.md) | ⚠️ Mostly works | 2027.3 | Saving, PDF, add-ins not tested |
+| [2027](versions/2027.md) | ⚠️ Mostly works | 2027.3 | Online families do not load |
 | 2021, 2022 | Not tested | | |
 
 - **Works:** the everyday basics work: sign-in, open and save, modeling, views and 3D, Materials, printing to PDF,
@@ -78,7 +78,7 @@ Run them in Terminal, in the project folder. In a new Terminal window, first typ
 | `./revit install 2025` | Install Revit 2025 |
 | `./revit check 2025` | Before an install: check what it needs, change nothing |
 | `./revit doctor 2025` | Check an installed Revit, its bottle and this Mac; change nothing |
-| `./revit addins 2025` | Add RevitLookup and pyRevit, with the fixes add-ins need (2020, 2023–2026) |
+| `./revit addins 2025` | Add RevitLookup and pyRevit, with the fixes add-ins need (2020, 2023–2027) |
 | `./revit addins 2025 --only pdfprinter` | Add only the add-ins named (comma-separated), here the **Revit PDF** printer. It needs Ghostscript: `brew install ghostscript` |
 | `./revit addins list 2025` | List the add-ins for Revit 2025 |
 | `./revit stop 2025` | Quit a Revit that hangs |

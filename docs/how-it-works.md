@@ -94,7 +94,7 @@ there and adds the steps they need.
 | Step | What breaks | What we do |
 |---|---|---|
 | `trust` | Revit asks "This signed add-in has been found" on every start: under Wine it cannot save **Always Load** | Trust the add-ins' publishers ahead, as **Always Load** would |
-| `wpfsw` (2023–2026) | Black rectangles across Revit after add-ins load | WPF draws in software; `wpfhw` turns it back |
+| `wpfsw` (2023–2027) | Black rectangles across Revit after add-ins load | WPF draws in software; `wpfhw` turns it back |
 | `enscape` (not by default; 2020) | Pressing Start in Enscape 3.4.4 crashes Revit; once past that, black models, a hang when its window is resized, and keys and mouse that do not move the view | Install Enscape with a `System.ValueTuple` that fits .NET 4.7; `tools/shims/vkshim` as `vulkan-1.dll` in `system32`, loaded by Revit.exe only; Metal argument buffers and synchronous queue submits in MoltenVK, set in the bottle's environment |
 | `enscape` (not by default; 2027) | Enscape 4.18 turns down the Mac GPU, and its license check cannot read the computer ID (no `wminet_utils.dll`); then its menus hang it, Asset Library stays blank, and the Chaos sign-in and Asset Library services do not start | Install Enscape without its UI; `wminet_utils.dll` (for the computer ID) from the .NET 4.8 installer Enscape ships; for `Enscape.RendererHost.exe`: `tools/shims/vkshim` as `vulkan-1.dll`, no `d3d11` (its interface draws in software), `tools/shims/wv2fix` loading `tools/shims/rvtfix` for its browser; the MoltenVK settings as for 2020; the two Chaos services through `tools/shims/svcshim` |
 | `enscape-off` (not by default) | — | Remove the Enscape manifest so Enscape does not load; `enscape-on` restores it |

@@ -45,8 +45,9 @@ For `./revit addins`. It downloads RevitLookup (github.com/lookup-foundation/Rev
 | RevitLookup | 2024 | `RevitLookup-2024.3.4-SingleUser.msi` | `installers/addins/revitlookup/` |
 | RevitLookup | 2025 | `RevitLookup-2025.2.4-SingleUser.msi` | `installers/addins/revitlookup/` |
 | RevitLookup | 2026 | `RevitLookup-2026.1.4-SingleUser.msi` | `installers/addins/revitlookup/` |
+| RevitLookup | 2027 | `RevitLookup-2027.0.4-SingleUser.msi` | `installers/addins/revitlookup/` |
 | pyRevit 4.8.12 | 2020 | `pyRevit_4.8.12.22247_signed.exe` | `installers/addins/pyrevit48/` |
-| pyRevit 7.0.0 | 2023–2026 | `pyRevit_7.0.0.26278_signed.exe` | `installers/addins/pyrevit7/` |
+| pyRevit 7.0.0 | 2023–2027 | `pyRevit_7.0.0.26278_signed.exe` | `installers/addins/pyrevit7/` |
 | Enscape 3.4.4 | 2020 | `Enscape-3.4.4-94564.msi` | `installers/addins/enscape/` |
 | Enscape 4.18 LTS | 2027 | `Enscape-4.18.2.1657-lts.exe` | `installers/addins/enscape/` |
 | System.ValueTuple 4.5.0, for Enscape | 2020 | `system.valuetuple.4.5.0.nupkg` | `installers/redist/nuget/` |
@@ -127,7 +128,7 @@ installers/
 ├── addins/                                                optional
 │   ├── revitlookup/RevitLookup-<year>….msi
 │   ├── pyrevit48/pyRevit_4.8.12.22247_signed.exe          2020
-│   ├── pyrevit7/pyRevit_7.0.0.26278_signed.exe            2023–2026
+│   ├── pyrevit7/pyRevit_7.0.0.26278_signed.exe            2023–2027
 │   └── enscape/
 │       ├── Enscape-3.4.4-94564.msi                        2020
 │       └── Enscape-4.18.2.1657-lts.exe                    2027
