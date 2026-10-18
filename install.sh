@@ -252,7 +252,8 @@ else
   echo "which app should open the link, choose \"Autodesk Sign-In ($BOTTLE)\"."
 fi
 [ ${#ADDIN_STEPS[@]} -eq 0 ] || echo "Optional add-ins (RevitLookup, pyRevit): ./revit addins $YEAR$SFX"
-echo "PDF printer (needs Ghostscript: brew install ghostscript): ./revit addins $YEAR$SFX --only pdfprinter"
+( . "$ROOT/scripts/lib/addins.sh"; addin_load pdfprinter && addin_available ) &&
+  echo "PDF printer (needs Ghostscript: brew install ghostscript): ./revit addins $YEAR$SFX --only pdfprinter"
 echo "Everyday commands: ./revit"
 result_set failed_steps "$(tr '\n' ' ' 2>/dev/null < "$RUN_DIR/failed.txt" | sed 's/ $//')"
 if [ -z "$problems" ]; then result_set result ok; exit 0; fi
