@@ -12,7 +12,7 @@ No virtual machine, no Windows installation.
 | [2024](versions/2024.md) | ✅ Works | 2024.3.6 | First PDF print may produce nothing |
 | [2025](versions/2025.md) | ✅ Works | 2025.5 | First PDF print may produce nothing |
 | [2026](versions/2026.md) | ⚠️ Mostly works | 2026.5 | PDF, Dynamo, exports not tested |
-| [2027](versions/2027.md) | ⚠️ Mostly works | 2027.3 | Online families do not load |
+| [2027](versions/2027.md) | ✅ Works | 2027.3 | Large models draw slowly the first time |
 | 2021, 2022 | Not tested | | |
 
 - **Works:** the everyday basics work: sign-in, open and save, modeling, views and 3D, Materials, printing to PDF,
