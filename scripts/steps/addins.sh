@@ -16,7 +16,7 @@ step_revitlookup() {
   detail "$(basename "$LOOKUP")"
 }
 
-step_pyrevit() { # pyRevit 4.8.12 for 2020 (its IPY277 engine runs on .NET 4.7; 6.5.5 needs 4.7.1+), 7.0 for 2023–2026.
+step_pyrevit() { # pyRevit 4.8.12 for 2020 (its IPY277 engine runs on .NET 4.7; 6.5.5 needs 4.7.1+), 7.0 for 2023–2027.
   # The 4.8 installer runs `attach master 277 --installed` but does not find Revit 2020: PYREVIT_ATTACH attaches it
   local f="$DATA/installers/addins/$PYREVIT" rc pyr='C:\users\crossover\AppData\Roaming\pyRevit-Master\bin\pyrevit.exe'
   [ -n "$PYREVIT" ] || { skip "pyRevit is not set up for Revit $YEAR"; return 0; }

@@ -630,8 +630,10 @@ reset; mkbottle rvt2024-t 2024 2024; printf '#!/bin/bash\nexit 22\n' > "$T/curl"
 STEP_ENV=(PATH="$T:$PATH"); run_steps 2024 rvt2024-t revitlookup
 expect "revitlookup without its installer says where it goes" 1 "revitlookup"
 check "revitlookup: the log names the missing file" grep -q "RevitLookup-2024.3.4-SingleUser.msi" "$RUN/revitlookup.log"
-reset; mkbottle rvt2027-t 2027 2027; run_steps 2027 rvt2027-t revitlookup
-expect "revitlookup: not set up for 2027 is a skip" 0 ""; check "revitlookup: in the summary" grep -qE '^   revitlookup +exit=skip ' "$RUN/summary.txt"
+reset; mkbottle rvt2027-t 2027 2027; printf '#!/bin/bash\nexit 22\n' > "$T/curl"; chmod +x "$T/curl"
+STEP_ENV=(PATH="$T:$PATH"); run_steps 2027 rvt2027-t revitlookup
+expect "revitlookup 2027 without its installer says where it goes" 1 "revitlookup"
+check "revitlookup 2027: the log names its file" grep -q "RevitLookup-2027.0.4-SingleUser.msi" "$RUN/revitlookup.log"
 reset; mkbottle rvt2024-t 2024 2024; run_steps 2024 rvt2024-t enscape
 expect "enscape: not set up for 2024" 1 "enscape"
 

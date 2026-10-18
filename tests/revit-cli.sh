@@ -162,7 +162,6 @@ reset; bottle rvt2024-a 2024 2024; run_install INSTALL_DRYRUN=1 2024
 check "install.sh: default bottle is not named" grep -qx '      fix: pick another name (./revit install 2024 rvt2024-b) or rebuild it: ./revit rebuild 2024' <<<"$OUT"
 
 # ---- addins, stop, logs, debug ----
-reset; run "" addins 2027;           expect "no add-ins for 2027" 1 "The add-in script is not set up for Revit 2027 yet."
 reset; run "" addins 2024;           expect "addins needs the bottle" 1 "There is no bottle rvt2024-a. To install Revit 2024: ./revit install 2024"
 reset; bottle rvt2024-a 2024 2024; run "" addins 2024; expect "addins runs the add-in script" 0 ""
 check "addins passes the year and the bottle" called "run-steps.sh 2024 rvt2024-a revitlookup pyrevit trust wpfsw check |"
@@ -523,7 +522,8 @@ reset; run "" addins list 2025 --json; expect "addins list --json" 0 '"id":"pyre
 check "addins list: valid JSON" eval 'printf "%s" "$OUT" | /usr/bin/perl -MJSON::PP -e "local \$/; JSON::PP->new->decode(<STDIN>)"'
 reset; bottle rvt2024-a 2024 2024; run "" addins 2024 --only pyrevit
 check "--only runs the add-in and its after-steps" called "run-steps.sh 2024 rvt2024-a pyrevit trust wpfsw check |"
-reset; bottle rvt2027-a 2027 2027; run "" addins 2027; expect "2027 without --only still says not set up" 1 "The add-in script is not set up for Revit 2027 yet."
+reset; bottle rvt2027-a 2027 2027; run "" addins 2027; expect "addins 2027 runs RevitLookup and pyRevit" 0 ""
+check "addins 2027: the default list, not Enscape" called "run-steps.sh 2027 rvt2027-a revitlookup pyrevit trust wpfsw check |"
 reset; bottle rvt2027-a 2027 2027; run "" addins 2027 --only enscape --accept-eula enscape
 check "--accept-eula reaches the runner" called "run-steps.sh 2027 rvt2027-a enscape trust check |"
 check "--accept-eula: the runner gets the consent" called "EULA=enscape"
@@ -640,7 +640,7 @@ check "rebuild --dry-run --json: add-ins reset in 2025" jq_ 'exit !($d->{command
   && $d->{addins_reset} && $d->{delete}[0]{label} eq "bottle rvt2025-a" && $d->{delete}[0]{bytes} =~ /^\d+$/ && @{$d->{notes}} == 2)'
 check "rebuild --dry-run --json: nothing ran" eval 'not_called install.sh && [ -d "$BOTTLES/rvt2025-a" ]'
 reset; bottle rvt2027-a 2027 2027; run "" rebuild 2027 --dry-run --json
-check "rebuild --dry-run --json: no add-ins reset in 2027" eval '[ "$RC" = 0 ] && grep -qF "\"addins_reset\":false" <<<"$OUT"'
+check "rebuild --dry-run --json: add-ins reset in 2027" eval '[ "$RC" = 0 ] && grep -qF "\"addins_reset\":true" <<<"$OUT"'
 reset; bottle rvt2025-a 2025 2025; run "" rebuild 2025 --dry-run
 check "rebuild --dry-run: today's lines, then the dry-run line" eval '[ "$RC" = 0 ] && grep -qF "This deletes the bottle rvt2025-a" <<<"$OUT" && [ "$(tail -1 <<<"$OUT")" = "(dry run: nothing changed)" ] && not_called install.sh'
 reset; run "" install 2024 --dry-run; expect "--dry-run on install is refused" 1 "--dry-run is for ./revit remove and rebuild only."

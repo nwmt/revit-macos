@@ -1,4 +1,4 @@
-# Revit 2027: ODIS installer, .NET 10, sign-in in the browser. Add-ins are not set up (./revit addins says so);
+# Revit 2027: ODIS installer, .NET 10, sign-in in the browser.
 # Enscape 4.18 LTS with its fixes: scripts/run-steps.sh 2027 <bottle> enscape trust.
 INSTALLER=odis
 DOTNET=net10
@@ -14,8 +14,9 @@ THEME=1
 RICHEDIT=(msftedit riched20 usp10 msls31)
 RVTFIX_ENV=()
 DYNAMO=""
-ADDIN_STEPS=()
-LOOKUP=""
-PYREVIT=""
+ADDIN_STEPS=(revitlookup pyrevit trust wpfsw check)
+ADDIN_WPF_SW=1                     # add-in windows need software WPF (step wpfsw)
+LOOKUP=revitlookup/RevitLookup-2027.0.4-SingleUser.msi
+PYREVIT=pyrevit7/pyRevit_7.0.0.26278_signed.exe
 PYREVIT_ATTACH=""
 ENSCAPE=4
