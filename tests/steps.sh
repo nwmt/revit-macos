@@ -100,7 +100,7 @@ reset; in_repo 'load_profile 2020; profile_json; load_profile 2027; profile_json
 check "profile_json: one JSON object per profile, with its lists" eval '/usr/bin/perl -MJSON::PP -ne '"'"'my $j = decode_json($_);
   exit 1 unless ref $j->{STEPS} eq "ARRAY" && ref $j->{PKGS} eq "ARRAY" && ref $j->{RICHEDIT} eq "ARRAY"; print "$j->{YEAR} ",
   scalar @{$j->{STEPS}}, " $j->{STEPS}[0] ", scalar @{$j->{PKGS}}, " $j->{DOTNET} [$j->{ENSCAPE}] $j->{RVTFIX_ENV}[0]\n"'"'"' <<<"$OUT" |
-  tr "\n" "|" | grep -qxF "2020 21 netfx 0 netfx47 [3] RVTFIX_CEF_ARGS=|2027 20 vc 30 net10 [4] |"'
+  tr "\n" "|" | grep -qxF "2020 21 netfx 0 netfx47 [3] RVTFIX_CEF_ARGS=|2027 21 vc 30 net10 [4] |"'
 reset; mkdir -p "$T/real"; ln -s "$T/real" "$T/link"; ln -s "$T/nowhere" "$T/dangling"
 in_repo 'for p in "$HOME/not/there/yet" "'"$T"'/link/sub" "'"$T"'/dangling"; do free_gb "$p"; volume_id "$p"; done'
 check "free_gb and volume_id: a number for a path that is not there, a link, a link to nothing" \
@@ -542,6 +542,10 @@ check "warpshim: our version.dll in system32 (it loads rvtfix into the material 
   grep -q "fake wv2fix" "$BOTTLES/rvt2024-t/drive_c/windows/system32/version.dll"
 check "warpshim: native version.dll for AdPreviewGenerator.exe" called "[HKCU\\Software\\Wine\\AppDefaults\\AdPreviewGenerator.exe\\DllOverrides] [/v] [version]"
 check "warpshim: not for the browser (that is wv2fix)" not_called "[HKCU\\Software\\Wine\\AppDefaults\\msedgewebview2.exe\\DllOverrides]"
+reset; mkbottle rvt2027-t 2027 2027; run_steps 2027 rvt2027-t downloads; expect "downloads" 0 "downloads"
+check "downloads: the folder is in the bottle" test -d "$BOTTLES/rvt2027-t/drive_c/users/crossover/AppData/Local/Downloads"
+check "downloads: Windows' Downloads folder points into the bottle" \
+  called "[{374DE290-123F-4565-9164-39C4925E467B}] [/t] [REG_EXPAND_SZ] [/d] [%USERPROFILE%\\AppData\\Local\\Downloads]"
 reset; mkbottle rvt2024-t 2024 2024; run_steps 2024 rvt2024-t pdfprinter
 expect "pdfprinter" 0 "pdfprinter"
 check "pdfprinter: the port path is quoted for /bin/sh (the sandbox path has a space)" called "|'$R/scripts/ps2pdf-port.sh'"

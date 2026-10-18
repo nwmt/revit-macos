@@ -63,6 +63,7 @@ In install order. Normal install steps have "—" in What breaks.
 | `gdoff` | Generative Design error on start | Turn the add-in off | 2023+ |
 | `rvtfix` | Start screen blank or white; 2026+: the browser uses about 60% CPU and the view is slow; crash when opening a view (a Windows function Wine lacks) | Browser draws inside Revit, with flags that make it draw; the missing function answered in memory | 2023+ (2020: for `warpshim`) |
 | `wv2fix` | The built-in browser (WebView2) crashes on clicks and resizes | Own `version.dll` in the browser process | 2024+ |
+| `downloads` | Insert → Load Autodesk Family stops at 100%: the browser saves the family into Downloads first, and macOS does not let it list the Mac's `~/Downloads` | Windows' Downloads folder moves into the bottle; the Mac's folder is not touched | 2027 |
 | `pdfprinter` (an add-in: `./revit addins <year> --only pdfprinter`) | No printer, so Print and Page Setup do not open | **Revit PDF** printer: PostScript → Ghostscript → PDF in `~/Documents/Revit-PDF` | 2020, 2023–2025 (2026: not tested) |
 | `dynamo` | Dynamo's 3D preview draws black squares, lags or crashes | Dynamo without hardware acceleration and background preview | 2020, 2023–2025 |
 | `urlhandler` | macOS does not know the link that returns from the browser to Revit: "Opening product" and nothing happens | The **Autodesk Sign-In** app passes the link into the bottle | 2024+ |

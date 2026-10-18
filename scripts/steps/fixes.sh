@@ -1,5 +1,5 @@
 # Install steps: our fixes for Wine inside Revit — shims, Microsoft's RichEdit, DXVK for Direct3D 9, the WebView2
-# browser, the PDF printer. Nothing changes an Autodesk file on disk. Sourced by scripts/run-steps.sh.
+# browser, the Downloads folder, the PDF printer. Nothing changes an Autodesk file on disk. Sourced by scripts/run-steps.sh.
 
 step_ncryptshim() { # Wine's ncrypt cannot import a private ECDSA P-256 key (ECCPRIVATEBLOB) → assert in
   # PersistenceDB\DataIntegrity.cpp:52 and "unrecoverable error" at startup. Our ncrypt.dll (tools/shims/ncryptshim), for
@@ -92,6 +92,17 @@ step_wv2fix() { # the WebView2 browser inside Revit crashes ("holding USER lock"
   # tools/shims/wv2fix skips that change and flushes the window first. The browser loads system DLLs only from system32
   wv2fix_install msedgewebview2.exe || return 1
   detail "version.dll (+ version_orig.dll) → system32; AppDefaults msedgewebview2.exe version=native,builtin"
+}
+
+step_downloads() { # Load Autodesk Family stays at 100%: the WebView2 browser saves the family into Downloads first, then
+  # moves it where Revit asked. In the bottle Downloads is CrossOver's link to the Mac's ~/Downloads, which macOS privacy
+  # protection does not let Wine list: the browser cannot find its own file, drops the download, and the family never
+  # loads. Windows' Downloads folder (FOLDERID_Downloads) → a folder inside the bottle; the link itself stays
+  local k='HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer' id='{374DE290-123F-4565-9164-39C4925E467B}'
+  mkdir -p "$B/drive_c/users/crossover/AppData/Local/Downloads" || return 1
+  w reg add "$k\\User Shell Folders" /v "$id" /t REG_EXPAND_SZ /d '%USERPROFILE%\AppData\Local\Downloads' /f || return 1
+  w reg add "$k\\Shell Folders" /v "$id" /t REG_SZ /d 'C:\users\crossover\AppData\Local\Downloads' /f || return 1
+  detail "Downloads (Windows) → C:\\users\\crossover\\AppData\\Local\\Downloads"
 }
 
 pdf_port_script() { # the printer port runs this path for every print job; it is stored in the bottle, so it must not

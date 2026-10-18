@@ -175,6 +175,7 @@ FIXES = {
                    lambda p, y: [VERSION_DLL, VERSION_ORIG,
                                  ("absent", "webview2", f"{WV2}/*/version*.dll", "old-version.dll",
                                   "an older variant of this fix sits next to the browser")]),
+    "downloads": _fix("Insert → Load Autodesk Family stops at 100%"),
     "pdfprinter": _fix("without a printer, Print and Page Setup do not open",
                        lambda p, y: [("shim", "pdfprinter", "rvt-pdf", "drive_c/rvt-pdf/add_printer.exe"),
                                      ("present", "spool", f"{S32}/spool/drivers/x64/3/revitpdf.ppd")]),
