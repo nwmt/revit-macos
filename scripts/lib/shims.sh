@@ -5,7 +5,7 @@ SHIMS_SHA256=e8053f0e93a9a8767e0e324c58d334c0ddf296b49ce08a5eb5393b364b554b09
 SHIMS_REPO="${SHIMS_REPO:-nwmt/revit-macos}"
 # every shim: its sources in tools/shims/<name>/, its file in build/<name>/ (how to build each: scripts/build-shims.sh).
 # The steps, CI and the release take this list
-SHIMS=(d3dwp mcppipes ncryptshim pdfprinter rvtfix svcshim tlbpin vkshim wbemshim wv2fix)
+SHIMS=(d3dwp mcphost mcppipes ncryptshim pdfprinter rvtfix svcshim tlbpin vkshim wbemshim wv2fix)
 # what ends up in the files: if any differs from the pinned tag, the release no longer matches them. Not this file:
 # its pin changes after every release
 SHIMS_SOURCES=(tools/shims scripts/build-shims.sh)
