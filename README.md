@@ -8,7 +8,7 @@ No virtual machine, no Windows installation.
 | Revit | Status | Tested on | Main gaps |
 |---|---|---|---|
 | [2020](versions/2020.md) | ✅ Works | 2020.2 | Dynamo without 3D preview |
-| [2021](versions/2021.md) | ✅ Works | 2021.0 | 2021.1 update not applied; Dynamo without 3D preview |
+| [2021](versions/2021.md) | ✅ Works | 2021.1.2 | 2021.1.10 update not applied; Dynamo without 3D preview |
 | [2023](versions/2023.md) | ✅ Works | 2023.0 | Dynamo node list empty |
 | [2024](versions/2024.md) | ✅ Works | 2024.3.6 | First PDF print may produce nothing |
 | [2025](versions/2025.md) | ✅ Works | 2025.5 | First PDF print may produce nothing |
