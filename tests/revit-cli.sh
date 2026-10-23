@@ -62,7 +62,8 @@ reset() { # a fresh sandbox for each test
     || { echo "sandbox setup failed"; exit 1; }
   cp "$REPO/revit" "$R/"; cp -R "$REPO/tools" "$R/"; cp "$REPO/scripts/lib/common.sh" "$REPO/scripts/lib/versions.sh" "$R/scripts/lib/"
   mkdir -p "$R/scripts/profiles"; cp "$REPO"/scripts/profiles/*.sh "$R/scripts/profiles/"
-  cp "$REPO/scripts/lib/addins.sh" "$R/scripts/lib/" 2>/dev/null; cp -R "$REPO/scripts/addins" "$REPO/scripts/steps" "$R/scripts/" 2>/dev/null
+  cp "$REPO/scripts/lib/addins.sh" "$REPO/scripts/lib/mcp.sh" "$R/scripts/lib/" 2>/dev/null
+  [ ! -f "$REPO/scripts/mcp-launch.sh" ] || cp "$REPO/scripts/mcp-launch.sh" "$R/scripts/"; cp -R "$REPO/scripts/addins" "$REPO/scripts/steps" "$R/scripts/" 2>/dev/null
   stub "$R/install.sh"; stub "$R/scripts/run-steps.sh"; stub "$R/scripts/launch.sh"; stub "$R/scripts/smoke.sh"
   cat > "$CXF/bin/wineserver" <<EOF
 #!/bin/bash
@@ -100,6 +101,12 @@ fake_revit() { # $1 = bottle, $2 = year: a process that looks like Revit.exe and
   touch "$BOTTLES/$1/drive_c/open.tmp"
   perl -e 'open(my $f, "<", $ARGV[0]) or die; sleep 60' "$BOTTLES/$1/drive_c/open.tmp" \
     "C:\\Program Files\\Autodesk\\Revit $2\\Revit.exe" &
+  PIDS="$PIDS $!"; sleep 1
+}
+fake_mcphost() { # $1 = bottle: a process that looks like our MCP launcher (mcphost.exe) and holds a file open there
+  touch "$BOTTLES/$1/drive_c/mcp.tmp"
+  perl -e 'open(my $f, "<", $ARGV[0]) or die; sleep 60' "$BOTTLES/$1/drive_c/mcp.tmp" \
+    "C:\\Program Files\\Autodesk\\Revit 2027 MCP Server Write-Tools Technical Preview\\mcphost.exe" --launch t &
   PIDS="$PIDS $!"; sleep 1
 }
 fake_lock() { # $1 = owner text: a process that holds the repo's lock as a running script would
@@ -169,6 +176,18 @@ check "addins logs as addins" grep -q "RUN_KIND=addins" "$CALLS"
 reset; bottle rvt2024-a 2024 2024; fake_revit rvt2024-a 2024; run "" addins 2024
 expect "addins refuses while Revit runs" 1 "Revit 2024 is running in rvt2024-a."
 check "running: no add-ins installed" not_called "run-steps.sh"
+reset; bottle rvt2024-a 2024 2024; fake_mcphost rvt2024-a; run "" addins 2024
+expect "addins refuses while an AI assistant uses Revit through MCP" 1 "An AI assistant is using Revit 2024 in rvt2024-a through MCP. Close it, or run ./revit stop 2024, then try again."
+check "MCP running: no add-ins installed" not_called "run-steps.sh"
+reset; bottle rvt2024-a 2024 2024; bottle rvt2024-b 2024 2024; fake_mcphost rvt2024-b; run "" addins 2024
+expect "an MCP launcher in another bottle does not block this one" 0 ""
+for c in "2024|rebuild 2024|install.sh" "2024|remove 2024|cxbottle" "|test 2024|smoke.sh"; do
+  reset; bottle rvt2024-a 2024 2024; fake_mcphost rvt2024-a; run "${c%%|*}" $(cut -d'|' -f2 <<<"$c")
+  expect "$(cut -d'|' -f2 <<<"$c"): refused while MCP runs" 1 "through MCP. Close it, or run ./revit stop 2024"
+  check "$(cut -d'|' -f2 <<<"$c"): nothing done while MCP runs" not_called "${c##*|}"
+done
+reset; bottle rvt2024-a 2024 2024; fake_mcphost rvt2024-a; run "" stop 2024; expect "stop works while MCP runs" 0 "Stopped"
+check "stop with MCP: the bottle's wineserver is killed" called "wineserver -k | REVIT_YEAR= INSTALL_DRYRUN= CX_RECREATE= WINEPREFIX=$BOTTLES/rvt2024-a"
 reset; bottle rvt2025-a 2025 2025; run "" stop 2024 rvt2025-a
 expect "stop refuses a bottle of another year" 1 "Bottle rvt2025-a is for Revit 2025, not 2024."
 check "wrong year: nothing stopped" not_called "wineserver"
@@ -558,6 +577,15 @@ cx_app() { # $1 = CFBundleShortVersionString: the fake CrossOver inside a CrossO
   local c="$T/CrossOver.app/Contents"; mkdir -p "$c/SharedSupport"; rm -rf "$c/SharedSupport/CrossOver"; cp -R "$CXF" "$c/SharedSupport/CrossOver"
   printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>%s</string></dict></plist>\n' "$1" > "$c/Info.plist"
 }
+reset; bottle rvt2027-a 2027 2027; D="$BOTTLES/rvt2027-a/drive_c/Program Files/Autodesk/Revit 2027 MCP Server Write-Tools Technical Preview"
+mkdir -p "$D" "$BOTTLES/rvt2027-a/drive_c/Program Files/Autodesk/Revit/Addins/2027" "$BOTTLES/rvt2027-a/drive_c/ProgramData/revit-macos"
+touch "$D/Autodesk.RevitMcpServer.Stdio.exe" "$D/mcphost.exe" "$D/mcppipes.dll"; echo 6.3.44.3 > "$BOTTLES/rvt2027-a/drive_c/ProgramData/revit-macos/adp"
+printf '<RevitAddIns><AddIn><Assembly>C:\\Program Files\\Autodesk\\Revit 2027 MCP Server Write-Tools Technical Preview\\Autodesk.RevitMcpServer.Addin.dll</Assembly></AddIn></RevitAddIns>\n' \
+  > "$BOTTLES/rvt2027-a/drive_c/Program Files/Autodesk/Revit/Addins/2027/Autodesk.RevitMcpServer.addin"
+for a in "status --json" "addins list 2027 --json"; do
+  run_data "$T/data" $a; expect "$a with an MCP install, data outside the repo" 0 ""
+done
+fake_wine; run_data "$T/data" doctor 2027; check "doctor with an MCP install, data outside the repo: it runs" eval 'grep -q "rvt2027-a" <<<"$OUT"'
 reset; run "" status --json; check "status --json: msls31 false, then true once the file is there (1)" grep -qE '"rosetta":(true|false),"msls31":false,' <<<"$OUT"
 mkdir -p "$R/installers/redist/win7sp1/x64"; touch "$R/installers/redist/win7sp1/x64/msls31.dll"; run "" status --json
 check "status --json: msls31 false, then true once the file is there (2)" grep -qF '"msls31":true,' <<<"$OUT"

@@ -232,6 +232,15 @@ revit_running() { # $1 = bottle path, $2 = year: a Revit.exe of that year with f
   done
   return 1
 }
+mcp_running() { # $1 = bottle path: our MCP launcher (mcphost.exe, scripts/mcp-launch.sh) with files open in that
+  # bottle; the CrossOver loader that has mcphost.exe in its arguments counts too. Output through variables, as above
+  local p rb out; rb="$(cd "$1" 2>/dev/null && pwd -P)" || return 1
+  for p in $(pgrep -f 'mcphost\.exe' 2>/dev/null); do
+    out="$(lsof -p "$p" -Fn 2>/dev/null)"
+    grep -qF "n$rb/" <<<"$out" && return 0
+  done
+  return 1
+}
 bottle_guard() { # $1 = must_exist | running_ok (like must_exist, Revit may run: ./revit stop) | allow_missing
   # (creating, removing leftovers), $2 = year, $3 = bottle. Dies with the reason. A wrong year/bottle pair would
   # rebuild or delete another Revit; CrossOver follows a link to the real bottle, so checks and actions could differ
@@ -248,6 +257,8 @@ bottle_guard() { # $1 = must_exist | running_ok (like must_exist, Revit may run:
   [ "$ys" = "$year" ] || die "Bottle $name is for Revit $ys, not $year. Check the year and the bottle name."
   [ "$mode" = running_ok ] || ! revit_running "$b" "$year" \
     || die "Revit $year is running in $name. Save your work and quit Revit, then try again. If it hangs: ./revit stop $year$sfx"
+  [ "$mode" = running_ok ] || ! mcp_running "$b" \
+    || die "An AI assistant is using Revit $year in $name through MCP. Close it, or run ./revit stop $year$sfx, then try again."
 }
 
 # ---- the temporary copies of ./revit test (scripts/smoke.sh) and what runs in a bottle ----

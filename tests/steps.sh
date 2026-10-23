@@ -672,6 +672,54 @@ reset; in_repo '. "$ROOT/scripts/lib/addins.sh"; for y in "${REVIT_SUPPORTED[@]}
     addin_load pyrevit; [ -z "$PYREVIT" ] || addin_files "$y" | cut -f2 | grep -qx "$PYREVIT" || echo "pyrevit $y"; done; echo checked'
 expect "the catalog names the files the profiles name" 0 "checked"; check "catalog = profiles" test "$OUT" = checked
 
+# ---- the Revit MCP Server: ready for ./revit mcp (files only) ----
+mcp_bottle() { # $1 = bottle, $2 = variant folder: a 2027 bottle with that MCP Server variant installed and ready
+  local b="$BOTTLES/$1" d="$BOTTLES/$1/drive_c/Program Files/Autodesk/$2" s
+  mkbottle "$1" 2027 2027; mkdir -p "$d" "$b/drive_c/Program Files/Autodesk/Revit/Addins/2027" "$b/drive_c/ProgramData/revit-macos" \
+    "$b/drive_c/Program Files/Common Files/Autodesk/AdpDesktopSDK/bin"
+  for s in mcphost/mcphost.exe mcppipes/mcppipes.dll; do
+    [ -f "$R/build/$s" ] || { mkdir -p "$R/build/$(dirname "$s")"; echo "fake $s" > "$R/build/$s"; }
+    cp "$R/build/$s" "$d/"
+  done
+  touch "$d/Autodesk.RevitMcpServer.Stdio.exe" "$b/drive_c/Program Files/Common Files/Autodesk/AdpDesktopSDK/bin/AdpSDKCore.dll"
+  printf '<?xml version="1.0" encoding="utf-8"?>\r\n<RevitAddIns>\r\n\t<AddIn Type="Application">\r\n\t\t<Assembly>C:\\Program Files\\Autodesk\\%s\\Autodesk.RevitMcpServer.Addin.dll</Assembly>\r\n\t</AddIn>\r\n</RevitAddIns>\r\n' \
+    "$2" > "$b/drive_c/Program Files/Autodesk/Revit/Addins/2027/Autodesk.RevitMcpServer.addin"
+  echo 6.3.44.3 > "$b/drive_c/ProgramData/revit-macos/adp"
+}
+MCPW="Revit 2027 MCP Server Write-Tools Technical Preview"; MCPE="Revit 2027 MCP Server Experimental-Tools Technical Preview"
+mcp_state() { # bash code that changes bottle rvt2027-t first; prints "<variant>|<missing>" for both variants
+  in_repo '. "$ROOT/scripts/lib/addins.sh"; load_profile 2027; B="$BOTTLES/rvt2027-t"; D="$(mcp_folder revitmcp)"; '"$1"'
+    echo "$(mcp_installed_variant)|$(mcp_missing revitmcp)|$(mcp_missing revitmcp-experimental)"; mcp_ready revitmcp && echo ready'
+}
+reset; mcp_bottle rvt2027-t "$MCPW"; mcp_state ''
+check "mcp: a complete Write-Tools install is ready" test "$OUT" = "revitmcp||the MCP Server files
+ready"
+reset; mcp_bottle rvt2027-t "$MCPE"; mcp_state ''
+check "mcp: a complete Experimental install is ready as that variant" grep -qx "revitmcp-experimental|the MCP Server files|" <<<"$OUT"
+for c in 'rm "$D/Autodesk.RevitMcpServer.Stdio.exe"|the MCP Server files' \
+  'rm "$(mcp_manifest)"|the MCP add-in manifest' \
+  'sed -i "" "s/Write-Tools/Experimental-Tools/" "$(mcp_manifest)"|an add-in manifest for this variant' \
+  'rm "$D/mcphost.exe"|mcphost.exe' 'rm "$D/mcppipes.dll"|mcppipes.dll' \
+  'echo other >> "$D/mcphost.exe"|the current mcphost.exe' 'echo other >> "$D/mcppipes.dll"|the current mcppipes.dll' \
+  'rm "$(mcp_adp_marker)"|Autodesk analytics (ADP)' ': > "$(mcp_adp_marker)"|Autodesk analytics (ADP)' \
+  'rm "$(mcp_adp_core)"|Autodesk analytics (ADP)'; do
+  i=$((${i:-0} + 1)); reset; mcp_bottle rvt2027-t "$MCPW"; mcp_state "${c%|*}"
+  check "mcp: not ready without ${c#*|} (case $i)" eval 'grep -q "|${c#*|}|" <<<"$OUT" && ! grep -qx ready <<<"$OUT"'
+  mcp_bottle rvt2027-t "$MCPW"; mcp_state ''
+  check "mcp: ready again once ${c#*|} is back (case $i)" grep -qx ready <<<"$OUT"
+done
+reset; mkbottle rvt2027-t 2027 2027; mcp_state 'echo "$(mcp_adp_version)|$?"'
+check "mcp: no installer, no ADP version, nothing ready" test "$OUT" = "|1
+|the MCP Server files|the MCP Server files"
+reset; mkdir -p "$R/installers/extracted/revit2027/x64/AdpSdk"
+printf '<Package>\n  <Identity>\n    <BuildNumber>6.3.44.3</BuildNumber>\n  </Identity>\n</Package>\n' > "$R/installers/extracted/revit2027/x64/AdpSdk/pkg.adp-desktop-sdk.xml"
+mkbottle rvt2027-t 2027 2027; mcp_state 'mcp_adp_version'
+check "mcp: the ADP version from the unpacked installer" grep -qx "6.3.44.3" <<<"$OUT"
+reset; mcp_bottle rvt2027-t "$MCPW"; mcp_state 'unset DIST; mcp_field revitmcp 5; mcp_field revitmcp-experimental 3; mcp_field nosuch 2 || echo none'
+check "mcp: the table's ProductCode, MSI path and an unknown id" grep -qF "{A2B3C4D5-2701-0010-4804-C5384500AB01}
+x64/RMCE/RMCE.msi
+none" <<<"$OUT"
+
 # ---- scripts around the install ----
 reset; cat > "$CXF/bin/cxbottle" <<EOF
 #!/bin/bash
