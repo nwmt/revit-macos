@@ -45,7 +45,7 @@ import bottleread  # noqa: E402
 import runlog  # noqa: E402
 import signatures  # noqa: E402
 
-GROUPS = ("host", "crossover", "bottles", "bottle", "install", "fixes", "addins", "logs")
+GROUPS = ("host", "crossover", "bottles", "bottle", "install", "fixes", "addins", "mcp", "logs")
 S32 = "drive_c/windows/system32"
 AL = "drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing"
 WV2 = "drive_c/Program Files (x86)/Microsoft/EdgeWebView/Application"
@@ -192,7 +192,8 @@ FIXES = {
     "enscape-off": _fix("Enscape does not load", why="it only moves Enscape's manifest"),
     "enscape-on": _fix("Enscape loads again", why="it only moves Enscape's manifest"),
     "revitmcp": _fix("an AI assistant does not reach Revit (docs/mcp.md)", why="the mcp group checks its files"),
-    "revitmcp_experimental": _fix("an AI assistant does not reach Revit (docs/mcp.md)", why="the mcp group checks its files"),
+    "revitmcp_experimental": _fix("an AI assistant does not reach Revit (docs/mcp.md)",
+                                  why="the mcp group checks its files"),
 }
 
 
@@ -777,6 +778,44 @@ def collect_logs(ctx, bottle_dir, records):
     return out
 
 
+# Autodesk's Revit MCP Server (scripts/lib/mcp.sh holds the same table): id, folder under Program Files\Autodesk, label
+MCP_VARIANTS = (("revitmcp", "Revit {y} MCP Server Write-Tools Technical Preview", "Write-Tools"),
+                ("revitmcp-experimental", "Revit {y} MCP Server Experimental-Tools Technical Preview",
+                 "Experimental-Tools"))
+MCP_MANIFEST = "drive_c/Program Files/Autodesk/Revit/Addins/{y}/Autodesk.RevitMcpServer.addin"
+MCP_ADP_MARKER = "drive_c/ProgramData/revit-macos/adp"
+MCP_ADP_CORE = "drive_c/Program Files/Common Files/Autodesk/AdpDesktopSDK/bin/AdpSDKCore.dll"
+MCP_EXPIRES = "2028-05-01"   # the Technical Preview stops working then
+
+
+def collect_mcp(ctx, p):
+    """The MCP Server's files in bottle p: the manifest's variant (None: no manifest; "": one we do not know), each
+    variant folder that exists, our launcher next to it against this project's shims, the ADP marker and DLL."""
+    y, j = ctx.year, os.path.join
+    m = {"manifest": None, "folders": {}, "today": time.strftime("%Y-%m-%d"),
+         "shims": {s: shim_info(ctx, s) for s in ("mcphost", "mcppipes")}}
+    try:
+        with open(j(p, MCP_MANIFEST.format(y=y)), encoding="utf-8-sig", errors="replace") as fh:
+            a = re.search(r"<Assembly>(.*)\\[^\\]*</Assembly>", fh.read())
+        m["manifest"] = next((i for i, d, _ in MCP_VARIANTS if a and a.group(1).strip() ==
+                              "C:\\Program Files\\Autodesk\\" + d.format(y=y)), "")
+    except OSError:
+        pass
+    for i, d, _ in MCP_VARIANTS:
+        fd = j(p, "drive_c/Program Files/Autodesk", d.format(y=y))
+        if os.path.isdir(fd):
+            m["folders"][i] = {"stdio": os.path.isfile(j(fd, "Autodesk.RevitMcpServer.Stdio.exe")),
+                               "mcphost": file_info(j(fd, "mcphost.exe"))["sha256"],
+                               "mcppipes": file_info(j(fd, "mcppipes.dll"))["sha256"]}
+    try:
+        with open(j(p, MCP_ADP_MARKER), encoding="utf-8", errors="replace") as fh:
+            m["adp_marker"] = fh.read().strip()
+    except OSError:
+        m["adp_marker"] = None
+    m["adp_core"] = os.path.isfile(j(p, MCP_ADP_CORE))
+    return m
+
+
 def collect_bottle(ctx):
     y, p = ctx.year, os.path.join(ctx.bottles, ctx.bottle)
     b = {"link": os.path.islink(p)}
@@ -821,6 +860,7 @@ def collect_bottle(ctx):
         netfx["release"] = rel[1] if rel and rel[0] == "dword" else None
     b["netfx"] = netfx
     b["logs"] = collect_logs(ctx, p, b["records"])
+    b["mcp"] = collect_mcp(ctx, p)
     return b
 
 
@@ -1281,6 +1321,48 @@ def addin_checks(f):
     return out
 
 
+def mcp_checks(f, b):
+    """The Revit MCP Server, when its manifest or a variant folder is there: what ./revit mcp needs, from files only
+    (whether the add-in opened its connection shows only while Revit runs: mcphost says so then)."""
+    m, y, sfx = b.get("mcp") or {}, f["year"], f["sfx"]
+    folders, man = m.get("folders") or {}, m.get("manifest")
+    if man is None and not folders:
+        return []
+    ids = [i for i, _, _ in MCP_VARIANTS]
+    vid = man if man in ids else next((i for i in ids if i in folders), "revitmcp")
+    label = next(lb for i, _, lb in MCP_VARIANTS if i == vid)
+    fix, out = f"./revit addins {y}{sfx} --only {vid} --accept-eula {vid}", []
+    if man is None:
+        out.append(Check("mcp.manifest", "fail", "the Revit MCP add-in has no manifest: Revit does not load it",
+                         fix=fix))
+    elif man == "":
+        out.append(Check("mcp.manifest", "fail", "the Revit MCP add-in manifest points at a folder this project does "
+                         "not know", fix=rebuild(f)))
+    fo = folders.get(vid)
+    if not fo or not fo["stdio"]:
+        out.append(Check("mcp.files", "fail", f"the Revit MCP Server ({label}) files are missing", fix=fix))
+    for s, exe in (("mcphost", "mcphost.exe"), ("mcppipes", "mcppipes.dll")):
+        cur = (m.get("shims") or {}).get(s) or {}
+        if fo and fo.get(s) is None:
+            out.append(Check(f"mcp.{s}", "fail",
+                             f"{exe} is missing next to the MCP Server: ./revit mcp cannot start it", fix=fix))
+        elif fo and cur.get("sha256") and not cur.get("stale") and fo.get(s) != cur["sha256"]:
+            out.append(Check(f"mcp.{s}", "fail", f"{exe} next to the MCP Server is not this project's current one",
+                             fix=fix))
+    if len(folders) > 1:
+        out.append(Check("mcp.variants", "warn", "both variants of the Revit MCP Server have folders here; only one "
+                         "can be used", fix=rebuild(f)))
+    if not m.get("adp_marker") or not m.get("adp_core"):
+        out.append(Check("mcp.adp", "fail", "Autodesk analytics (ADP), which the MCP add-in requires, is not installed "
+                         "completely", fix=fix))
+    if (m.get("today") or "") >= MCP_EXPIRES:
+        out.append(Check("mcp.expired", "warn", "the Revit MCP Server Technical Preview stopped working in May 2028",
+                         fix="get a newer one from your Autodesk account (docs/mcp.md)"))
+    if not out:
+        out.append(Check("mcp.ready", "ok", f"the Revit MCP Server ({label}) is ready: ./revit mcp {y}{sfx}"))
+    return out
+
+
 def day(t, now=None):
     """2 Oct, or 2 Oct 2025 in another year."""
     d, n = time.localtime(t), time.localtime(now)
@@ -1405,7 +1487,7 @@ def bottle_checks(f):
     out += app_checks(f, b)
     out += install_checks(f, b) + since_install(f, b)
     if b.get("revit_exe"):
-        out += fixes_checks(f, b) + addin_checks(f)
+        out += fixes_checks(f, b) + addin_checks(f) + mcp_checks(f, b)
     return out + logs_checks(f, b)
 
 

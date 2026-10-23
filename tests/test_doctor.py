@@ -475,6 +475,106 @@ class Bottle(Sandbox):
         self.assertEqual(self.by_id(dr.run_checks(self.facts))["addins.pdfprinter.gs"].status, "warn")
 
 
+class Mcp(Sandbox):
+    """The Revit MCP Server's files (doctor's mcp group); the sandbox year stands in for 2027."""
+
+    def setUp(self):
+        super().setUp()
+        for s, n in (("mcphost", "mcphost.exe"), ("mcppipes", "mcppipes.dll")):
+            self.write(os.path.join(self.root, "build", s, n), "fake " + s)
+
+    def folder(self, i="revitmcp"):
+        d = next(d for v, d, _ in dr.MCP_VARIANTS if v == i).format(y=self.year)
+        return os.path.join(self.b, "drive_c/Program Files/Autodesk", d)
+
+    def install(self, i="revitmcp", manifest=True):
+        j, d = os.path.join, self.folder(i)
+        self.write(j(d, "Autodesk.RevitMcpServer.Stdio.exe"), "x")
+        self.write(j(d, "mcphost.exe"), self.shim("mcphost"))
+        self.write(j(d, "mcppipes.dll"), self.shim("mcppipes"))
+        if manifest:
+            self.write(j(self.b, dr.MCP_MANIFEST.format(y=self.year)),
+                       '\ufeff<RevitAddIns><AddIn><Assembly>C:\\Program Files\\Autodesk\\%s\\Autodesk.RevitMcpServer.Addin.dll'
+                       '</Assembly></AddIn></RevitAddIns>\r\n' % os.path.basename(d))
+        self.write(j(self.b, dr.MCP_ADP_MARKER), "6.3.44.3\n")
+        self.write(j(self.b, dr.MCP_ADP_CORE), "x")
+
+    def mcp(self, cs):
+        return {c.id: c for c in cs if c.group == "mcp"}
+
+    def test_no_evidence_no_mcp_checks(self):
+        self.assertEqual(self.mcp(self.checks()), {})
+
+    def test_a_complete_install_is_ready_and_claims_nothing_about_the_pipe(self):
+        self.install()
+        self.runner.ps = "  492 /x/wine C:\\Program Files\\Autodesk\\Revit %d\\Revit.exe\n" % self.year
+        cs = self.mcp(self.checks())
+        self.assertEqual(list(cs), ["mcp.ready"])
+        self.assertEqual(cs["mcp.ready"].title, "the Revit MCP Server (Write-Tools) is ready: ./revit mcp %d" % self.year)
+        self.assertEqual(self.problems(self.checks(), "mcp"), [])
+
+    def test_each_missing_piece_is_its_line(self):
+        j = os.path.join
+        cases = [("Autodesk.RevitMcpServer.Stdio.exe", "mcp.files"), ("mcphost.exe", "mcp.mcphost"),
+                 ("mcppipes.dll", "mcp.mcppipes")]
+        for name, cid in cases:
+            self.install()
+            os.remove(j(self.folder(), name))
+            cs = self.mcp(self.checks())
+            self.assertEqual(cs[cid].status, "fail", name)
+            self.assertNotIn("mcp.ready", cs)
+            self.assertEqual(cs[cid].fix, "./revit addins %d --only revitmcp --accept-eula revitmcp" % self.year)
+        self.install()
+        self.write(j(self.folder(), "mcphost.exe"), "an older launcher")
+        self.assertIn("not this project's current one", self.mcp(self.checks())["mcp.mcphost"].title)
+        for path in (dr.MCP_ADP_MARKER, dr.MCP_ADP_CORE):
+            self.install()
+            os.remove(j(self.b, path))
+            self.assertEqual(self.mcp(self.checks())["mcp.adp"].status, "fail", path)
+        self.install()
+        self.write(j(self.b, dr.MCP_ADP_MARKER), "")
+        self.assertEqual(self.mcp(self.checks())["mcp.adp"].status, "fail")
+
+    def test_a_folder_without_its_manifest(self):
+        self.install(manifest=False)
+        cs = self.mcp(self.checks())
+        self.assertEqual(cs["mcp.manifest"].status, "fail")
+        self.assertIn("no manifest", cs["mcp.manifest"].title)
+
+    def test_the_experimental_variant_and_both_folders(self):
+        self.install("revitmcp-experimental")
+        cs = self.mcp(self.checks())
+        self.assertIn("(Experimental-Tools) is ready", cs["mcp.ready"].title)
+        self.install("revitmcp", manifest=False)
+        cs = self.mcp(self.checks())
+        self.assertEqual(cs["mcp.variants"].status, "warn")
+        self.assertNotIn("mcp.files", cs)
+
+    def test_after_the_preview_expired(self):
+        self.install()
+        self.checks()
+        self.facts["b"]["mcp"]["today"] = "2028-05-01"
+        self.assertEqual(self.mcp(dr.run_checks(self.facts))["mcp.expired"].status, "warn")
+        self.facts["b"]["mcp"]["today"] = "2028-04-30"
+        self.assertNotIn("mcp.expired", self.mcp(dr.run_checks(self.facts)))
+
+    def test_a_non_default_bottle_names_itself_in_the_fix(self):
+        self.install()
+        os.remove(os.path.join(self.folder(), "mcphost.exe"))
+        self.checks()
+        self.facts["sfx"] = " rvt%d-x" % self.year
+        cs = self.mcp(dr.run_checks(self.facts))
+        self.assertEqual(cs["mcp.mcphost"].fix, "./revit addins %d rvt%d-x --only revitmcp --accept-eula revitmcp"
+                         % (self.year, self.year))
+
+    def test_no_wine_and_nothing_written(self):
+        self.install()
+        before = self.snapshot()
+        self.checks()
+        self.assertEqual(self.snapshot(), before)
+        self.assertFalse(glob.glob(os.path.join(self.d, "ran-*")))
+
+
 CRASH = "wine: Unhandled page fault on read access to 0 at address 1 (thread 0040), starting debugger..."
 HEALTHY = ["1.0:0030:0040:warn:seh:dispatch_exception code=c0000005 flags=0 addr=0000000140001000",
            "1.1:0030:0040:err:ole:ensure_mta Failed, hr 0x800401f0", "1.2:0030:0040:fixme:win:shm_surface_set_clip"]
