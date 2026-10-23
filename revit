@@ -5,6 +5,7 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"; . "$ROOT/scripts/lib/common.sh"
 YES=0; JSON=0; ALL=0; EVENTS_DIR=""; ONLY=""; EULA=""; REUSE_X=0; REEXTRACT=0; FLAG_ERR=""; SIG_GOT=""; END_DONE=0
+WRITE=0   # ./revit mcp: --write
 DRY=0; LOG=0; KEEP=0   # --dry-run: remove and rebuild only. ./revit test: --log, and --keep (the maintainer's, not in the help)
 RUN_ARG=""; EXCL=()   # ./revit report: --run <log_dir>, --exclude <file> (again for more files)
 RESULT_HINT=usage   # what an exit before the child means: usage until the arguments check out (Task 5 reads it)
@@ -63,6 +64,7 @@ Usage: ./revit <command> <year> [bottle]
   stop      quit a Revit that hangs
   logs      list the newest logs
   debug     start Revit and record a log
+  mcp       connect an AI assistant to a running Revit (docs/mcp.md)
   rebuild   delete the bottle and install Revit again
   remove    delete Revit, its bottle and its apps
   status    list the Revit bottles on this Mac (no year)
@@ -93,6 +95,7 @@ while [ $# -gt 0 ]; do
     --dry-run) DRY=1 ;;
     --log) LOG=1 ;;
     --keep) KEEP=1 ;;
+    --write) WRITE=1 ;;
     --events|--only|--accept-eula|--run|--exclude)
       if [ $# -lt 2 ]; then FLAG_ERR="$1 needs a value"
       else case "$1" in --events) EVENTS_DIR="$2" ;; --only) ONLY="$2" ;; --accept-eula) EULA="$2" ;;
@@ -110,6 +113,11 @@ CMD="${POS[0]:-}"; YEAR_ARG="${POS[1]:-}"; NAME="${POS[2]:-}"
 [ "$KEEP" = 0 ] || [ "$CMD" = test ] || FLAG_ERR="Unknown option: --keep"
 [ -z "$RUN_ARG" ] || [ "$CMD" = report ] || FLAG_ERR="--run is for ./revit report only."
 [ ${#EXCL[@]} = 0 ] || [ "$CMD" = report ] || FLAG_ERR="--exclude is for ./revit report only."
+[ "$WRITE" = 0 ] || [ "$CMD" = mcp ] || FLAG_ERR="Unknown option: --write"
+if [ "$CMD" = mcp ]; then   # stdout belongs to the MCP client: no events, no more words than year and bottle
+  [ ${#POS[@]} -le 3 ] || FLAG_ERR="Too many arguments. Example: ./revit mcp 2027 [bottle] [--write]"
+  [ -z "$EVENTS_DIR" ] || FLAG_ERR="--events is not for ./revit mcp."
+fi
 SUPERVISED=0; case "$CMD" in install|check|addins|rebuild|test) SUPERVISED=1 ;; esac
 sup_traps() { # signals noted, not ignored (an ignored signal would be inherited by the child), from here to the child
   trap 'SIG_GOT=INT' INT; trap 'SIG_GOT=TERM' TERM; trap 'SIG_GOT=HUP' HUP
@@ -135,7 +143,7 @@ if [ -n "$EVENTS_DIR" ]; then
 fi
 [ -z "$FLAG_ERR" ] || die "$FLAG_ERR"
 case "$CMD" in
-  install|check|doctor|report|addins|import|cache|stop|logs|debug|rebuild|remove|status|find-installer|link-installer|test) ;;
+  install|check|doctor|report|addins|import|cache|stop|logs|debug|rebuild|remove|status|find-installer|link-installer|test|mcp) ;;
   ""|help|-h|--help) usage; exit 0 ;;
   *) echo "Unknown command: $CMD" >&2; echo >&2; usage >&2; exit 1 ;;
 esac
@@ -424,7 +432,11 @@ case "$CMD" in
           || die "$ADDIN_NAME needs $ADDIN_TOOL on this Mac: brew install ghostscript"
         ids+=("$id")
       done
-      list=($(addin_plan "${ids[@]}"))
+      in_list revitmcp "${ids[@]}" && in_list revitmcp-experimental "${ids[@]}" \
+        && die "Install one variant of the Revit MCP Server, not both: --only revitmcp or --only revitmcp-experimental."
+      plan="$(addin_plan "${ids[@]}")" || die "Could not plan the add-in steps."
+      [ -n "$plan" ] || die "Could not plan the add-in steps."
+      read -r -a list <<<"$plan"
       [ -z "$EULA" ] || export REVIT_ACCEPT_EULA="$EULA"
       bottle_guard must_exist "$YEAR" "$NAME"; not_busy; run_ctx_new; sup_traps
       lock_take --no-trap "./revit addins $YEAR $NAME"; bottle_guard must_exist "$YEAR" "$NAME"
@@ -452,6 +464,7 @@ case "$CMD" in
     while IFS= read -r f; do f="${f%/}"; echo "  logs/${f#"$DATA/logs/"}"; done <<<"$found"
     echo "Open the folder: open \"$DATA/logs/$NAME\""
     echo "To report a problem, see \"Report a problem\" in docs/troubleshooting.md." ;;
+  mcp) need_crossover; exec "$ROOT/scripts/mcp-launch.sh" "$YEAR" "$NAME" "$WRITE" ;;
   debug)
     need_crossover; bottle_guard must_exist "$YEAR" "$NAME"; not_busy
     "$ROOT/scripts/launch.sh" "$YEAR" "$NAME" || exit 1

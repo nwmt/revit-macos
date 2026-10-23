@@ -9,7 +9,7 @@ CLEAN_ENV=(-u REVIT_DATA -u REVIT_LOCK_DIR -u SHIMS_DIR -u REVIT_BUNDLED -u REVI
   -u REVIT_ACCEPT_EULA -u REVIT_SOURCE_LIST -u REVIT_REUSE_EXTRACTED -u REVIT_REEXTRACT -u REVIT_UNPACK_AGAIN
   -u REVIT_FOR_BOTTLE -u INSTALL_PARENT -u W_CACHE -u SHIMS_FROM_SOURCE -u RUN_DIR -u RUN_KIND -u CX_RECREATE
   -u INSTALL_DRYRUN -u REVIT_LANG -u ODIS_PKGS -u REVIT_THEME -u REVIT_YEAR -u SMOKE_TIMEOUT -u SMOKE_START_WAIT
-  -u SMOKE_STALL -u SMOKE_WORKER_WAIT -u SMOKE_POLL -u SMOKE_PREP_TIMEOUT -u REVIT_CX_TMP)
+  -u SMOKE_STALL -u SMOKE_WORKER_WAIT -u SMOKE_POLL -u SMOKE_PREP_TIMEOUT -u REVIT_CX_TMP -u MCP_TEST_HOLD -u MCP_HANDOFF_S)
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)" && [ -d "$TMP" ] || { echo "mktemp failed" >&2; exit 1; }   # an empty TOP would be the current folder
 TOP="$(cd "$TMP" && pwd -P)" || exit 1   # /var → /private/var: lsof reports real paths
@@ -785,5 +785,124 @@ check "clone: cache: its unpacked folder that bottle was installed from is kept"
 run_in "$AD" "" cache clear --yes
 check "app: cache clear --yes frees its own, the clone's stays" \
   eval '[ "$RC" = 0 ] && [ ! -e "$AD/installers/extracted/revit2025" ] && [ -f "$R/installers/extracted/revit2025/setup.xml" ]'
+# ---- ./revit mcp (scripts/mcp-launch.sh) ----
+MCPW="Revit 2027 MCP Server Write-Tools Technical Preview"; MCPE="Revit 2027 MCP Server Experimental-Tools Technical Preview"
+mcp_install() { # $1 = bottle, $2 = variant folder: a complete MCP Server install (fixture files, our shims from build/)
+  local b="$BOTTLES/$1" d="$BOTTLES/$1/drive_c/Program Files/Autodesk/$2" s
+  mkdir -p "$d" "$b/drive_c/Program Files/Autodesk/Revit/Addins/2027" "$b/drive_c/ProgramData/revit-macos" \
+    "$b/drive_c/Program Files/Common Files/Autodesk/AdpDesktopSDK/bin"
+  for s in mcphost/mcphost.exe mcppipes/mcppipes.dll; do mkdir -p "$R/build/${s%/*}"; echo "fake $s" > "$R/build/$s"; cp "$R/build/$s" "$d/"; done
+  touch "$d/Autodesk.RevitMcpServer.Stdio.exe" "$b/drive_c/Program Files/Common Files/Autodesk/AdpDesktopSDK/bin/AdpSDKCore.dll"
+  printf '<RevitAddIns><AddIn><Assembly>C:\\Program Files\\Autodesk\\%s\\Autodesk.RevitMcpServer.Addin.dll</Assembly></AddIn></RevitAddIns>\r\n' "$2" \
+    > "$b/drive_c/Program Files/Autodesk/Revit/Addins/2027/Autodesk.RevitMcpServer.addin"
+  echo 6.3.44.3 > "$b/drive_c/ProgramData/revit-macos/adp"
+}
+mcp_cx() { # the fake CrossOver's wine plays mcphost.exe: records its arguments (and FD8/FD9 if they reached it), writes
+  # the launch confirmation, echoes stdin to stdout, exits with $T/mcp-rc. $T/mcp-mode: noconfirm | ignoreterm | holdclose
+  cat > "$CXF/bin/wine" <<EOF
+#!/bin/bash
+[ "\$1" = --bottle ] || exit 0
+name="\$2"; shift 2; tok=""; prev=""
+for a in "\$@"; do [ "\$prev" = --launch ] && tok="\$a"; prev="\$a"; done
+{ printf '%s\n' "\$@"; [ -e /dev/fd/9 ] && echo FD9; [ -e /dev/fd/8 ] && echo FD8; } > "$T/mcp-argv"
+bf="$BOTTLES/\$name/drive_c/mcp-open.tmp"; touch "\$bf"; exec 4<"\$bf"
+case "\$(cat "$T/mcp-mode" 2>/dev/null)" in
+  noconfirm) sleep 60 ;;
+  ignoreterm) trap '' TERM; sleep 60 ;;
+  holdclose) sleep 1; exec 4<&-; sleep 60 ;;
+esac
+d="$BOTTLES/\$name/drive_c/users/crossover/AppData/Local/Temp/revit-macos-mcp"; mkdir -p "\$d"; echo \$\$ > "\$d/launch-\$tok"
+cat
+exit "\$(cat "$T/mcp-rc" 2>/dev/null || echo 0)"
+EOF
+  chmod +x "$CXF/bin/wine"
+}
+mcp_world() { reset; bottle rvt2027-a 2027 2027; mcp_install rvt2027-a "${1:-$MCPW}"; mcp_cx; fake_revit rvt2027-a 2027; }
+MCP_ENV=()
+run_mcp() { # stdin from $MCP_IN (default: nothing), rest = ./revit arguments; OUT = stdout only, ERR = stderr, RC
+  : > "$CALLS"
+  (cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" ${MCP_ENV[@]+"${MCP_ENV[@]}"} /bin/bash "$R/revit" "$@" \
+    < "${MCP_IN:-/dev/null}" > "$T/mcp-out" 2> "$T/mcp-err"); RC=$?
+  OUT="$(cat "$T/mcp-out")"; ERR="$(cat "$T/mcp-err")"; MCP_IN=""
+}
+mcp_bg() { # ./revit mcp in the background with a held-open stdin (fd 5 writes it) and INT at its default; sets LPID
+  rm -f "$T/mcp-in"; mkfifo "$T/mcp-in"; : > "$T/mcp-out"; : > "$T/mcp-err"
+  (cd / && exec env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" ${MCP_ENV[@]+"${MCP_ENV[@]}"} \
+    perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV' /bin/bash "$R/revit" "$@" < "$T/mcp-in" > "$T/mcp-out" 2> "$T/mcp-err") &
+  LPID=$!; exec 5>"$T/mcp-in"
+}
+mcp_wait() { local i; for i in $(seq 1 ${2:-100}); do eval "$1" && return 0; sleep 0.1; done; return 1; }   # $1 = condition
+confirmed() { ls "$BOTTLES/rvt2027-a/drive_c/users/crossover/AppData/Local/Temp/revit-macos-mcp/"launch-* >/dev/null 2>&1; }
+own_alive() { pgrep -f 'revit-mcp-[0-9a-f]{8}-' >/dev/null; }   # a process with a launch token in its arguments
+lock_is_free() { perl -MFcntl=:flock -e 'open(my $f, ">>", $ARGV[0]) or exit 0; flock($f, LOCK_EX | LOCK_NB) or exit 1' "$H/Library/Application Support/revit-macos/lock"; }
+mcp_stdout_empty() { [ -z "$OUT" ]; }
+
+reset; run_mcp mcp 2027; check "mcp: no bottle → refused, stdout empty" eval '[ "$RC" != 0 ] && grep -q "There is no bottle rvt2027-a" <<<"$ERR" && mcp_stdout_empty'
+reset; bottle rvt2027-a 2027 2027; mcp_install rvt2027-a "$MCPW"; mcp_cx; run_mcp mcp 2027
+check "mcp: no Revit → open Revit first" eval '[ "$RC" != 0 ] && grep -qx "Open Revit 2027 with a model first." <<<"$ERR" && mcp_stdout_empty'
+check "mcp: no Revit → wine never started" test ! -e "$T/mcp-argv"
+reset; bottle rvt2027-a 2027 2027; mcp_cx; fake_revit rvt2027-a 2027; run_mcp mcp 2027
+check "mcp: not installed → the install command" eval '[ "$RC" != 0 ] && grep -qF "Install it: ./revit addins 2027 --only revitmcp --accept-eula revitmcp" <<<"$ERR" && mcp_stdout_empty'
+reset; bottle rvt2027-a 2027 2027; run_mcp status --write; check "--write on another command" eval '[ "$RC" != 0 ] && grep -qx "Unknown option: --write" <<<"$ERR"'
+reset; run_mcp mcp 2027 rvt2027-a extra; check "mcp: extra arguments" eval '[ "$RC" != 0 ] && grep -q "Too many arguments" <<<"$ERR" && mcp_stdout_empty'
+reset; run "" --help; check "mcp is in the help" grep -qx "  mcp       connect an AI assistant to a running Revit (docs/mcp.md)" <<<"$OUT"
+for c in "$MCPW||--tool-permission=StableReadOnly" "$MCPW|--write|--tool-permission=Stable --tool-min-permission=StableReadOnly" \
+  "$MCPE||--tool-permission=StableReadOnly" "$MCPE|--write|--tool-permission=Experimental --tool-min-permission=StableReadOnly"; do
+  v="${c%%|*}"; f="$(cut -d'|' -f2 <<<"$c")"; want="${c##*|}"
+  mcp_world "$v"; printf 'hello\n{"jsonrpc":"2.0"}\n' > "$T/in"; MCP_IN="$T/in"; run_mcp mcp 2027 $f
+  check "mcp ${v#Revit 2027 MCP Server } ${f:-read-only}: exit 0, stdout is the server's alone" eval '[ "$RC" = 0 ] && [ "$OUT" = "$(cat "$T/in")" ] && [ -z "$ERR" ]'
+  check "mcp ${v#Revit 2027 MCP Server } ${f:-read-only}: launcher, token, server and $want" eval '[ "$(sed -n "1p;4p;5p" "$T/mcp-argv" | tr "\n" "|")" = "C:\\Program Files\\Autodesk\\$v\\mcphost.exe|--|C:\\Program Files\\Autodesk\\$v\\Autodesk.RevitMcpServer.Stdio.exe|" ] && [ "$(sed -n "6,\$p" "$T/mcp-argv" | tr "\n" " ")" = "$want " ]'
+done
+check "mcp: neither the lock (fd 9) nor fd 8 reaches the launcher" eval '! grep -qx -e FD9 -e FD8 "$T/mcp-argv"'
+mcp_world; echo 5 > "$T/mcp-rc"; run_mcp mcp 2027; check "mcp: EOF → the launcher's exit code" test "$RC" = 5
+mcp_world; mcp_bg mcp 2027; mcp_wait confirmed 100; mcp_wait 'lock_is_free' 50
+check "mcp: the lock is released after the handoff" lock_is_free
+echo ping >&5; mcp_wait 'grep -qx ping "$T/mcp-out"' 50; check "mcp: input after the handoff still reaches the server" grep -qx ping "$T/mcp-out"
+exec 5>&-; wait "$LPID"; check "mcp: EOF after the handoff → exit 0" test "$?" = 0
+for p in 'rm "$D/Autodesk.RevitMcpServer.Stdio.exe"|the MCP Server files' 'rm "$M"|the MCP add-in manifest' 'rm "$D/mcphost.exe"|mcphost.exe' \
+  'rm "$D/mcppipes.dll"|mcppipes.dll' 'echo x >> "$D/mcphost.exe"|the current mcphost.exe' 'echo x >> "$D/mcppipes.dll"|the current mcppipes.dll' \
+  'rm "$BOTTLES/rvt2027-a/drive_c/ProgramData/revit-macos/adp"|Autodesk analytics (ADP)'; do
+  mcp_world; D="$BOTTLES/rvt2027-a/drive_c/Program Files/Autodesk/$MCPW"; M="$BOTTLES/rvt2027-a/drive_c/Program Files/Autodesk/Revit/Addins/2027/Autodesk.RevitMcpServer.addin"
+  eval "${p%|*}"; run_mcp mcp 2027
+  if [ "${p#*|}" = "the MCP add-in manifest" ]; then want="is not installed in rvt2027-a"; else want="is not complete (${p#*|} is missing)"; fi
+  check "mcp refuses without ${p#*|}" eval '[ "$RC" != 0 ] && grep -qF "$want" <<<"$ERR" && [ ! -e "$T/mcp-argv" ]'
+done
+# the bottle goes between the first check and the lock: the check under the lock refuses, wine never starts
+mcp_world; touch "$T/hold"; MCP_ENV=(MCP_TEST_HOLD="$T/hold"); mcp_bg mcp 2027; mcp_wait '[ -e "$T/hold.reached" ]' 100
+chmod -R u+w "$BOTTLES/rvt2027-a"; stop_fakes; rm -rf "$BOTTLES/rvt2027-a"; rm "$T/hold"; exec 5>&-; wait "$LPID"; rc=$?; MCP_ENV=()
+check "mcp: bottle removed before the lock → refused under the lock" eval '[ "$rc" != 0 ] && grep -q "There is no bottle rvt2027-a" "$T/mcp-err" && [ ! -e "$T/mcp-argv" ]'
+reset; bottle rvt2027-a 2027 2027; mcp_install rvt2027-a "$MCPW"; echo 'addin_plan() { return 1; }' >> "$R/scripts/lib/addins.sh"; run "" addins 2027 --only revitmcp
+check "addins: a failing plan → refused, no runner" eval '[ "$RC" != 0 ] && grep -q "Could not plan" <<<"$OUT" && ! grep -q run-steps "$CALLS"'
+reset; bottle rvt2027-a 2027 2027; echo 'addin_plan() { :; }' >> "$R/scripts/lib/addins.sh"; run "" addins 2027 --only revitmcp
+check "addins: an empty plan → refused, no runner" eval '[ "$RC" != 0 ] && grep -q "Could not plan" <<<"$OUT" && ! grep -q run-steps "$CALLS"'
+reset; bottle rvt2027-a 2027 2027; fake_wine; run "" addins 2027 --only revitmcp,revitmcp-experimental --accept-eula revitmcp,revitmcp-experimental
+check "addins: both MCP variants at once → refused before anything" eval '[ "$RC" != 0 ] && grep -q "not both" <<<"$OUT" && ! grep -q -e run-steps -e "^wine" "$CALLS"'
+# signals: before the handoff (no confirmation yet) and after it; a second client of the same bottle lives on
+for s in TERM:143 HUP:129 INT:130; do
+  for ph in before after; do
+    mcp_world; fake_mcphost rvt2027-a; other=$!
+    [ "$ph" = before ] && echo noconfirm > "$T/mcp-mode"
+    mcp_bg mcp 2027; mcp_wait '[ -s "$T/mcp-argv" ]' 100; [ "$ph" = after ] && mcp_wait confirmed 100; sleep 0.5
+    kill -"${s%:*}" "$LPID"; wait "$LPID"; rc=$?; exec 5>&-
+    check "mcp: $s ${s%:*} $ph the handoff → exit ${s#*:}, own launcher gone, the other client and Revit alive" \
+      eval '[ "$rc" = "${s#*:}" ] && ! own_alive && kill -0 "$other" 2>/dev/null && pgrep -f "Revit 2027.Revit.exe" >/dev/null'
+    rm -f "$T/mcp-mode"
+  done
+done
+mcp_world; echo noconfirm > "$T/mcp-mode"; MCP_ENV=(MCP_HANDOFF_S=3); t0=$SECONDS; run_mcp mcp 2027; MCP_ENV=()
+check "mcp: no confirmation → refused after the deadline" eval '[ "$RC" = 1 ] && grep -q "did not start within 3 s" <<<"$ERR" && mcp_stdout_empty'
+check "mcp: no confirmation → own launcher gone, lock free" eval '! own_alive && lock_is_free'
+sleep 2; check "mcp: no late launcher afterwards" eval '! own_alive && ! confirmed'
+mcp_world; fake_mcphost rvt2027-a; other=$!; echo ignoreterm > "$T/mcp-mode"; MCP_ENV=(MCP_HANDOFF_S=2); run_mcp mcp 2027; MCP_ENV=()
+check "mcp: a loader that ignores TERM → killed; Revit and the other client alive" \
+  eval '[ "$RC" = 1 ] && ! own_alive && kill -0 "$other" 2>/dev/null && pgrep -f "Revit 2027.Revit.exe" >/dev/null'
+mcp_world; echo holdclose > "$T/mcp-mode"; MCP_ENV=(MCP_HANDOFF_S=6); mcp_bg mcp 2027; MCP_ENV=(); mcp_wait '[ -s "$T/mcp-argv" ]' 100; sleep 2
+pkill -f "Revit 2027.Revit.exe"; sleep 0.5; run "2027" remove 2027   # Revit closed, the loader's bottle file closed: only the lock stops it
+check "mcp: while the launcher starts (its bottle file closed, no confirmation), remove is refused" eval '[ "$RC" != 0 ] && grep -q "Another task is running: ./revit mcp 2027 rvt2027-a" <<<"$OUT" && [ -d "$BOTTLES/rvt2027-a" ]'
+wait "$LPID"; exec 5>&-; check "mcp: then the lock is free and nothing of it is left" eval 'lock_is_free && ! own_alive'
+reset; for a in "2027 rvt2027-a" "2027 rvt2027-a 2" "27 rvt2027-a 0"; do
+  (cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" /bin/bash "$R/scripts/mcp-launch.sh" $a > "$T/o" 2> "$T/e"); rc=$?
+  check "mcp-launch.sh $a: usage, exit 2, stdout empty" eval '[ "$rc" = 2 ] && [ ! -s "$T/o" ] && grep -q "^Usage: scripts/mcp-launch.sh" "$T/e"'
+done
 # ---- end ----
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]
