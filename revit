@@ -298,7 +298,7 @@ if [ "$CMD" = addins ] && [ "$YEAR_ARG" = list ]; then
     src="$(addin_files "$YEAR" | head -1 | cut -f1)"; tok=true; [ -z "$ADDIN_TOOL" ] || command -v "$ADDIN_TOOL" >/dev/null || [ -x "/opt/homebrew/bin/$ADDIN_TOOL" ] || tok=false
     rdy="$tok"   # ready: every own file imported (auto files come at install), the tool there
     while IFS=$'\t' read -r s f _ _; do [ "$s" = own ] && [ ! -f "$DATA/installers/addins/$f" ] && rdy=false; done < <(addin_files "$YEAR")
-    out+="${out:+,}{\"id\":$(json_str "$id"),\"name\":$(json_str "$ADDIN_NAME"),\"about\":$(json_str "$ADDIN_ABOUT"),\"available\":$av,\"installed\":$ins,\"tested\":$te,\"source\":$(json_str "$src"),\"eula\":$(json_str "$ADDIN_EULA"),\"tool\":$(json_str "$ADDIN_TOOL"),\"tool_ok\":$tok,\"ready\":$rdy}"
+    out+="${out:+,}{\"id\":$(json_str "$id"),\"name\":$(json_str "$ADDIN_NAME"),\"about\":$(json_str "$ADDIN_ABOUT"),\"available\":$av,\"installed\":$ins,\"tested\":$te,\"source\":$(json_str "$src"),\"eula\":$(json_str "$ADDIN_EULA"),\"notice\":$(json_str "$ADDIN_NOTICE"),\"tool\":$(json_str "$ADDIN_TOOL"),\"tool_ok\":$tok,\"ready\":$rdy}"
   done
   if [ "$JSON" = 1 ]; then echo "[$out]"; else for id in "${ADDIN_IDS[@]}"; do addin_load "$id"; addin_available && echo "  $id  $ADDIN_NAME — $ADDIN_ABOUT"; done; fi
   exit 0

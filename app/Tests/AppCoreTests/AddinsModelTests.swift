@@ -10,6 +10,8 @@ func bottleStatus(_ name: String, year: Int, addins: [String]) -> EngineOutput {
     return EngineOutput(stdout: Data(json.utf8), stderr: "", exitCode: 0)
 }
 let enscape2027 = #"[{"id":"enscape","name":"Enscape","about":"Real-time rendering","available":true,"installed":false,"tested":true,"source":"own","eula":"https://www.chaos.com/eula","tool":"","tool_ok":true,"ready":READY}]"#
+let mcpNotice = "Autodesk's MCP Server is a Technical Preview and runs only with Autodesk analytics (ADP); installing it turns ADP on in this bottle."
+let mcp2027 = #"[{"id":"revitmcp-experimental","name":"Revit MCP Server (Experimental-Tools)","about":"AI","available":true,"installed":false,"tested":false,"source":"own","eula":"https://www.autodesk.com/company/terms-of-use/en/general-terms","notice":"\#(mcpNotice)","tool":"","tool_ok":true,"ready":true},{"id":"revitmcp","name":"Revit MCP Server (Write-Tools)","about":"AI","available":true,"installed":false,"tested":false,"source":"own","eula":"https://www.autodesk.com/company/terms-of-use/en/general-terms","notice":"\#(mcpNotice)","tool":"","tool_ok":true,"ready":true}]"#
 
 @MainActor final class AddinsHarness {
     let h = Harness()
@@ -66,6 +68,23 @@ let enscape2027 = #"[{"id":"enscape","name":"Enscape","about":"Real-time renderi
         a.model.accept("enscape")
         #expect(a.model.selected == ["enscape"]); #expect(a.model.accepted == ["enscape"])
         #expect(a.model.toggle("enscape") == nil); #expect(a.model.selected.isEmpty)
+    }
+
+    @Test func mcpNoticeReachesTheRowsAndEachVariantNeedsItsOwnConsent() async throws {
+        let a = await AddinsHarness(year: 2027, bottle: "rvt2027-a", list: mcp2027)
+        #expect(a.model.rows.map(\.notice) == [mcpNotice, mcpNotice])
+        #expect(a.model.toggle("revitmcp") == "https://www.autodesk.com/company/terms-of-use/en/general-terms")
+        #expect(a.model.selected.isEmpty)
+        a.model.accept("revitmcp")
+        #expect(a.model.toggle("revitmcp-experimental") == "https://www.autodesk.com/company/terms-of-use/en/general-terms")
+        #expect(a.model.selected == ["revitmcp"]); #expect(a.model.accepted == ["revitmcp"])
+        try await a.model.installSelected()
+        #expect(await a.h.fake.started.last == ["addins", "2027", "rvt2027-a", "--only", "revitmcp", "--accept-eula", "revitmcp"])
+        let b = await AddinsHarness(year: 2027, bottle: "rvt2027-a", list: mcp2027)
+        b.model.accept("revitmcp-experimental")
+        try await b.model.installSelected()
+        #expect(await b.h.fake.started.last == ["addins", "2027", "rvt2027-a", "--only", "revitmcp-experimental", "--accept-eula", "revitmcp-experimental"])
+        #expect(b.model.rows.first { $0.id == "enscape" } == nil)
     }
 
     @Test func installSelectedPassesIdsInCatalogOrderAndTheAcceptedEULAs() async throws {

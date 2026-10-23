@@ -72,6 +72,27 @@ public struct AddinInfo: Decodable, Equatable, Sendable {
     public let source, eula, tool: String
     public let toolOk: Bool
     public let ready: Bool
+    public let notice: String               // shown before consent (the catalog's ADDIN_NOTICE); "" when the key is absent
+
+    public init(id: String, name: String, about: String, available: Bool, installed: Bool, tested: Bool, source: String,
+                eula: String, tool: String, toolOk: Bool, ready: Bool, notice: String = "") {
+        self.id = id; self.name = name; self.about = about; self.available = available; self.installed = installed
+        self.tested = tested; self.source = source; self.eula = eula; self.tool = tool; self.toolOk = toolOk
+        self.ready = ready; self.notice = notice
+    }
+
+    enum CodingKeys: String, CodingKey { case id, name, about, available, installed, tested, source, eula, tool, toolOk, ready, notice }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(id: try c.decode(String.self, forKey: .id), name: try c.decode(String.self, forKey: .name),
+                  about: try c.decode(String.self, forKey: .about), available: try c.decode(Bool.self, forKey: .available),
+                  installed: try c.decode(Bool.self, forKey: .installed), tested: try c.decode(Bool.self, forKey: .tested),
+                  source: try c.decode(String.self, forKey: .source), eula: try c.decode(String.self, forKey: .eula),
+                  tool: try c.decode(String.self, forKey: .tool), toolOk: try c.decode(Bool.self, forKey: .toolOk),
+                  ready: try c.decode(Bool.self, forKey: .ready),
+                  notice: try c.decodeIfPresent(String.self, forKey: .notice) ?? "")
+    }
 }
 
 public struct ReportResult: Decodable, Equatable, Sendable {

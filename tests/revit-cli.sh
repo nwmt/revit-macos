@@ -601,6 +601,19 @@ check "addins list --json: ready is the last key" eval 'grep -qE "\"tool_ok\":(t
 check "addins list --json: enscape ready only after import (before)" test "$(ready_of enscape)" = false
 touch "$T/Enscape-4.18.2.1657-lts.exe"; run "" addins import enscape "$T/Enscape-4.18.2.1657-lts.exe"; run "" addins list 2027 --json
 check "addins list --json: enscape ready only after import (after)" test "$(ready_of enscape)" = true
+reset; touch "$T/PublicMcpServer.exe" "$T/PublicMcpServerExperimental.exe"; run "" addins import revitmcp "$T/PublicMcpServer.exe"
+expect "import revitmcp" 0 "Revit MCP Server (Write-Tools): PublicMcpServer.exe is ready."
+run "" addins import revitmcp-experimental "$T/PublicMcpServerExperimental.exe"; expect "import revitmcp-experimental" 0 "is ready."
+check "import: the MCP Server installers in installers/addins/publicmcpserver" \
+  test -f "$R/installers/addins/publicmcpserver/PublicMcpServer.exe" -a -f "$R/installers/addins/publicmcpserver/PublicMcpServerExperimental.exe"
+run "" addins list 2027 --json
+mcp_json() { jq_ 'for (@$d) { printf "%s|%s|%s|%s|%s\n", $_->{id}, $_->{tested} ? "t" : "f", $_->{ready} ? "r" : "-", $_->{eula}, $_->{notice} if $_->{id} =~ /revitmcp/ }'; }
+N="Autodesk's MCP Server is a Technical Preview and runs only with Autodesk analytics (ADP); installing it turns ADP on in this bottle."
+check "addins list --json: both MCP variants, untested, ready, eula and notice" test "$(mcp_json)" = \
+  "revitmcp-experimental|f|r|https://www.autodesk.com/company/terms-of-use/en/general-terms|$N
+revitmcp|f|r|https://www.autodesk.com/company/terms-of-use/en/general-terms|$N"
+check "addins list --json: older entries have an empty notice" test "$(jq_ 'for (@$d) { print $_->{id}, "\n" if $_->{notice} eq "" }' | tr '\n' ' ')" = "enscape pdfprinter pyrevit revitlookup "
+reset; run "" addins list 2025 --json; check "addins list --json: no MCP Server before 2027" eval '! grep -q revitmcp <<<"$(jq_ '"'"'for (@$d) { print $_->{id}, "\n" if $_->{available} }'"'"')"'
 reset; run "" addins list 2025 --json; check "addins list --json: pyrevit is ready (auto)" test "$(ready_of pyrevit)" = true
 check "addins list --json: pdfprinter ready follows tool_ok" eval '[ "$(ready_of pdfprinter)" = "$(jq_ '"'"'for (@$d) { print $_->{tool_ok} ? "true" : "false" if $_->{id} eq "pdfprinter" }'"'"')" ]'
 pe_fixture() { # <file> <machine> <characteristics> <magic> [length]: a PE header (MZ, e_lfanew 0x40, PE, 1 section,

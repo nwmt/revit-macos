@@ -10,6 +10,7 @@ public struct AddinRow: Equatable, Sendable {
     public let id, name, about: String
     public let tested: Bool
     public let eula: String
+    public let notice: String                // shown with the license before consent, or ""
     public let tool: String                  // a tool it needs on this Mac (gs), or ""
     public let state: AddinState
 }
@@ -46,7 +47,8 @@ public struct AddinRow: Equatable, Sendable {
             else if a.source == "own" && !a.ready { state = .needsFile }
             else if !a.tool.isEmpty && !a.toolOk { state = .needsTool(brew: brew) }
             else { state = .available }
-            return AddinRow(id: a.id, name: a.name, about: a.about, tested: a.tested, eula: a.eula, tool: a.tool, state: state)
+            return AddinRow(id: a.id, name: a.name, about: a.about, tested: a.tested, eula: a.eula, notice: a.notice,
+                            tool: a.tool, state: state)
         }
         selected = selected.filter { id in rows.contains { $0.id == id && $0.state == .available } }
     }

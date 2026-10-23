@@ -57,6 +57,9 @@ struct AddinsView: View {
             if let l = license {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("This add-in has its own license.").font(.headline)
+                    if let n = model.rows.first(where: { $0.id == l.id })?.notice, !n.isEmpty {
+                        Text(n).fixedSize(horizontal: false, vertical: true)
+                    }
                     if let u = URL(string: l.url) { Link(l.url, destination: u) }
                     Text("Installing it means you accept that license.").foregroundStyle(.secondary)
                     HStack {

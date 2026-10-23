@@ -42,6 +42,9 @@ func data(_ s: String) -> Data { Data(s.utf8) }
 @Test func addinListDecodes() throws {
     let a = try JSONDecoder.engine.decode([AddinInfo].self, from: data(#"[{"id":"pyrevit","name":"pyRevit","about":"Scripts","available":true,"installed":false,"tested":true,"source":"auto","eula":"","tool":"","tool_ok":true,"ready":true}]"#))
     #expect(a == [AddinInfo(id: "pyrevit", name: "pyRevit", about: "Scripts", available: true, installed: false, tested: true, source: "auto", eula: "", tool: "", toolOk: true, ready: true)])
+    #expect(a[0].notice == "")
+    let m = try JSONDecoder.engine.decode([AddinInfo].self, from: data(#"[{"id":"revitmcp","name":"MCP","about":"AI","available":true,"installed":false,"tested":false,"source":"own","eula":"https://e","notice":"ADP turns on","tool":"","tool_ok":true,"ready":false}]"#))
+    #expect(m[0].notice == "ADP turns on"); #expect(m[0].eula == "https://e"); #expect(!m[0].ready)
 }
 
 @Test func reportRefusedDecodes() throws {

@@ -687,13 +687,16 @@ mcp_bottle() { # $1 = bottle, $2 = variant folder: a 2027 bottle with that MCP S
   echo 6.3.44.3 > "$b/drive_c/ProgramData/revit-macos/adp"
 }
 MCPW="Revit 2027 MCP Server Write-Tools Technical Preview"; MCPE="Revit 2027 MCP Server Experimental-Tools Technical Preview"
-mcp_state() { # bash code that changes bottle rvt2027-t first; prints "<variant>|<missing>" for both variants
+mcp_state() { # bash code that changes bottle rvt2027-t first; prints "<variant>|<missing>" for both variants, then
+  # "ready" (mcp_ready) and "catalog" (the catalog's addin_is_installed) for Write-Tools
   in_repo '. "$ROOT/scripts/lib/addins.sh"; load_profile 2027; B="$BOTTLES/rvt2027-t"; D="$(mcp_folder revitmcp)"; '"$1"'
-    echo "$(mcp_installed_variant)|$(mcp_missing revitmcp)|$(mcp_missing revitmcp-experimental)"; mcp_ready revitmcp && echo ready'
+    echo "$(mcp_installed_variant)|$(mcp_missing revitmcp)|$(mcp_missing revitmcp-experimental)"; mcp_ready revitmcp && echo ready
+    addin_load revitmcp && addin_is_installed && echo catalog'
 }
 reset; mcp_bottle rvt2027-t "$MCPW"; mcp_state ''
 check "mcp: a complete Write-Tools install is ready" test "$OUT" = "revitmcp||the MCP Server files
-ready"
+ready
+catalog"
 reset; mcp_bottle rvt2027-t "$MCPE"; mcp_state ''
 check "mcp: a complete Experimental install is ready as that variant" grep -qx "revitmcp-experimental|the MCP Server files|" <<<"$OUT"
 for c in 'rm "$D/Autodesk.RevitMcpServer.Stdio.exe"|the MCP Server files' \
@@ -704,9 +707,9 @@ for c in 'rm "$D/Autodesk.RevitMcpServer.Stdio.exe"|the MCP Server files' \
   'rm "$(mcp_adp_marker)"|Autodesk analytics (ADP)' ': > "$(mcp_adp_marker)"|Autodesk analytics (ADP)' \
   'rm "$(mcp_adp_core)"|Autodesk analytics (ADP)'; do
   i=$((${i:-0} + 1)); reset; mcp_bottle rvt2027-t "$MCPW"; mcp_state "${c%|*}"
-  check "mcp: not ready without ${c#*|} (case $i)" eval 'grep -q "|${c#*|}|" <<<"$OUT" && ! grep -qx ready <<<"$OUT"'
+  check "mcp: not ready without ${c#*|} (case $i)" eval 'grep -q "|${c#*|}|" <<<"$OUT" && ! grep -qx -e ready -e catalog <<<"$OUT"'
   mcp_bottle rvt2027-t "$MCPW"; mcp_state ''
-  check "mcp: ready again once ${c#*|} is back (case $i)" grep -qx ready <<<"$OUT"
+  check "mcp: ready again once ${c#*|} is back (case $i)" eval 'grep -qx ready <<<"$OUT" && grep -qx catalog <<<"$OUT"'
 done
 reset; mkbottle rvt2027-t 2027 2027; mcp_state 'echo "$(mcp_adp_version)|$?"'
 check "mcp: no installer, no ADP version, nothing ready" test "$OUT" = "|1

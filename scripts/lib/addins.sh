@@ -11,7 +11,7 @@ addin_dirs() { # the user's Addins folder, then the two all-users ones (the seco
 }
 
 addin_load() { # $1 = id: its fields and functions; 1 = no such add-in
-  ADDIN_NAME=""; ADDIN_ABOUT=""; ADDIN_TESTED=(); ADDIN_EULA=""; ADDIN_AFTER=(); ADDIN_TOOL=""; ADDIN_STEP=""
+  ADDIN_NAME=""; ADDIN_ABOUT=""; ADDIN_NOTICE=""; ADDIN_TESTED=(); ADDIN_EULA=""; ADDIN_AFTER=(); ADDIN_TOOL=""; ADDIN_STEP=""
   addin_files() { :; }; addin_is_installed() { return 1; }
   in_list "$1" ${ADDIN_IDS[@]+"${ADDIN_IDS[@]}"} || return 1
   . "$ROOT/scripts/addins/$1.sh"
