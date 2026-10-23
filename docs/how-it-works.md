@@ -42,10 +42,10 @@ In install order. Normal install steps have "—" in What breaks.
 |---|---|---|---|
 | `vc` | — | Microsoft Visual C++ runtimes | all |
 | `fonts` | — | Core fonts and MSXML 6 (winetricks) | all |
-| `netfx` | The .NET Framework 4.8 installer refuses to run on "Windows 10" | Real .NET Framework 4.0 first, then 4.8 from Revit's installer as Windows 7 | 2023, 2024 (2020: 4.7 the same way) |
+| `netfx` | The .NET Framework 4.8 installer refuses to run on "Windows 10" | Real .NET Framework 4.0 first, then 4.8 from Revit's installer as Windows 7 | 2021, 2023, 2024 (2020: 4.7 the same way) |
 | `dotnet` | Revit 2025 and newer run on .NET 8 or 10 | Every .NET runtime Revit's installer ships | 2025, 2026, 2027 |
 | `licensing`, `svcshim` | Licensing service does not start as a Windows service | Install Autodesk licensing; a small wrapper service runs it | all |
-| `adsso`, `ssoenv` | Sign-in window loads forever with GPU drawing | Install the AdSSO sign-in window; run it without GPU | 2020, 2023 |
+| `adsso`, `ssoenv` | Sign-in window loads forever with GPU drawing | Install the AdSSO sign-in window; run it without GPU | 2020, 2021, 2023 |
 | `idmgr` | — | Autodesk Identity Manager: sign-in through your Mac's browser | 2024+ |
 | `rcl`, `ret`, `materials`, `samples` | — | Revit content and extensions, the material library, sample projects | 2020 |
 | `rvt` | Autodesk installer (ODIS); Revit's MSI fails if the licensing service does not answer | Install Revit's MSI directly. We run its licensing-service check first and stop with that check's log if it fails. For 2024 the update, a patch to that MSI, is applied while installing it | all |
@@ -54,18 +54,18 @@ In install order. Normal install steps have "—" in What breaks.
 | `revitini` | 2024, 2025: "Cannot load the required component Autodesk RealDWG Shared", Revit closes. 2027: "Default family templates is empty or invalid" | In `Revit.ini`: where RealDWG is, the language section; defaults for new users (anti-aliasing off, theme to match the Mac) | 2024+ |
 | `register` | — | Register Revit with Autodesk licensing, as Autodesk's installer does | all |
 | `ncryptshim` | Crash on start and on save (signature check) | Own `ncrypt.dll` for Revit | all |
-| `wbemshim` | Crash on New Project and in Options (system info query) | Own WMI wrapper | 2020, 2023, 2024 |
+| `wbemshim` | Crash on New Project and in Options (system info query) | Own WMI wrapper | 2020, 2021, 2023, 2024 |
 | `webview2` | Built-in web pages fail (old browser runtime) | Install a current WebView2 runtime | 2024+ |
 | `d3d9dxvk` | UI, Dynamo and Direct3D 9 panels hang or are unreliable | DXVK for Direct3D 9 | all |
 | `richedit` | Text in views and dialogs fails; crash on text when creating a project | Microsoft RichEdit DLLs for Revit | all |
 | `tlbpin` | Creating views with text is 2–3× slower; long edits poll the mouse slowly | Cache for a type library and for the cursor position | all |
 | `warpshim` | Materials dialog does not open; its previews crash (`AdPreviewGenerator.exe`) | Software D3D11 device → normal device, through `tools/shims/rvtfix`, in Revit and in the preview process (loaded there by `tools/shims/wv2fix`) | all |
 | `gdoff` | Generative Design error on start | Turn the add-in off | 2023+ |
-| `rvtfix` | Start screen blank or white; 2026+: the browser uses about 60% CPU and the view is slow; crash when opening a view (a Windows function Wine lacks) | Browser draws inside Revit, with flags that make it draw; the missing function answered in memory | 2023+ (2020: for `warpshim`) |
+| `rvtfix` | Start screen blank or white; 2026+: the browser uses about 60% CPU and the view is slow; crash when opening a view (a Windows function Wine lacks) | Browser draws inside Revit, with flags that make it draw; the missing function answered in memory | 2023+ (2020, 2021: for `warpshim`) |
 | `wv2fix` | The built-in browser (WebView2) crashes on clicks and resizes | Own `version.dll` in the browser process | 2024+ |
 | `downloads` | Insert → Load Autodesk Family stops at 100%: the browser saves the family into Downloads first, and macOS does not let it list the Mac's `~/Downloads` | Windows' Downloads folder moves into the bottle; the Mac's folder is not touched | 2026, 2027 |
-| `pdfprinter` (an add-in: `./revit addins <year> --only pdfprinter`) | No printer, so Print and Page Setup do not open | **Revit PDF** printer: PostScript → Ghostscript → PDF in `~/Documents/Revit-PDF` | 2020, 2023–2025 (2026: not tested) |
-| `dynamo` | Dynamo's 3D preview draws black squares, lags or crashes | Dynamo without hardware acceleration and background preview | 2020, 2023–2025 |
+| `pdfprinter` (an add-in: `./revit addins <year> --only pdfprinter`) | No printer, so Print and Page Setup do not open | **Revit PDF** printer: PostScript → Ghostscript → PDF in `~/Documents/Revit-PDF` | 2020, 2021, 2023–2025 (2026: not tested) |
+| `dynamo` | Dynamo's 3D preview draws black squares, lags or crashes | Dynamo without hardware acceleration and background preview | 2020, 2021, 2023–2025 |
 | `urlhandler` | macOS does not know the link that returns from the browser to Revit: "Opening product" and nothing happens | The **Autodesk Sign-In** app passes the link into the bottle | 2024+ |
 
 Some fixes were carried over from another version as they are, without checking that this version still needs them.
@@ -76,8 +76,8 @@ The project ships no Microsoft files. `./revit install` puts these into the bott
 
 | Component | Comes from | Step |
 |---|---|---|
-| Visual C++ runtimes; .NET Framework 4.7 (2020) and 4.8 (2023, 2024); .NET 8 and 10 (2025+) | Revit's installer, which ships them | `vc`, `netfx`, `dotnet` |
-| .NET Framework 4.0 (2020, 2023, 2024) | Microsoft's offline installer from Microsoft's download server: the same file and checksum winetricks uses | `netfx` |
+| Visual C++ runtimes; .NET Framework 4.7 (2020) and 4.8 (2021, 2023, 2024); .NET 8 and 10 (2025+) | Revit's installer, which ships them | `vc`, `netfx`, `dotnet` |
+| .NET Framework 4.0 (2020, 2021, 2023, 2024) | Microsoft's offline installer from Microsoft's download server: the same file and checksum winetricks uses | `netfx` |
 | WebView2 runtime (2024+) | Microsoft's installer for the newest build, from Microsoft's download link; if that download fails, the older one in Revit's installer | `webview2` |
 | Core fonts, MSXML 6 | winetricks downloads them from their usual sources | `fonts` |
 | `riched20.dll`, `msftedit.dll`, `usp10.dll` | The Windows 7 SP1 update package (KB976932) from Microsoft's download server: the same file and checksum winetricks uses | `richedit` |
@@ -138,7 +138,7 @@ Ctrl-C sends in Terminal, and only to a task the app started.
 | `tools/shims/pdfprinter` | The bottle has no printers. Adds the **Revit PDF** printer; Ghostscript turns its output into PDFs in `~/Documents/Revit-PDF`. |
 | `tools/revitini.py` | Writes the `Revit.ini` settings of the `revitini` step (UTF-16, as Revit keeps it). |
 | `tools/win_shortcut.py` | Reads the Start Menu shortcuts the installer creates and builds the macOS apps from them, with the same command line and icon. |
-| `tools/adsk_sfx.py` | Unpacks Autodesk multi-part downloads (Revit 2020, 2023, the 2024 base release) on the Mac. Their own self-extractor runs out of memory under Wine. |
+| `tools/adsk_sfx.py` | Unpacks Autodesk multi-part downloads (Revit 2020, 2021, 2023, the 2024 base release) on the Mac. Their own self-extractor runs out of memory under Wine. |
 | `tools/trustpub.py` | Trusts the publishers of the installed add-ins, as **Always Load** would (the `trust` step). |
 | `tools/adix.py`, `tools/odis.py` | Read Autodesk's installer manifests and unpack ADIX packages (files and registry) into the bottle, instead of the ODIS installer. |
 

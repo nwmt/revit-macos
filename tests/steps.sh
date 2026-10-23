@@ -76,14 +76,14 @@ hold_lock() { # $1 = owner text: a background process that holds the lock like a
 }
 
 # ---- versions.sh and profiles ----
-reset; in_repo 'echo "${REVIT_SUPPORTED[*]}"'; expect "supported years come from the profiles" 0 "2020 2023 2024 2025 2026 2027"
+reset; in_repo 'echo "${REVIT_SUPPORTED[*]}"'; expect "supported years come from the profiles" 0 "2020 2021 2023 2024 2025 2026 2027"
 reset; in_repo 'load_profile 2024 && echo "$YEAR $PRODKEY ${#STEPS[@]} ${REVITINI[1]}"'
 expect "a profile loads" 0 '2024 829P1 21 Interoperability.RealDWGInstalledLocation=C:\Program Files\Autodesk\RealDWG Shared 2024\'
 # a version page lists Dynamo under Works only for a year whose install has the dynamo step
 reset; in_repo 'for y in "${REVIT_SUPPORTED[@]}"; do load_profile "$y"; in_list dynamo "${STEPS[@]}" && continue
   awk "/^## Works/{f=1; next} /^## /{f=0} f" "'"$REPO"'/versions/$y.md" | grep -qi dynamo && echo "$y lists Dynamo"; done; echo checked'
 check "no version page lists Dynamo under Works without the dynamo step" test "$OUT" = checked
-reset; in_repo 'load_profile 2021'; expect "a year without a profile is not loaded" 1 ""
+reset; in_repo 'load_profile 2022'; expect "a year without a profile is not loaded" 1 ""
 reset; in_repo 'load_profile 2027; load_profile 2023; echo "[${ENSCAPE}] ${#ADDIN_STEPS[@]}"'
 expect "loading a profile clears the previous one" 0 "[] 5"
 reset; in_repo '. "$ROOT/scripts/lib/wine.sh"; for f in "$ROOT"/scripts/steps/*.sh; do . "$f"; done
@@ -459,12 +459,17 @@ check "licensing (2020): Current points at the version" test "$(readlink "$AL202
 reset; mkbottle rvt2020-t 2020 2020; mkdist2020; lic_rule 84 2020; run_steps 2020 rvt2020-t licensing
 expect "licensing (2020): 84 is not its code" 1 "Step licensing failed"
 sc_running() { rule "sc query" 0 "echo '        STATE              : 4  RUNNING'"; }
-reset; mkbottle rvt2020-t 2020 2020; mkdir -p "$AL2020/16.1.0.1"; ln -s 16.1.0.1 "$AL2020/Current"; sc_running
+reset; mkbottle rvt2020-t 2020 2020; mkdir -p "$AL2020/9.2.2.2501"; ln -s 9.2.2.2501 "$AL2020/Current"; sc_running
 run_steps 2020 rvt2020-t svcshim; expect "svcshim (2020): the service runs" 0 ""
 check "svcshim (2020): the service starts from the version folder, not Current" \
-  called '"C:\Program Files (x86)\Common Files\Autodesk Shared\AdskLicensing\svcshim.exe" "C:\Program Files (x86)\Common Files\Autodesk Shared\AdskLicensing\16.1.0.1\AdskLicensingService\AdskLicensingService.exe"]'
+  called '"C:\Program Files (x86)\Common Files\Autodesk Shared\AdskLicensing\svcshim.exe" "C:\Program Files (x86)\Common Files\Autodesk Shared\AdskLicensing\9.2.2.2501\AdskLicensingService\AdskLicensingService.exe"]'
 reset; mkbottle rvt2020-t 2020 2020; mkdir -p "$AL2020"; sc_running; run_steps 2020 rvt2020-t svcshim
 expect "svcshim (2020): no Current link fails" 1 "Step svcshim failed"
+AL2021="$BOTTLES/rvt2021-t/drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing"
+reset; mkbottle rvt2021-t 2021 2021; mkdir -p "$AL2021/10.2.0.4231"; ln -s 10.2.0.4231 "$AL2021/Current"; sc_running
+run_steps 2021 rvt2021-t svcshim; expect "svcshim (2021, ODIS): the service runs" 0 ""
+check "svcshim (2021, ODIS): AdskLicensing 10.2 starts from the version folder" \
+  called '\AdskLicensing\10.2.0.4231\AdskLicensingService\AdskLicensingService.exe"]'
 reset; mkbottle rvt2024-t 2024 2024; mkdir -p "$AL2024/16.1.0.1"; ln -s 16.1.0.1 "$AL2024/Current"; sc_running
 run_steps 2024 rvt2024-t svcshim; expect "svcshim (2024): the service runs" 0 ""
 check "svcshim (2024): ImagePath is svcshim.exe alone" called '\AdskLicensing\svcshim.exe"] [/f]'

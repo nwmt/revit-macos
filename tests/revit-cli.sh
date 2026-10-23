@@ -137,7 +137,7 @@ not_called() { ! grep -qF -- "$1" "$CALLS"; }
 reset; run "";                       expect "no arguments print the help" 0 "Usage: ./revit <command> <year> [bottle]"
 reset; run "" frobnicate 2024;       expect "unknown command" 1 "Unknown command: frobnicate"
 reset; run "" install;               expect "missing year" 1 "Which Revit year? Example: ./revit install 2025"
-reset; run "" install 2021;          expect "unsupported year" 1 "Revit 2021 is not supported yet"
+reset; run "" install 2022;          expect "unsupported year" 1 "Revit 2022 is not supported yet"
 reset; run "" remove rvt2024-a 2024; expect "swapped arguments" 1 '"rvt2024-a" is not a Revit year'
 reset; run "" install 2024 default;  expect "bottle name default" 1 'cannot be "default"'
 reset; run "" install 2024 "a b";    expect "bottle name with a space" 1 "Bottle name may contain only"
@@ -154,7 +154,7 @@ check "busy: no second install" not_called "install.sh 2024"
 
 # ---- install.sh ----
 reset; run_install "" 2024 default;  expect "install.sh refuses the bottle name default" 1 'cannot be "default"'
-reset; run_install "" 2021;          expect "install.sh lists the supported years" 1 "Working versions: 2020, 2023, 2024, 2025, 2026, 2027."
+reset; run_install "" 2022;          expect "install.sh lists the supported years" 1 "Working versions: 2020, 2021, 2023, 2024, 2025, 2026, 2027."
 reset; bottle rvt2024-b 2024 2024; run_install INSTALL_DRYRUN=1 2024 rvt2024-b
 expect "install.sh: rebuild hint names the bottle" 1 "rebuild it: ./revit rebuild 2024 rvt2024-b"
 expect "install.sh: final hint names the bottle" 1 "run ./revit install 2024 rvt2024-b again"
@@ -321,7 +321,7 @@ check "events: every line is JSON" valid_ndjson "$T/ev/events.ndjson"
 check "events: start first, with the year as a number and the default bottle" eval 'head -1 "$T/ev/events.ndjson" | grep -qF "{\"event\":\"start\",\"run_id\":\"ev\",\"command\":\"install\",\"year\":2024,\"bottle\":\"rvt2024-a\","'
 check "events: end last, exactly once" eval '[ "$(EV | grep -c "\"event\":\"end\"")" = 1 ] && EV | tail -1 | grep -q "\"event\":\"end\""'
 check "events: nothing on the terminal" eval '! grep -q "\"event\"" <<<"$OUT"'
-reset; run "" install 2021 --events "$T/ev"
+reset; run "" install 2022 --events "$T/ev"
 check "events: a bad year ends as usage" eval 'EV | tail -1 | grep -q "\"result\":\"usage\""'
 check "events: a bad year still starts first" eval 'EV | head -1 | grep -q "\"event\":\"start\""'
 reset; run "" install 2024 --frob --events "$T/ev"
@@ -370,7 +370,7 @@ rc_says() { # the exit code is 1 exactly when a check failed (a ✗ line, or "fa
 valid_doctor_json() { /usr/bin/perl -MJSON::PP -e 'local $/; my $j = decode_json(<STDIN>); my $s = $j->{summary};
   exit 1 unless ref $j->{checks} eq "ARRAY" && @{$j->{checks}} == $s->{checks} && $s->{checks} == $s->{fail} + $s->{warn} + $s->{ok} + $s->{info};
   for (@{$j->{checks}}) { exit 1 unless $_->{status} =~ /^(ok|warn|fail|info)$/ && join(",", sort keys %$_) eq "detail,doc,fix,group,id,status,title" }' <<<"$OUT"; }
-reset; run "" doctor 2021;           expect "doctor: an unsupported year" 1 "Revit 2021 is not supported yet"
+reset; run "" doctor 2022;           expect "doctor: an unsupported year" 1 "Revit 2022 is not supported yet"
 reset; run "" doctor rvt2025-a;      expect "doctor: a bottle where the year goes" 1 '"rvt2025-a" is not a Revit year'
 reset; run "" doctor 2025 "a b";     expect "doctor: a bad bottle name" 1 "Bottle name may contain only"
 reset; run "" doctor --frob;         expect "doctor: an unknown flag" 1 "Unknown option: --frob"
@@ -408,7 +408,7 @@ zip_has() { # $1 = zip, $2 = member name. A variable, not a pipe into grep -q: u
   # unzip SIGPIPE, and the check failed now and then
   local l; l="$(/usr/bin/unzip -l "$1" 2>/dev/null)"; grep -qE " $2\$" <<<"$l"
 }
-reset; run "" report 2021;           expect "report: an unsupported year" 1 "Revit 2021 is not supported yet"
+reset; run "" report 2022;           expect "report: an unsupported year" 1 "Revit 2022 is not supported yet"
 reset; run "" report rvt2025-a;      expect "report: a bottle where the year goes" 1 '"rvt2025-a" is not a Revit year'
 reset; run "" report 2025 "a b";     expect "report: a bad bottle name" 1 "Bottle name may contain only"
 reset; run "" report 2025 --run;     expect "report: --run needs a value" 1 "--run needs a value"
@@ -481,7 +481,7 @@ check "remove: unpacked files deleted despite the copy" test ! -d "$R/installers
 
 # ---- test ----
 reset; run "" test;                  expect "test: missing year" 1 "Which Revit year? Example: ./revit test 2025"
-reset; run "" test 2021;             expect "test: unsupported year" 1 "Revit 2021 is not supported yet"
+reset; run "" test 2022;             expect "test: unsupported year" 1 "Revit 2022 is not supported yet"
 reset; run "" test 2024 rvt2024-a.test; expect "test: the name of a copy is no bottle name" 1 "Bottle name may contain only"
 reset; run "" test 2024;             expect "test: needs the bottle" 1 "There is no bottle rvt2024-a. To install Revit 2024: ./revit install 2024"
 reset; bottle rvt2024-a 2024 2024; run "" test 2024; expect "test runs the test script" 0 ""

@@ -8,12 +8,13 @@ No virtual machine, no Windows installation.
 | Revit | Status | Tested on | Main gaps |
 |---|---|---|---|
 | [2020](versions/2020.md) | ✅ Works | 2020.2 | Dynamo without 3D preview |
+| [2021](versions/2021.md) | ✅ Works | 2021.0 | 2021.1 update not applied; Dynamo without 3D preview |
 | [2023](versions/2023.md) | ✅ Works | 2023.0 | Dynamo node list empty |
 | [2024](versions/2024.md) | ✅ Works | 2024.3.6 | First PDF print may produce nothing |
 | [2025](versions/2025.md) | ✅ Works | 2025.5 | First PDF print may produce nothing |
 | [2026](versions/2026.md) | ⚠️ Mostly works | 2026.5 | PDF, Dynamo, exports not tested |
 | [2027](versions/2027.md) | ✅ Works | 2027.3 | Large models draw slowly the first time |
-| 2021, 2022 | Not tested | | |
+| 2022 | Not tested | | |
 
 - **Works:** the everyday basics work: sign-in, open and save, modeling, views and 3D, Materials, printing to PDF,
   common exports. What is left are minor issues with workarounds.
@@ -65,7 +66,7 @@ Revit appears in the Applications folder of your home folder (in Finder: Go → 
 
 ## First launch
 
-- **Revit 2020, 2023:** sign in in Revit's own window. If Revit then hangs on the splash screen, quit it and start it again.
+- **Revit 2020, 2021, 2023:** sign in in Revit's own window. If Revit then hangs on the splash screen, quit it and start it again.
 - **Revit 2024 and newer:** Revit opens the Autodesk sign-in page in your browser. After you sign in, the browser
   asks which app should open the link. Choose **Autodesk Sign-In (rvt2025-a)**, named after the bottle.
 

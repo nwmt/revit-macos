@@ -17,6 +17,8 @@ def attrs(tag):
 
 def packages(dist):
     app = glob.glob(os.path.join(dist, "manifest", "app.*.xml"))
+    if len(app) > 1:   # 2021: an app.*.xml per package; app.RVT.xml lists them all
+        app = [p for p in app if os.path.basename(p) == "app.RVT.xml"]
     if len(app) != 1:
         sys.exit(f"expected one manifest/app.*.xml in {dist}, found {len(app)}")
     for tag in re.findall(r"<Package\s[^>]*>", open(app[0], encoding="utf-8").read()):

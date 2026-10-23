@@ -136,6 +136,15 @@ class Odis(Tmp):
         self.assertNotEqual(run("odis", "get", self.d, "B").returncode, 0)
         self.assertNotEqual(run("odis", "frobnicate", self.d).returncode, 0)
 
+    def test_several_manifests_read_rvt(self):  # 2021: an app.*.xml per package, app.RVT.xml lists them all
+        os.makedirs(self.path("manifest"))
+        os.makedirs(self.path("x64/A"))
+        open(self.path("manifest/app.RVT.xml"), "w").write(
+            '<Packages><Package name="A" installAs="x" path="x64/A/pkg.A.xml"/></Packages>')
+        open(self.path("manifest/app.Other.xml"), "w").write('<Packages></Packages>')
+        open(self.path("x64/A/pkg.A.xml"), "w").write('<Package><InstallFile type="MSI" file="x64/A/A.msi"/></Package>')
+        self.assertEqual(run("odis", "list", self.d).stdout.split("\t")[0], "A")
+
 
 class Adix(Tmp):
     def adix(self, names):

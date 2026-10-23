@@ -99,6 +99,10 @@ step_pkgs() { # product packages from manifest/app.RVT.xml except RVT (step rvt)
           ditto "${RD}Revit $YEAR" "$RD" && rm -rf "${RD}Revit $YEAR" || r=1
           say "$tag" "$r" "moved its files from \"Revit ${YEAR}Revit $YEAR\" into \"Revit $YEAR\""
         fi ;;
+      EXE) # 2021: content (RCLCRVT, RCLEENU) and Generative Design are WiX Burn bundles over an MSI, /quiet
+        read -r -a extra <<< "$pparams"
+        install_exe "$tag" "$DIST/$pfile" ${extra[@]+"${extra[@]}"}; r=$?
+        accept_codes "$r" 0 3010 && r=0 ;;
       *) say "$tag" skip "type $ptype ($pfile): not supported" ;;
     esac
     [ "$r" = 0 ] || rc=1

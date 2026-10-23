@@ -141,7 +141,7 @@ Revit 2027
 
 ### "You need to install a printer"
 
-Revit 2020, 2023, 2024, 2025
+Revit 2020, 2021, 2023, 2024, 2025
 
 **Solution:** Use the **Revit PDF** printer: `brew install ghostscript`, then `./revit addins 2025 --only pdfprinter`.
 PDFs go to `~/Documents/Revit-PDF`.
@@ -222,7 +222,7 @@ again with the fixes.
 
 ### Dynamo has no 3D background preview
 
-Revit 2020, 2023, 2024, 2025
+Revit 2020, 2021, 2023, 2024, 2025
 
 Expected: it is turned off, because with it Dynamo draws black squares, lags or crashes. Graphs run and results show
 in Revit views.
