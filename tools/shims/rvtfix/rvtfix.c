@@ -42,6 +42,15 @@
  *    Fix: bind the import to USER32!IsWindow (same registers, no side effects, TRUE for a live window): rename it in
  *    the import table if the loader has not bound it yet, otherwise put IsWindow into its import address table slot.
  *
+ * 6. WebView2 host window destroyed with the browser's window inside (Dynamo 4.2 in 2027: its splash screen closes):
+ *    the browser (msedgewebview2.exe) puts its own top-level Chrome_WidgetWin_1 into the client's Chrome_WidgetWin_0
+ *    with SetParent. When the WebView closes, the client destroys its host window; Wine destroys the browser's window
+ *    with it, in the browser process, and Chromium frees its window objects. The "WebView closed" message that comes
+ *    next makes Chromium hide or close those freed objects (aura::Window::Hide, HWNDMessageHandler::Close: IsWindow is
+ *    TRUE, delegate_ is null) -> the browser crashes, every page it serves goes with it, Dynamo crashes.
+ *    Fix: replace user32's DestroyWindow export; before a window of ours is destroyed, move the Chrome_WidgetWin_*
+ *    windows of another process inside it to HWND_MESSAGE. The browser then closes them itself.
+ *
  * 4 and 5 run when the DLL loads (LdrRegisterDllNotification), or at once if it is already loaded.
  *
  * Diagnostics: OutputDebugString with the "[rvtfix]" prefix (CX_DEBUGMSG=+debugstr).
@@ -281,6 +290,64 @@ static void watch_dlls(void)
     if (!reg || reg(0, on_dll, NULL, &cookie)) trace("no LdrRegisterDllNotification: DLLs loaded later are not fixed\n");
 }
 
+/* --- 6. WebView2 host window: the browser's window leaves before the host is destroyed --- */
+typedef BOOL (WINAPI *destroy_fn)(HWND);
+static destroy_fn orig_destroy;
+#define MAX_RESCUE 64
+struct rescue { HWND hwnd[MAX_RESCUE], parent[MAX_RESCUE]; int n, missed; };
+
+static BOOL CALLBACK find_browser(HWND hwnd, LPARAM lp) /* the top Chrome_WidgetWin_* of another process */
+{
+    struct rescue *r = (struct rescue *)lp;
+    char cls[32];
+    HWND parent = GetAncestor(hwnd, GA_PARENT);
+    if (foreign(hwnd) && parent && !foreign(parent) && GetClassNameA(hwnd, cls, sizeof(cls))) {
+        cls[17] = 0;   /* the prefix: "Chrome_WidgetWin_" is 17 characters */
+        if (lstrcmpA(cls, "Chrome_WidgetWin_")) return TRUE;
+        if (r->n < MAX_RESCUE) r->hwnd[r->n++] = hwnd;
+        else r->missed++;
+    }
+    return TRUE;
+}
+
+static BOOL WINAPI hook_destroy(HWND hwnd)
+{
+    struct rescue r = {0};
+    DWORD err;
+    BOOL ok;
+    int i;
+    /* only a window this thread may destroy: DestroyWindow fails on another thread's window */
+    if (hwnd && GetWindowThreadProcessId(hwnd, NULL) == GetCurrentThreadId())
+        EnumChildWindows(hwnd, find_browser, (LPARAM)&r);
+    if (r.missed) trace("DestroyWindow %p: %d more browser windows left inside\n", hwnd, r.missed);
+    for (i = 0; i < r.n; i++) {
+        r.parent[i] = SetParent(r.hwnd[i], HWND_MESSAGE);
+        trace("DestroyWindow %p: browser window %p from %p to HWND_MESSAGE%s\n", hwnd, r.hwnd[i], r.parent[i],
+              r.parent[i] ? "" : " failed");
+    }
+    ok = orig_destroy(hwnd);
+    if (!ok && r.n) { /* refused (a CBT hook): the host lives on, so its browser windows go back */
+        err = GetLastError();
+        for (i = 0; i < r.n; i++)
+            if (r.parent[i] && IsWindow(r.hwnd[i]) && IsWindow(r.parent[i])) SetParent(r.hwnd[i], r.parent[i]);
+        trace("DestroyWindow %p failed: browser windows put back\n", hwnd);
+        SetLastError(err);
+    }
+    return ok;
+}
+
+static void fix_destroy(void)
+{
+    HMODULE user = GetModuleHandleW(L"user32.dll");
+    BYTE *thunk;
+    if (!user || !(thunk = alloc_near((BYTE *)user, 0x1000))) { trace("user32: no thunk\n"); return; }
+    if (patch_export(user, "DestroyWindow", (void *)hook_destroy, (void **)&orig_destroy, thunk))
+        trace("user32!DestroyWindow: browser windows of another process leave first\n");
+    else
+        trace("user32: DestroyWindow not found\n");
+    FlushInstructionCache(GetCurrentProcess(), thunk, 16);
+}
+
 static void fix_dragdrop(void)
 {
     HMODULE ole = LoadLibraryW(L"ole32.dll");
@@ -301,6 +368,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
         GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
                            (LPCWSTR)DllMain, &(HMODULE){0}); /* thunks point here, so never unload */
         fix_dragdrop();
+        fix_destroy();
         fix_webview2();
         fix_cef();
         fix_autodesk();
