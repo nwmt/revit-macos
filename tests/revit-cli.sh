@@ -871,9 +871,9 @@ done
 mcp_world; touch "$T/hold"; MCP_ENV=(MCP_TEST_HOLD="$T/hold"); mcp_bg mcp 2027; mcp_wait '[ -e "$T/hold.reached" ]' 100
 chmod -R u+w "$BOTTLES/rvt2027-a"; stop_fakes; rm -rf "$BOTTLES/rvt2027-a"; rm "$T/hold"; exec 5>&-; wait "$LPID"; rc=$?; MCP_ENV=()
 check "mcp: bottle removed before the lock → refused under the lock" eval '[ "$rc" != 0 ] && grep -q "There is no bottle rvt2027-a" "$T/mcp-err" && [ ! -e "$T/mcp-argv" ]'
-reset; bottle rvt2027-a 2027 2027; mcp_install rvt2027-a "$MCPW"; echo 'addin_plan() { return 1; }' >> "$R/scripts/lib/addins.sh"; run "" addins 2027 --only revitmcp
+reset; bottle rvt2027-a 2027 2027; mcp_install rvt2027-a "$MCPW"; echo 'addin_plan() { return 1; }' >> "$R/scripts/lib/addins.sh"; run "" addins 2027 --only revitmcp --accept-eula revitmcp
 check "addins: a failing plan → refused, no runner" eval '[ "$RC" != 0 ] && grep -q "Could not plan" <<<"$OUT" && ! grep -q run-steps "$CALLS"'
-reset; bottle rvt2027-a 2027 2027; echo 'addin_plan() { :; }' >> "$R/scripts/lib/addins.sh"; run "" addins 2027 --only revitmcp
+reset; bottle rvt2027-a 2027 2027; echo 'addin_plan() { :; }' >> "$R/scripts/lib/addins.sh"; run "" addins 2027 --only revitmcp --accept-eula revitmcp
 check "addins: an empty plan → refused, no runner" eval '[ "$RC" != 0 ] && grep -q "Could not plan" <<<"$OUT" && ! grep -q run-steps "$CALLS"'
 reset; bottle rvt2027-a 2027 2027; fake_wine; run "" addins 2027 --only revitmcp,revitmcp-experimental --accept-eula revitmcp,revitmcp-experimental
 check "addins: both MCP variants at once → refused before anything" eval '[ "$RC" != 0 ] && grep -q "not both" <<<"$OUT" && ! grep -q -e run-steps -e "^wine" "$CALLS"'
@@ -904,5 +904,9 @@ reset; for a in "2027 rvt2027-a" "2027 rvt2027-a 2" "27 rvt2027-a 0"; do
   (cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" /bin/bash "$R/scripts/mcp-launch.sh" $a > "$T/o" 2> "$T/e"); rc=$?
   check "mcp-launch.sh $a: usage, exit 2, stdout empty" eval '[ "$rc" = 2 ] && [ ! -s "$T/o" ] && grep -q "^Usage: scripts/mcp-launch.sh" "$T/e"'
 done
+reset; bottle rvt2027-a 2027 2027; run "" addins 2027 --only revitmcp
+check "addins --only revitmcp without consent: the notice, nothing runs" eval '[ "$RC" = 1 ] && grep -qF "turns ADP on in this bottle. To accept, add --accept-eula revitmcp: ./revit addins 2027 --only revitmcp --accept-eula revitmcp" <<<"$OUT" && ! grep -q run-steps "$CALLS"'
+reset; bottle rvt2027-a 2027 2027; run "" addins 2027 --only revitmcp --accept-eula revitmcp
+check "addins --only revitmcp with consent: the step runs with it" eval '[ "$RC" = 0 ] && called "run-steps.sh 2027 rvt2027-a revitmcp check |"'
 # ---- end ----
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]

@@ -428,6 +428,8 @@ case "$CMD" in
       for id in $(echo "$ONLY" | tr ',' ' '); do
         addin_load "$id" || die "Unknown add-in: $id. Add-ins: ${ADDIN_IDS[*]}"
         addin_available || die "$ADDIN_NAME is not available for Revit $YEAR."
+        [ -z "$ADDIN_NOTICE" ] || case ",$EULA," in *",$id,"*) ;; *)   # consent before anything runs
+          die "$ADDIN_NOTICE To accept, add --accept-eula $id: ./revit addins $YEAR$SFX --only $id --accept-eula $id" ;; esac
         [ -z "$ADDIN_TOOL" ] || command -v "$ADDIN_TOOL" >/dev/null || [ -x "/opt/homebrew/bin/$ADDIN_TOOL" ] \
           || die "$ADDIN_NAME needs $ADDIN_TOOL on this Mac: brew install ghostscript"
         ids+=("$id")
