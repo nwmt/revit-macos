@@ -191,6 +191,8 @@ FIXES = {
     "enscape": _fix("Enscape does not work", _enscape),
     "enscape-off": _fix("Enscape does not load", why="it only moves Enscape's manifest"),
     "enscape-on": _fix("Enscape loads again", why="it only moves Enscape's manifest"),
+    "revitmcp": _fix("an AI assistant does not reach Revit (docs/mcp.md)", why="the mcp group checks its files"),
+    "revitmcp_experimental": _fix("an AI assistant does not reach Revit (docs/mcp.md)", why="the mcp group checks its files"),
 }
 
 

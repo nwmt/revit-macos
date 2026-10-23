@@ -37,13 +37,21 @@ install_exe() { # run_exe and a summary line: "<name> exit=<code> <file> <switch
 msi() { # $1 = name, $2 = Windows path to the MSI, rest = KEY=VALUE properties. Returns msiexec's code.
   # `wine msiexec args…` cannot pass values with spaces (CrossOver escapes quotes as \", Wine's msiexec splits on
   # spaces → 1639): the command line goes into a .cmd file that cmd /c runs
-  local name="$1" path="$2" a line rc; shift 2
-  line="msiexec /i \"$path\" /qn /norestart ALLUSERS=1"
+  msi_run w "" "$@"
+}
+msi_nowait() { # like msi, but waits for msiexec alone: an MSI that starts a program which stays (MicrosoftEdgeUpdate
+  # after the Revit MCP Server's MSI) would hold `wine --wait-children` for as long as that program runs. cmd's
+  # `start /wait` waits for msiexec and returns its code; wine without --wait-children waits for cmd only
+  msi_run w_nowait 'start "" /wait ' "$@"
+}
+msi_run() { # $1 = w | w_nowait, $2 = text before msiexec in the .cmd, then msi's arguments
+  local run="$1" pre="$2" name="$3" path="$4" a line rc; shift 4
+  line="${pre}msiexec /i \"$path\" /qn /norestart ALLUSERS=1"
   for a in "$@"; do case "$a" in *" "*) line+=" ${a%%=*}=\"${a#*=}\"" ;; *) line+=" $a" ;; esac; done
   line+=" /l*v \"C:\\$name.msi.log\""
   printf '@echo off\r\n%s\r\nexit /b %%ERRORLEVEL%%\r\n' "$line" > "$B/drive_c/$name.cmd" || return 1
   cp "$B/drive_c/$name.cmd" "$RUN_DIR/$name.cmd"
-  w cmd /c "C:\\$name.cmd"; rc=$?
+  "$run" cmd /c "C:\\$name.cmd"; rc=$?
   rm -f "$B/drive_c/$name.cmd"; mv "$B/drive_c/$name.msi.log" "$RUN_DIR/" 2>/dev/null
   return $rc
 }

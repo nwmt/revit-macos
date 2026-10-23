@@ -4,7 +4,7 @@
 # (optional) is shown before consent, next to the license.
 ADDIN_NAME="Revit MCP Server (Experimental-Tools)"
 ADDIN_ABOUT="Autodesk's AI connection for Revit 2027 (Technical Preview)"
-ADDIN_NOTICE="Autodesk's MCP Server is a Technical Preview and runs only with Autodesk analytics (ADP); installing it turns ADP on in this bottle."
+ADDIN_NOTICE="$MCP_NOTICE"
 ADDIN_TESTED=()
 ADDIN_EULA="https://www.autodesk.com/company/terms-of-use/en/general-terms"
 ADDIN_AFTER=()

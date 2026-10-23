@@ -94,6 +94,62 @@ net_full() { # .NET Framework 4.7.2 or 4.8 over 2020's 4.7. Not default: Revit 2
   detail "Release $before → $(net_release) (461808 = 4.7.2, 528040+ = 4.8)"
 }
 
+step_revitmcp() { mcp_install_variant revitmcp; }   # Autodesk's Revit MCP Server, Write-Tools (scripts/addins/revitmcp.sh)
+step_revitmcp_experimental() { mcp_install_variant revitmcp-experimental; }
+
+mcp_install_variant() { # $1 = id: the MCP Server variant from its ODIS installer, then ADP and our launcher (mcphost,
+  # mcppipes) next to it (scripts/lib/mcp.sh). One variant per bottle: they share the add-in manifest
+  local id="$1" other exe msi tmp rc sfx; sfx="$(bottle_sfx "$NAME" "$YEAR")"
+  addin_load "$id" || return 1
+  eula_ok "$id" || { echo "$MCP_NOTICE To accept: add --accept-eula $id (./revit addins $YEAR$sfx --only $id --accept-eula $id)"; return 1; }
+  for other in revitmcp revitmcp-experimental; do
+    [ "$other" != "$id" ] || continue
+    if [ "$(mcp_installed_variant)" = "$other" ] || mcp_product_registered "$other"; then
+      echo "Another variant of the Revit MCP Server ($other) is installed in this bottle, and only one can be. To switch: ./revit rebuild $YEAR$sfx, then install $id"
+      return 1
+    fi
+  done
+  mcp_adp_version >/dev/null || { echo "the Revit $YEAR installer is not unpacked: ./scripts/unpack-revit.sh $YEAR"; return 1; }
+  if mcp_product_registered "$id" && [ -f "$(mcp_folder "$id")/$MCP_SERVER_EXE" ] && [ "$(mcp_installed_variant)" = "$id" ]; then
+    echo "$ADDIN_NAME is installed; ADP and the launcher are checked"
+  else
+    exe="$DATA/installers/addins/$(mcp_field "$id" 4)"; msi="$(mcp_field "$id" 3)"
+    [ -f "$exe" ] || { echo "no installers/addins/$(mcp_field "$id" 4) (./revit addins import $id <file>)"; return 1; }
+    command -v 7zz >/dev/null || { echo "7zz required: brew install sevenzip"; return 1; }
+    tmp="$(mktemp -d)" || return 1
+    7zz x -y -o"$tmp" "$exe" "$(dirname "$msi")/*" >/dev/null && cp "$tmp/$msi" "$B/drive_c/$id.msi"; rc=$?
+    rm -rf "$tmp"; [ $rc = 0 ] || { echo "could not take $msi out of $(basename "$exe")"; return 1; }
+    if mcp_product_registered "$id"; then   # registered, but files or the manifest are gone: a repair puts them back
+      msi_nowait "$id" "C:\\$id.msi" ADSK_SETUP_EXE=1 REINSTALL=ALL REINSTALLMODE=amus; rc=$?
+    else
+      msi_nowait "$id" "C:\\$id.msi" ADSK_SETUP_EXE=1; rc=$?
+    fi
+    rm -f "$B/drive_c/$id.msi"
+    accept_codes "$rc" 0 194 || { echo "the $ADDIN_NAME MSI returned $rc"; return 1; }
+  fi
+  adp_install || return 1
+  ensure_shim mcphost && ensure_shim mcppipes || return 1
+  cp "$(shim_dir)/mcphost/mcphost.exe" "$(shim_dir)/mcppipes/mcppipes.dll" "$(mcp_folder "$id")/" || return 1
+  mcp_ready "$id" || { echo "$ADDIN_NAME is not complete: $(mcp_missing "$id") is missing"; return 1; }
+  detail "$ADDIN_NAME; ADP $(cat "$(mcp_adp_marker)"); mcphost and mcppipes"
+}
+
+adp_install() { # Autodesk analytics (ADP Desktop SDK), which the MCP Server's add-in requires, from the unpacked Revit
+  # installer, its packages unchanged: InstallCustomAction action=pre → the ZIP into Common Files → action=post. The
+  # marker (the package version) is written only after all three; it goes first, so a cut-short run repeats all three
+  local v d m t rc
+  v="$(mcp_adp_version)" || { echo "the Revit $YEAR installer is not unpacked: ./scripts/unpack-revit.sh $YEAR"; return 1; }
+  d="$(mcp_dist)/x64/AdpSdk"; m="$(mcp_adp_marker)"; t="$(dirname "$(mcp_adp_core)")"
+  [ "$(cat "$m" 2>/dev/null)" = "$v" ] && [ -f "$(mcp_adp_core)" ] && { echo "ADP $v is installed"; return 0; }
+  rm -f "$m" || return 1
+  run_exe InstallCustomAction "$d/InstallCustomAction.exe" action=pre > "$RUN_DIR/adp-pre.log" 2>&1; rc=$?
+  [ $rc = 0 ] || { echo "ADP: InstallCustomAction action=pre returned $rc"; return 1; }
+  mkdir -p "$t" && unzip -q -o "$d/adp-desktop-sdk.zip" -d "$t" || { echo "ADP: could not unpack adp-desktop-sdk.zip"; return 1; }
+  run_exe InstallCustomAction "$d/InstallCustomAction.exe" action=post > "$RUN_DIR/adp-post.log" 2>&1; rc=$?
+  [ $rc = 0 ] || { echo "ADP: InstallCustomAction action=post returned $rc"; return 1; }
+  mkdir -p "$(dirname "$m")" && printf '%s\n' "$v" > "$m.tmp" && mv "$m.tmp" "$m"
+}
+
 step_enscape() { # Enscape with its fixes, for the version in the profile (ENSCAPE: 3 for 2020, 4 for 2027)
   case "$ENSCAPE" in
     3) enscape3 ;; 4) enscape4 ;;

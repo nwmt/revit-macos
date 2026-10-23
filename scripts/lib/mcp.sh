@@ -8,6 +8,7 @@ MCP_VARIANTS=(
   "revitmcp-experimental|Revit 2027 MCP Server Experimental-Tools Technical Preview|x64/RMCE/RMCE.msi|publicmcpserver/PublicMcpServerExperimental.exe|{A4B5C6D7-2701-0010-4804-C5384500AB01}"
 )
 MCP_SERVER_EXE=Autodesk.RevitMcpServer.Stdio.exe
+MCP_NOTICE="Autodesk's MCP Server is a Technical Preview and runs only with Autodesk analytics (ADP); installing it turns ADP on in this bottle."
 
 mcp_field() { # $1 = id, $2 = column (1 = id … 5 = ProductCode); 1 = no such variant
   local v; for v in "${MCP_VARIANTS[@]}"; do
@@ -19,7 +20,7 @@ mcp_folder()   { local f; f="$(mcp_field "$1" 2)" && echo "$B/drive_c/Program Fi
 mcp_manifest() { echo "$B/drive_c/Program Files/Autodesk/Revit/Addins/$YEAR/Autodesk.RevitMcpServer.addin"; }
 mcp_adp_marker() { echo "$B/drive_c/ProgramData/revit-macos/adp"; }   # the ADP package version, after a complete install
 mcp_adp_core() { echo "$B/drive_c/Program Files/Common Files/Autodesk/AdpDesktopSDK/bin/AdpSDKCore.dll"; }
-mcp_dist() { echo "$DATA/installers/extracted/revit$YEAR"; }   # the unpacked Revit installer: ADP comes from there
+mcp_dist() { revit_dist "$YEAR"; }   # the unpacked Revit installer: ADP comes from there
 mcp_adp_version() { # the ADP package version of the unpacked installer; nothing and 1 when it is not there
   local v; v="$(sed -n 's:.*<BuildNumber>\([^<]*\)</BuildNumber>.*:\1:p' "$(mcp_dist)/x64/AdpSdk/pkg.adp-desktop-sdk.xml" 2>/dev/null | head -1)"
   [ -n "$v" ] && echo "$v"
@@ -47,3 +48,7 @@ mcp_missing() { # $1 = id: the first piece that is missing, as a short phrase; n
   return 0
 }
 mcp_ready() { [ -z "$(mcp_missing "$1")" ]; }   # $1 = id
+mcp_product_registered() { # $1 = id: its MSI is registered, asked of the running wineserver (system.reg on disk lags
+  # behind by up to half a minute). Needs wine.sh
+  w reg query "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\$(mcp_field "$1" 5)" >/dev/null 2>&1
+}

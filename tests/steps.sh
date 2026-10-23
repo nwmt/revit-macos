@@ -716,12 +716,96 @@ check "mcp: no installer, no ADP version, nothing ready" test "$OUT" = "|1
 |the MCP Server files|the MCP Server files"
 reset; mkdir -p "$R/installers/extracted/revit2027/x64/AdpSdk"
 printf '<Package>\n  <Identity>\n    <BuildNumber>6.3.44.3</BuildNumber>\n  </Identity>\n</Package>\n' > "$R/installers/extracted/revit2027/x64/AdpSdk/pkg.adp-desktop-sdk.xml"
-mkbottle rvt2027-t 2027 2027; mcp_state 'mcp_adp_version'
+echo '<Setup/>' > "$R/installers/extracted/revit2027/setup.xml"; mkbottle rvt2027-t 2027 2027; mcp_state 'mcp_adp_version'
 check "mcp: the ADP version from the unpacked installer" grep -qx "6.3.44.3" <<<"$OUT"
 reset; mcp_bottle rvt2027-t "$MCPW"; mcp_state 'unset DIST; mcp_field revitmcp 5; mcp_field revitmcp-experimental 3; mcp_field nosuch 2 || echo none'
 check "mcp: the table's ProductCode, MSI path and an unknown id" grep -qF "{A2B3C4D5-2701-0010-4804-C5384500AB01}
 x64/RMCE/RMCE.msi
 none" <<<"$OUT"
+
+# ---- the Revit MCP Server: the install step ----
+MW="$BOTTLES/rvt2027-t/drive_c/Program Files/Autodesk/$MCPW"; ME="$BOTTLES/rvt2027-t/drive_c/Program Files/Autodesk/$MCPE"
+MCPM="$BOTTLES/rvt2027-t/drive_c/Program Files/Autodesk/Revit/Addins/2027/Autodesk.RevitMcpServer.addin"
+ADPM="$BOTTLES/rvt2027-t/drive_c/ProgramData/revit-macos/adp"
+ADPC="$BOTTLES/rvt2027-t/drive_c/Program Files/Common Files/Autodesk/AdpDesktopSDK/bin/AdpSDKCore.dll"
+CODEW="{A2B3C4D5-2701-0010-4804-C5384500AB01}"; CODEE="{A4B5C6D7-2701-0010-4804-C5384500AB01}"
+mcp_world() { # a 2027 bottle, the MCP Server installers, the unpacked Revit installer with ADP, a fake 7zz
+  mkbottle rvt2027-t 2027 2027; mkdist 2027
+  local a="$R/installers/extracted/revit2027/x64/AdpSdk"; mkdir -p "$a" "$T/bin" "$T/zip" "$R/installers/addins/publicmcpserver"
+  printf '<Package>\n  <Identity>\n    <BuildNumber>6.3.44.3</BuildNumber>\n  </Identity>\n</Package>\n' > "$a/pkg.adp-desktop-sdk.xml"
+  touch "$a/InstallCustomAction.exe" "$T/zip/AdpSDKCore.dll" "$R/installers/addins/publicmcpserver/PublicMcpServer.exe" \
+    "$R/installers/addins/publicmcpserver/PublicMcpServerExperimental.exe"
+  (cd "$T/zip" && zip -q "$a/adp-desktop-sdk.zip" AdpSDKCore.dll)
+  # fake 7zz: x -y -o<dir> <exe> <x64/RMxx/*> makes <dir>/x64/RMxx/RMxx.msi
+  { echo '#!/bin/bash'; echo "echo \"7zz \$*\" >> \"$CALLS\""
+    echo 'o=""; for a in "$@"; do case "$a" in -o*) o="${a#-o}" ;; esac; done'
+    echo 'p="${@: -1}"; d="${p%/*}"; mkdir -p "$o/$d" && echo msi > "$o/$d/${d##*/}.msi"'; } > "$T/bin/7zz"
+  # what the fake MSI of variant folder $1 leaves: the server and the manifest that points at it
+  { echo '#!/bin/bash'; echo "d=\"$BOTTLES/rvt2027-t/drive_c/Program Files/Autodesk/\$1\"; m=\"$MCPM\""
+    echo 'mkdir -p "$d" "$(dirname "$m")" && touch "$d/Autodesk.RevitMcpServer.Stdio.exe" &&'
+    echo "  printf '<RevitAddIns><AddIn><Assembly>C:\\\\Program Files\\\\Autodesk\\\\%s\\\\Autodesk.RevitMcpServer.Addin.dll</Assembly></AddIn></RevitAddIns>\\r\\n' \"\$1\" > \"\$m\""; } > "$T/mcp-msi.sh"
+  chmod +x "$T/bin/7zz" "$T/mcp-msi.sh"
+}
+mcp_rules() { # $1 = exit code of the Write-Tools MSI, then the ProductCodes the fake live registry knows (others: 1)
+  local c rc="$1"; shift
+  for c in "$@"; do rule "Uninstall\\$c" 0; done
+  rule "Uninstall\\{" 1; rule "revitmcp.cmd" "$rc" "\"$T/mcp-msi.sh\" '$MCPW'"; rule "revitmcp-experimental.cmd" 0 "\"$T/mcp-msi.sh\" '$MCPE'"
+}
+mcp_run() { STEP_ENV=(PATH="$T/bin:$PATH" REVIT_ACCEPT_EULA="${MCP_EULA:-}"); run_steps 2027 rvt2027-t "$@"; }
+reset; mcp_world; mcp_rules 0; MCP_EULA="" mcp_run revitmcp
+expect "revitmcp without consent refuses" 1 "revitmcp"
+check "revitmcp: the log has the notice and the flag" grep -q "turns ADP on in this bottle. To accept: add --accept-eula revitmcp" "$RUN/revitmcp.log"
+check "revitmcp without consent: nothing ran" eval '! grep -q -e "7zz" -e "\[cmd\]" -e InstallCustomAction "$CALLS"'
+reset; mcp_world; mcp_rules 0; MCP_EULA=revitmcp mcp_run revitmcp; expect "revitmcp: a first install" 0 "revitmcp"
+check "first install: the fake manifest names the folder" grep -qF 'C:\Program Files\Autodesk\Revit 2027 MCP Server Write-Tools Technical Preview\Autodesk' "$MCPM"
+check "first install: x64/RMCP only, from the ODIS exe" grep -q 'PublicMcpServer.exe x64/RMCP/\*$' "$CALLS"
+check "first install: msiexec waits for itself alone (no --wait-children)" grep -qF "[--bottle] [rvt2027-t] [cmd] [/c] [C:\\revitmcp.cmd]" "$CALLS"
+check "first install: start /wait in the .cmd" grep -q '^start "" /wait msiexec /i "C:\\revitmcp.msi" .*ADSK_SETUP_EXE=1' "$RUN/revitmcp.cmd"
+check "first install: not a repair" eval '! grep -q REINSTALL "$RUN/revitmcp.cmd"'
+check "first install: the live registry was asked" called "[reg] [query] [HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\$CODEW]"
+check "first install: ADP pre, then post" eval '[ "$(grep -o "InstallCustomAction.exe\] \[action=[a-z]*" "$CALLS" | tr "\n" " ")" = "InstallCustomAction.exe] [action=pre InstallCustomAction.exe] [action=post " ]'
+check "first install: ADP marker and AdpSDKCore.dll" eval '[ "$(cat "$ADPM")" = 6.3.44.3 ] && [ -f "$ADPC" ]'
+check "first install: mcphost and mcppipes next to the server" eval 'cmp -s "$R/build/mcphost/mcphost.exe" "$MW/mcphost.exe" && cmp -s "$R/build/mcppipes/mcppipes.dll" "$MW/mcppipes.dll"'
+check "first install: no MSI left in drive_c" test ! -e "$BOTTLES/rvt2027-t/drive_c/revitmcp.msi"
+check "first install: no system.reg was needed" test ! -e "$BOTTLES/rvt2027-t/system.reg"
+for g in 'rm "$MW/Autodesk.RevitMcpServer.Stdio.exe"|Stdio.exe' 'rm "$MCPM"|the manifest'; do
+  reset; mcp_world; mcp_rules 0 "$CODEW"; "$T/mcp-msi.sh" "$MCPW"; MCP_EULA=revitmcp mcp_run revitmcp
+  : > "$CALLS"; eval "${g%|*}"; MCP_EULA=revitmcp mcp_run revitmcp
+  expect "revitmcp again without ${g#*|}: ready again" 0 "revitmcp"
+  check "without ${g#*|}: registered → a repair, not a first install" grep -q 'ADSK_SETUP_EXE=1 REINSTALL=ALL REINSTALLMODE=amus' "$RUN/revitmcp.cmd"
+done
+reset; mcp_world; mcp_rules 0 "$CODEW"; "$T/mcp-msi.sh" "$MCPW"; MCP_EULA=revitmcp mcp_run revitmcp
+: > "$CALLS"; rm "$MW/mcphost.exe"; MCP_EULA=revitmcp mcp_run revitmcp
+expect "revitmcp again without mcphost.exe: ready again" 0 "revitmcp"
+check "without mcphost.exe: no MSI, the launcher copied again" eval '! grep -q "\[cmd\]" "$CALLS" && [ -f "$MW/mcphost.exe" ]'
+check "without mcphost.exe: ADP skipped (marker and DLL there)" not_called "InstallCustomAction"
+reset; mcp_world; mcp_rules 0; "$T/mcp-msi.sh" "$MCPE"; MCP_EULA=revitmcp mcp_run revitmcp
+expect "revitmcp with the Experimental manifest refuses" 1 "revitmcp"
+check "other variant: the log says to rebuild" grep -q "only one can be. To switch: ./revit rebuild 2027 rvt2027-t" "$RUN/revitmcp.log"
+check "other variant: no msiexec" not_called "[cmd]"
+reset; mcp_world; mcp_rules 0 "$CODEE"; MCP_EULA=revitmcp mcp_run revitmcp
+expect "revitmcp with Experimental registered, its manifest gone, refuses" 1 "revitmcp"; check "other registered: no msiexec" not_called "[cmd]"
+reset; mcp_world; mcp_rules 194; MCP_EULA=revitmcp mcp_run revitmcp; expect "revitmcp: msiexec 194 (reboot) is fine" 0 "revitmcp"
+reset; mcp_world; mcp_rules 67; MCP_EULA=revitmcp mcp_run revitmcp; expect "revitmcp: msiexec 67 (1603) fails" 1 "revitmcp"
+check "1603: the log names the code" grep -q "MSI returned 67" "$RUN/revitmcp.log"; check "1603: no ADP" not_called "InstallCustomAction"
+reset; mcp_world; mcp_rules 0; MCP_EULA=revitmcp-experimental mcp_run revitmcp_experimental
+expect "revitmcp_experimental: a first install" 0 "revitmcp_experimental"
+check "experimental: x64/RMCE, the launcher in its folder" eval 'grep -q "PublicMcpServerExperimental.exe x64/RMCE/\*$" "$CALLS" && [ -f "$ME/mcphost.exe" ]'
+for a in "action=pre|pre" "unzip|unzip" "action=post|post"; do
+  reset; mcp_world; mcp_rules 0
+  case "${a%|*}" in unzip) : > "$R/installers/extracted/revit2027/x64/AdpSdk/adp-desktop-sdk.zip" ;; *) rule "${a%|*}" 5 ;; esac
+  MCP_EULA=revitmcp mcp_run revitmcp; expect "ADP failing at ${a#*|}: the step fails" 1 "revitmcp"
+  check "ADP failing at ${a#*|}: no marker" test ! -e "$ADPM"
+done
+: > "$RULES"; mcp_rules 0 "$CODEW"; : > "$CALLS"; MCP_EULA=revitmcp mcp_run revitmcp
+check "ADP: a rerun after a failed post runs pre again and writes the marker" eval 'grep -q "action=pre" "$CALLS" && [ -s "$ADPM" ]'
+reset; mcp_world; mcp_rules 0; MCP_EULA=revitmcp mcp_run revitmcp; rm "$ADPC"; : > "$RULES"; rule "action=post" 5; mcp_rules 0 "$CODEW"
+MCP_EULA=revitmcp mcp_run revitmcp; expect "ADP: marker but no DLL, post fails" 1 "revitmcp"; check "ADP: the old marker is gone" test ! -e "$ADPM"
+reset; mcp_world; mcp_rules 0; MCP_EULA=revitmcp mcp_run revitmcp; : > "$RULES"; mcp_rules 0 "$CODEW"; : > "$CALLS"; MCP_EULA=revitmcp mcp_run revitmcp
+expect "revitmcp twice" 0 ""; check "twice: ADP skipped, no msiexec" eval '! grep -q -e InstallCustomAction -e "\[cmd\]" "$CALLS"'
+reset; mcp_world; mcp_rules 0; rm -rf "$R/installers/extracted/revit2027"; MCP_EULA=revitmcp mcp_run revitmcp
+expect "revitmcp without the unpacked installer" 1 "revitmcp"
+check "no unpacked installer: the hint, before any msiexec" eval 'grep -q "not unpacked: ./scripts/unpack-revit.sh 2027" "$RUN/revitmcp.log" && ! grep -q "\[cmd\]" "$CALLS"'
 
 # ---- scripts around the install ----
 reset; cat > "$CXF/bin/cxbottle" <<EOF
