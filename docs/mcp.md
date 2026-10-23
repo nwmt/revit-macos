@@ -47,7 +47,8 @@ The model's tools appear once the server has found Revit, a few seconds after th
 
 `./revit mcp 2027` lets the assistant only read: query the model, read elements, open, show and select views and
 elements, export views. To let it change the model, add `--write` (`"args": ["mcp", "2027", "--write"]`): it can then
-change parameters and move or rotate elements.
+change parameters and move or rotate elements. Ask it to review the changes: Autodesk's review lists every element it
+changed in this session.
 
 **Experimental-Tools** is a second installer from the same page (`PublicMcpServerExperimental.exe`) with about 40 tools:
 sheets, views, schedules, deleting elements, exports. Autodesk offers it at your own risk. Install it the same way

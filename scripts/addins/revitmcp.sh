@@ -5,7 +5,7 @@
 ADDIN_NAME="Revit MCP Server (Write-Tools)"
 ADDIN_ABOUT="Autodesk's AI connection for Revit 2027 (Technical Preview)"
 ADDIN_NOTICE="$MCP_NOTICE"
-ADDIN_TESTED=()
+ADDIN_TESTED=(2027)
 ADDIN_EULA="https://www.autodesk.com/company/terms-of-use/en/general-terms"
 ADDIN_AFTER=()
 ADDIN_TOOL=""
