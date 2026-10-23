@@ -19,6 +19,7 @@ shim_spec() { # $1 = shim → OUT (its file in build/<shim>/), FLAGS, LIBS; 1 = 
   FLAGS=(-Wno-unused-parameter); LIBS=()
   case "$1" in
     d3dwp)      OUT=d3dwp.dll;       FLAGS+=(-shared) ;;
+    mcppipes)   OUT=mcppipes.dll;    FLAGS+=(-shared) ;;
     ncryptshim) OUT=ncrypt.dll;      FLAGS+=(-shared -municode); LIBS=(-lbcrypt -Wl,--enable-stdcall-fixup) ;;
     pdfprinter) OUT=add_printer.exe; FLAGS+=(-municode);         LIBS=(-lwinspool) ;;
     rvtfix)     OUT=rvtfix.dll;      FLAGS+=(-shared);           LIBS=(-luser32 -lole32) ;;
