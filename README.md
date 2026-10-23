@@ -82,6 +82,7 @@ Run them in Terminal, in the project folder. In a new Terminal window, first typ
 | `./revit addins 2025` | Add RevitLookup and pyRevit, with the fixes add-ins need (2020, 2023–2027) |
 | `./revit addins 2025 --only pdfprinter` | Add only the add-ins named (comma-separated), here the **Revit PDF** printer. It needs Ghostscript: `brew install ghostscript` |
 | `./revit addins list 2025` | List the add-ins for Revit 2025 |
+| `./revit mcp 2027` | Connect an AI assistant to a running Revit 2027, through Autodesk's Revit MCP Server ([how](docs/mcp.md)) |
 | `./revit stop 2025` | Quit a Revit that hangs |
 | `./revit logs 2025` | List the newest logs |
 | `./revit debug 2025` | Start Revit and record a log |

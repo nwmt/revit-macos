@@ -51,9 +51,13 @@ For `./revit addins`. It downloads RevitLookup (github.com/lookup-foundation/Rev
 | Enscape 3.4.4 | 2020 | `Enscape-3.4.4-94564.msi` | `installers/addins/enscape/` |
 | Enscape 4.18 LTS | 2027 | `Enscape-4.18.2.1657-lts.exe` | `installers/addins/enscape/` |
 | System.ValueTuple 4.5.0, for Enscape | 2020 | `system.valuetuple.4.5.0.nupkg` | `installers/redist/nuget/` |
+| Revit MCP Server Write-Tools | 2027 | `PublicMcpServer.exe` | `installers/addins/publicmcpserver/` |
+| Revit MCP Server Experimental-Tools | 2027 | `PublicMcpServerExperimental.exe` | `installers/addins/publicmcpserver/` |
 
 `./revit addins` installs Enscape only when you name it: `./revit addins <year> --only enscape --accept-eula enscape`
 (the Enscape installer accepts the Enscape EULA). Enscape comes from your Chaos account, System.ValueTuple from nuget.org.
+The Revit MCP Server comes from your Autodesk Account; `./revit addins import revitmcp <file>` copies it to its place
+([how to install and use it](../docs/mcp.md)).
 
 ## Disk space
 
