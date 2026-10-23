@@ -222,7 +222,7 @@ again with the fixes.
 
 ### Dynamo has no 3D background preview
 
-Revit 2020, 2021, 2023, 2024, 2025
+Revit 2020, 2021, 2023, 2024, 2025, 2027
 
 Expected: it is turned off, because with it Dynamo draws black squares, lags or crashes. Graphs run and results show
 in Revit views.

@@ -61,11 +61,11 @@ In install order. Normal install steps have "—" in What breaks.
 | `tlbpin` | Creating views with text is 2–3× slower; long edits poll the mouse slowly | Cache for a type library and for the cursor position | all |
 | `warpshim` | Materials dialog does not open; its previews crash (`AdPreviewGenerator.exe`) | Software D3D11 device → normal device, through `tools/shims/rvtfix`, in Revit and in the preview process (loaded there by `tools/shims/wv2fix`) | all |
 | `gdoff` | Generative Design error on start | Turn the add-in off | 2023+ |
-| `rvtfix` | Start screen blank or white; 2026+: the browser uses about 60% CPU and the view is slow; crash when opening a view (a Windows function Wine lacks) | Browser draws inside Revit, with flags that make it draw; the missing function answered in memory | 2023+ (2020, 2021: for `warpshim`) |
+| `rvtfix` | Start screen blank or white; 2026+: the browser uses about 60% CPU and the view is slow; crash when opening a view (a Windows function Wine lacks); 2027: Dynamo crashes when its start window closes | Browser draws inside Revit, with flags that make it draw; the missing function answered in memory; the browser's window is moved out before Revit destroys the window it sits in | 2023+ (2020, 2021: for `warpshim`) |
 | `wv2fix` | The built-in browser (WebView2) crashes on clicks and resizes | Own `version.dll` in the browser process | 2024+ |
 | `downloads` | Insert → Load Autodesk Family stops at 100%: the browser saves the family into Downloads first, and macOS does not let it list the Mac's `~/Downloads` | Windows' Downloads folder moves into the bottle; the Mac's folder is not touched | 2026, 2027 |
 | `pdfprinter` (an add-in: `./revit addins <year> --only pdfprinter`) | No printer, so Print and Page Setup do not open | **Revit PDF** printer: PostScript → Ghostscript → PDF in `~/Documents/Revit-PDF` | 2020, 2021, 2023–2025 (2026: not tested) |
-| `dynamo` | Dynamo's 3D preview draws black squares, lags or crashes | Dynamo without hardware acceleration and background preview | 2020, 2021, 2023–2025 |
+| `dynamo` | Dynamo's 3D preview draws black squares, lags or crashes | Dynamo without hardware acceleration and background preview; 2027: Dynamo does not wait on its start window, which stays white | 2020, 2021, 2023–2025, 2027 |
 | `urlhandler` | macOS does not know the link that returns from the browser to Revit: "Opening product" and nothing happens | The **Autodesk Sign-In** app passes the link into the bottle | 2024+ |
 
 Some fixes were carried over from another version as they are, without checking that this version still needs them.

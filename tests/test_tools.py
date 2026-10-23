@@ -119,8 +119,10 @@ class DynamoSettings(Tmp):
         text = open(p).read()
         self.assertIn("<UseHardwareAcceleration>false</UseHardwareAcceleration>", text)
         self.assertIn("<IsFirstRun>false</IsFirstRun>", text)
+        self.assertIn("<EnableStaticSplashScreen>false</EnableStaticSplashScreen>", text)
         self.assertEqual(run("dynamo_settings", p).returncode, 0)
         self.assertEqual(open(p).read().count("IsRevitBackgroundPreviewActive"), 1)
+        self.assertEqual(open(p).read().count("EnableStaticSplashScreen"), 2)   # one element: open and close tag
 
 
 class Odis(Tmp):

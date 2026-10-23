@@ -161,12 +161,13 @@ step_gdoff() { # Generative Design: "GenerativeDesignForRevitApplication does no
   detail "GenerativeDesignForRevit.addin → .addin.off"
 }
 
-step_dynamo() { # Dynamo's 3D preview breaks under D3DMetal: hardware acceleration and the background preview off
-  # (tools/dynamo_settings.py). Dynamo writes the file on exit: run with Revit closed
+step_dynamo() { # Dynamo's 3D preview breaks under D3DMetal: hardware acceleration and the background preview off;
+  # no static splash screen, which stays white in 2027 (tools/dynamo_settings.py). Dynamo writes the file on exit: run
+  # with Revit closed
   local ds
   [ -n "$DYNAMO" ] || { skip "no Dynamo settings for Revit $YEAR"; return 0; }
   ds="$B/drive_c/users/crossover/AppData/Roaming/Dynamo/Dynamo Revit/$DYNAMO/DynamoSettings.xml"
   mkdir -p "$(dirname "$ds")" || return 1
   python3 -I "$ROOT/tools/dynamo_settings.py" "$ds" || return 1
-  detail "Dynamo $DYNAMO: UseHardwareAcceleration=false, IsBackgroundPreviewActive=false"
+  detail "Dynamo $DYNAMO: UseHardwareAcceleration=false, IsBackgroundPreviewActive=false, EnableStaticSplashScreen=false"
 }

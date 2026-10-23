@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Turn off Dynamo's hardware acceleration and its background 3D preview; keep the preview in Revit views.
+"""Turn off Dynamo's hardware acceleration and its background 3D preview; keep the preview in Revit views; skip the
+static splash screen.
 
   dynamo_settings.py <DynamoSettings.xml>
 
 Dynamo's 3D preview (HelixToolkit.SharpDX) breaks under D3DMetal: a crash in 2020 (GetSharedHandle → E_NOTIMPL),
 black squares and lag across Revit in 2023. Dynamo writes the file on its first run and on exit; a missing file gets
-a minimal one. Run with Revit closed, with python3 -I.
+a minimal one. The splash screen of Dynamo 4.2 (2027) is a WebView2 page that loads but stays white, and Dynamo waits
+there for "Launch Dynamo": EnableStaticSplashScreen=false (its "Don't show this again") lets Dynamo go on by itself.
+Older Dynamo ignores the unknown element. Run with Revit closed, with python3 -I.
 """
 import os
 import sys
@@ -24,10 +27,11 @@ def main():
         root = ET.Element("PreferenceSettings")
         tree = ET.ElementTree(root)
         ET.SubElement(root, "IsFirstRun").text = "false"
-    e = root.find("UseHardwareAcceleration")
-    if e is None:
-        e = ET.SubElement(root, "UseHardwareAcceleration")
-    e.text = "false"
+    for key in ("UseHardwareAcceleration", "EnableStaticSplashScreen"):
+        e = root.find(key)
+        if e is None:
+            e = ET.SubElement(root, key)
+        e.text = "false"
     previews = root.find("BackgroundPreviews")
     if previews is None:
         previews = ET.SubElement(root, "BackgroundPreviews")
