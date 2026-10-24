@@ -22,12 +22,16 @@
  *    the harness passes kernelbase.dll), CreateRemoteThread(LoadLibraryW), that thread must end with a module, then the
  *    DLL's acknowledgement <folder>\.hook must read "ok <server pid>". Anything else: one line on stderr naming the
  *    stage, the job is ended, exit 3.
- * 5. Every 2 s a scan process (mcphost --scan, in the job, one at a time) reads the handle tables of the bottle's
- *    Revit.exe processes and writes the names of their \Device\NamedPipe\revit-mcp-<year>-<32 hex> handles, then
+ * 5. A scan process (mcphost --scan, in the job, one at a time) reads the handle tables of the bottle's Revit.exe
+ *    processes and writes the names of their \Device\NamedPipe\revit-mcp-<year>-<32 hex> handles, then
  *    "complete <generation>", to <out>.tmp and renames it. Under Wine object names come from wineserver without I/O,
  *    so a query is not expected to block; still, a scan that runs over 1.5 s is ended and waited for, and its files
  *    are not read. Only a complete scan of the current generation changes the folder: new names get a marker, markers
- *    the scan did not see go.
+ *    the scan did not see go. Scans run every 2 s only until every Revit.exe has a pipe: a scan duplicates each of
+ *    Revit's handles, and doing that while the add-in's pipe changes about 5 minutes after the last tool call crashes
+ *    wineserver (CrossOver 26). Once settled, every 2 s mcphost only lists the Revit.exe processes (PID and creation
+ *    time) and asks for each marker's pipe by name (WaitNamedPipeW); a changed list or a pipe that is gone means a
+ *    new scan.
  * 6. If a Revit.exe runs and no scan found a pipe 20 s after the resume, one line on stderr says so; the server keeps
  *    running (Revit may still be opening).
  * Test build for the harness only: -DMCPHOST_TEST_SCAN_HANG (the scan sleeps 60 s).
@@ -335,7 +339,8 @@ static int scan_apply(DWORD gen, int *revits)
         else if (line[0] == 'r' && !memcmp(line, "revit ", 6)) r++;
         else if (!memcmp(line, "name ", 5) && n < MAX_NAMES && lstrlenA(line + 5) < NAME_LEN) {
             MultiByteToWideChar(CP_ACP, 0, line + 5, -1, seen[n], NAME_LEN);
-            if (pipe_name_ok(seen[n])) n++;
+            int d; for (d = 0; d < n && lstrcmpW(seen[d], seen[n]); d++) ;   /* one per pipe, not per instance */
+            if (d == n && pipe_name_ok(seen[n])) n++;
         }
     }
     if (!complete) return -1;
@@ -359,6 +364,51 @@ static int scan_apply(DWORD gen, int *revits)
         FindClose(h);
     }
     return n;
+}
+
+/* the Revit.exe processes now: their count, and *sig, which changes when one starts or ends; no handle is duplicated */
+static int revits_now(ULONGLONG *sig)
+{
+    PROCESSENTRY32W pe = { sizeof(pe) };
+    int r = 0;
+    *sig = 0;
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) { *sig = ~0ULL; return -1; }
+    if (Process32FirstW(snap, &pe)) do
+        if (!lstrcmpiW(pe.szExeFile, L"Revit.exe")) {
+            ULONGLONG t = 0;
+            HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe.th32ProcessID);
+            if (p) {
+                FILETIME c, e, k, u;
+                if (GetProcessTimes(p, &c, &e, &k, &u)) t = ((ULONGLONG)c.dwHighDateTime << 32) | c.dwLowDateTime;
+                CloseHandle(p);
+            }
+            *sig += (t ^ pe.th32ProcessID) * 0x9E3779B97F4A7C15ULL + pe.th32ProcessID;
+            r++;
+        }
+    while (Process32NextW(snap, &pe));
+    CloseHandle(snap);
+    return r;
+}
+
+/* markers whose pipe no longer exists go, asked by name; TRUE when one went. Any other answer keeps the marker */
+static BOOL markers_gone(void)
+{
+    WIN32_FIND_DATAW fd;
+    WCHAR pat[MAX_PATH + 4], p[MAX_PATH * 2], pipe[NAME_LEN + 16];
+    BOOL gone = FALSE;
+    wsprintfW(pat, L"%s\\*", folder);
+    HANDLE h = FindFirstFileW(pat, &fd);
+    if (h == INVALID_HANDLE_VALUE) return FALSE;
+    do {
+        if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || !pipe_name_ok(fd.cFileName)) continue;
+        wsprintfW(pipe, L"\\\\.\\pipe\\%s", fd.cFileName);
+        if (WaitNamedPipeW(pipe, 1) || GetLastError() != ERROR_FILE_NOT_FOUND) continue;
+        wsprintfW(p, L"%s\\%s", folder, fd.cFileName); DeleteFileW(p);
+        gone = TRUE;
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+    return gone;
 }
 
 static BOOL token_ok(const WCHAR *t)
@@ -463,15 +513,21 @@ int wmain(int argc, WCHAR **argv)
 
     SCANNER s = { 0 };
     DWORD gen = 0;
-    ULONGLONG next_scan = GetTickCount64();
-    BOOL found = FALSE, told = FALSE;
+    ULONGLONG next_scan = GetTickCount64(), scan_sig = 0, settled_sig = 0;
+    BOOL found = FALSE, told = FALSE, settled = FALSE;   /* settled: the last scan found a pipe for every Revit.exe */
     int revits = 0;
     while (WaitForSingleObject(pi.hProcess, 100) == WAIT_TIMEOUT) {
         ULONGLONG now = GetTickCount64();
         if (s.proc) {
             if (WaitForSingleObject(s.proc, 0) == WAIT_OBJECT_0) {
                 CloseHandle(s.proc); s.proc = NULL;
-                if (!s.ended) { int r = 0, n = scan_apply(gen, &r); if (n >= 0) { revits = r; if (n) found = TRUE; } }
+                if (!s.ended) {
+                    int r = 0, n = scan_apply(gen, &r);
+                    if (n >= 0) {
+                        revits = r; if (n) found = TRUE;
+                        settled = r > 0 && n >= r; settled_sig = scan_sig;
+                    }
+                }
                 DeleteFileW(scan_out); DeleteFileW(scan_tmp);
             } else if (!s.ended && now - s.started > SCAN_LIMIT_MS) {
                 TerminateProcess(s.proc, 1); s.ended = TRUE;
@@ -480,7 +536,13 @@ int wmain(int argc, WCHAR **argv)
                 err("mcphost: a pipe scan does not end; the pipe list is not refreshed until it does"); s.warned = TRUE;
             }
         }
-        if (!s.proc && now >= next_scan) { scan_start(&s, ++gen); next_scan = now + SCAN_EVERY_MS; }
+        if (!s.proc && now >= next_scan) {
+            ULONGLONG sig;
+            next_scan = now + SCAN_EVERY_MS;
+            revits_now(&sig);
+            if (settled && (sig != settled_sig || markers_gone())) settled = FALSE;
+            if (!settled) { scan_sig = sig; scan_start(&s, ++gen); }
+        }
         if (!told && !found && revits && now - resumed >= NOTICE_AFTER_MS) {
             err("mcphost: the Revit MCP add-in has not opened its connection: Autodesk analytics (ADP) may be off, the add-in "
                 "may not have loaded, or the Technical Preview has expired (May 2028)");
