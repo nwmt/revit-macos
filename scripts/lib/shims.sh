@@ -1,7 +1,7 @@
 # Our shims: the list, the pinned prebuilt release, ensure_shim. Source with . "$ROOT/scripts/lib/shims.sh"
 # After publishing a new release (git tag vX.Y.Z → .github/workflows/release.yml), bump both values below.
-SHIMS_VERSION=0.7.0
-SHIMS_SHA256=a3a097ae0351f5a370194a828d2a51008f54b494a82244d5ea1cd0a1460cfb5b
+SHIMS_VERSION=0.7.1
+SHIMS_SHA256=bd786136a9409b717283fd029627a7ae5fd7f0805e33505138ba41ab81ef8c20
 SHIMS_REPO="${SHIMS_REPO:-nwmt/revit-macos}"
 # every shim: its sources in tools/shims/<name>/, its file in build/<name>/ (how to build each: scripts/build-shims.sh).
 # The steps, CI and the release take this list
