@@ -596,6 +596,61 @@ LOADED = ('1.0:0030:0031:trace:loaddll:build_module Loaded L"C:\\\\Program Files
 ECDSA = '1.3:0030:0040:warn:seh:dispatch_exception "[ncrypt-shim] VerifySignature(32 bytes) -> 0xc000a000\\n"'
 
 
+
+class PyrevitAgent(Sandbox):
+    """pyRevit's agent for ./revit mcp --server pyrevit (doctor's mcp group): an ok line when it is on, else nothing."""
+    folder, install, mcp = Mcp.folder, Mcp.install, Mcp.mcp   # Mcp's helpers, not its tests
+
+    def setUp(self):
+        super().setUp()
+        for s, n in (("mcphost", "mcphost.exe"), ("mcppipes", "mcppipes.dll")):
+            self.write(os.path.join(self.root, "build", s, n), "fake " + s)
+
+    def agent(self, runtime=True, ini="[core]\r\ncheckupdates = false\r\n[agent]\r\nenabled = True\r\n"):
+        j = os.path.join
+        os.makedirs(j(self.b, dr.PYREVIT_CLONE_REL, "bin"), exist_ok=True)
+        if runtime:
+            self.write(j(self.b, dr.PYREVIT_CLONE_REL, "pyrevitlib/pyrevit/agent/_runner.py"), "")
+        if ini is not None:
+            self.write(j(self.b, dr.PYREVIT_CONFIG_REL), ini)
+
+    def test_agent_on_is_ready(self):
+        self.agent()
+        cs = self.mcp(self.checks())
+        self.assertEqual(list(cs), ["mcp.pyrevit.ready"])
+        self.assertEqual(cs["mcp.pyrevit.ready"].status, "ok")
+        self.assertEqual(cs["mcp.pyrevit.ready"].title, "pyRevit's agent is on: ./revit mcp %d --server pyrevit" % self.year)
+
+    def test_a_non_default_bottle_names_itself(self):
+        self.agent()
+        self.checks()
+        self.facts["sfx"] = " rvt%d-x" % self.year
+        self.assertEqual(self.mcp(dr.run_checks(self.facts))["mcp.pyrevit.ready"].title,
+                         "pyRevit's agent is on: ./revit mcp %d rvt%d-x --server pyrevit" % (self.year, self.year))
+
+    def test_nothing_when_the_agent_is_not_there_or_off(self):
+        for kw in ({"ini": "[agent]\r\nenabled = false\r\n"}, {"ini": "[core]\r\nenabled = true\r\n"}, {"ini": None},
+                   {"runtime": False}):
+            with self.subTest(**{k: repr(v) for k, v in kw.items()}):
+                self.tearDown(); self.setUp(); self.agent(**kw)
+                self.assertEqual(self.mcp(self.checks()), {})
+        self.tearDown(); self.setUp()
+        self.assertEqual(self.mcp(self.checks()), {})   # no pyRevit at all
+
+    def test_the_ini_rules_match_the_launcher(self):
+        for ini in ("[agent]\nenabled=true\n", "[core]\r\nx = 1\r\n[agent]\r\npolicy = \"auto\"\r\nenabled = TRUE\r\n",
+                    "[agent]\r\n  enabled   =   true  \r\n"):
+            with self.subTest(ini=ini):
+                self.tearDown(); self.setUp(); self.agent(ini=ini)
+                self.assertIn("mcp.pyrevit.ready", self.mcp(self.checks()))
+
+    def test_next_to_a_ready_autodesk_server(self):
+        self.install()
+        self.agent()
+        cs = dr.run_checks(self.facts) if self.checks() else []
+        self.assertNotIn("doctor.internal", [c.id for c in cs])
+        self.assertEqual(sorted(self.mcp(cs)), ["mcp.pyrevit.ready", "mcp.ready"])
+
 class Logs(Sandbox):
     """The logs group: the newest logs of the bottle against tools/signatures.py."""
     RUN = "20261016-120000"   # the install the run record names; the record says when it began

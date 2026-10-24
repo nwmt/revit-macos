@@ -786,6 +786,9 @@ MCP_MANIFEST = "drive_c/Program Files/Autodesk/Revit/Addins/{y}/Autodesk.RevitMc
 MCP_ADP_MARKER = "drive_c/ProgramData/revit-macos/adp"
 MCP_ADP_CORE = "drive_c/Program Files/Common Files/Autodesk/AdpDesktopSDK/bin/AdpSDKCore.dll"
 MCP_EXPIRES = "2028-05-01"   # the Technical Preview stops working then
+# pyRevit's agent (./revit mcp --server pyrevit; scripts/lib/mcp.sh holds the same paths and ini rules)
+PYREVIT_CLONE_REL = "drive_c/users/crossover/AppData/Roaming/pyRevit-Master"
+PYREVIT_CONFIG_REL = "drive_c/users/crossover/AppData/Roaming/pyRevit/pyRevit_config.ini"
 
 
 def collect_mcp(ctx, p):
@@ -861,6 +864,7 @@ def collect_bottle(ctx):
     b["netfx"] = netfx
     b["logs"] = collect_logs(ctx, p, b["records"])
     b["mcp"] = collect_mcp(ctx, p)
+    b["pyrevit_agent"] = collect_pyrevit_agent(p)
     return b
 
 
@@ -1321,6 +1325,41 @@ def addin_checks(f):
     return out
 
 
+def pyrevit_agent_enabled(text):
+    """The [agent] section of pyRevit_config.ini says enabled = true (any case; pyRevit writes Windows line ends)."""
+    on, agent = False, False
+    for line in text.replace("\r", "").split("\n"):
+        t = line.strip()
+        if t.startswith("["):
+            agent = re.sub(r"\s", "", t).lower() == "[agent]"
+        elif agent and "=" in t:
+            k, v = t.split("=", 1)
+            if k.strip().lower() == "enabled":
+                on = re.sub(r"\s", "", v).lower() == "true"
+    return on
+
+
+def collect_pyrevit_agent(p):
+    """pyRevit in bottle p: its clone, the agent runtime (pyRevit 7 and newer) and whether the agent is turned on."""
+    j = os.path.join
+    a = {"clone": os.path.isdir(j(p, PYREVIT_CLONE_REL)),
+         "runtime": os.path.isfile(j(p, PYREVIT_CLONE_REL, "pyrevitlib/pyrevit/agent/_runner.py")), "enabled": False}
+    try:
+        with open(j(p, PYREVIT_CONFIG_REL), encoding="utf-8-sig", errors="replace") as fh:
+            a["enabled"] = pyrevit_agent_enabled(fh.read())
+    except OSError:
+        pass
+    return a
+
+
+def pyrevit_agent_checks(f, b):
+    """One ok line when pyRevit's agent is ready for ./revit mcp --server pyrevit; nothing otherwise (no problem)."""
+    a = b.get("pyrevit_agent") or {}
+    if a.get("clone") and a.get("runtime") and a.get("enabled"):
+        return [Check("mcp.pyrevit.ready", "ok", f"pyRevit's agent is on: ./revit mcp {f['year']}{f['sfx']} --server pyrevit")]
+    return []
+
+
 def mcp_checks(f, b):
     """The Revit MCP Server, when its manifest or a variant folder is there: what ./revit mcp needs, from files only
     (whether the add-in opened its connection shows only while Revit runs: mcphost says so then)."""
@@ -1490,7 +1529,7 @@ def bottle_checks(f):
     out += app_checks(f, b)
     out += install_checks(f, b) + since_install(f, b)
     if b.get("revit_exe"):
-        out += fixes_checks(f, b) + addin_checks(f) + mcp_checks(f, b)
+        out += fixes_checks(f, b) + addin_checks(f) + mcp_checks(f, b) + pyrevit_agent_checks(f, b)
     return out + logs_checks(f, b)
 
 
