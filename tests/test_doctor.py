@@ -535,6 +535,19 @@ class Mcp(Sandbox):
         self.write(j(self.b, dr.MCP_ADP_MARKER), "")
         self.assertEqual(self.mcp(self.checks())["mcp.adp"].status, "fail")
 
+    def test_no_reference_shim_in_this_project_is_not_ready(self):
+        # ./revit mcp compares the launcher with $(shim_dir)/<shim>: without that file it refuses
+        for s, n in (("mcphost", "mcphost.exe"), ("mcppipes", "mcppipes.dll")):
+            self.install()
+            ref = os.path.join(self.root, "build", s, n)
+            os.remove(ref)
+            cs = self.mcp(self.checks())
+            self.assertNotIn("mcp.ready", cs, n)
+            self.assertEqual(cs["mcp." + s].status, "fail", n)
+            self.assertIn("this project has no " + n, cs["mcp." + s].title)
+            self.assertEqual(cs["mcp." + s].fix, "./revit addins %d --only revitmcp --accept-eula revitmcp" % self.year)
+            self.write(ref, "fake " + s)
+
     def test_a_folder_without_its_manifest(self):
         self.install(manifest=False)
         cs = self.mcp(self.checks())

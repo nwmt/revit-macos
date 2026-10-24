@@ -1346,6 +1346,9 @@ def mcp_checks(f, b):
         if fo and fo.get(s) is None:
             out.append(Check(f"mcp.{s}", "fail",
                              f"{exe} is missing next to the MCP Server: ./revit mcp cannot start it", fix=fix))
+        elif fo and not cur.get("file"):
+            out.append(Check(f"mcp.{s}", "fail", f"this project has no {exe} to compare the one next to the MCP Server "
+                             "with: ./revit mcp cannot start it", fix=fix))
         elif fo and cur.get("sha256") and not cur.get("stale") and fo.get(s) != cur["sha256"]:
             out.append(Check(f"mcp.{s}", "fail", f"{exe} next to the MCP Server is not this project's current one",
                              fix=fix))
