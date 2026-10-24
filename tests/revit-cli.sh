@@ -809,6 +809,7 @@ bf="$BOTTLES/\$name/drive_c/mcp-open.tmp"; touch "\$bf"; exec 4<"\$bf"
 case "\$(cat "$T/mcp-mode" 2>/dev/null)" in
   noconfirm) sleep 60 ;;
   ignoreterm) trap '' TERM; sleep 60 ;;
+  orphan) ( trap '' TERM; exec sleep 61 ) & sleep 60 ;;   # a child without the token that outlives its parent
   holdclose) sleep 1; exec 4<&-; sleep 60 ;;
 esac
 d="$BOTTLES/\$name/drive_c/users/crossover/AppData/Local/Temp/revit-macos-mcp"; mkdir -p "\$d"; echo \$\$ > "\$d/launch-\$tok"
@@ -896,6 +897,9 @@ sleep 2; check "mcp: no late launcher afterwards" eval '! own_alive && ! confirm
 mcp_world; fake_mcphost rvt2027-a; other=$!; echo ignoreterm > "$T/mcp-mode"; MCP_ENV=(MCP_HANDOFF_S=2); run_mcp mcp 2027; MCP_ENV=()
 check "mcp: a loader that ignores TERM → killed; Revit and the other client alive" \
   eval '[ "$RC" = 1 ] && ! own_alive && kill -0 "$other" 2>/dev/null && pgrep -f "Revit 2027.Revit.exe" >/dev/null'
+mcp_world; echo orphan > "$T/mcp-mode"; MCP_ENV=(MCP_HANDOFF_S=2); run_mcp mcp 2027; MCP_ENV=()
+check "mcp: a child that ignores TERM after its parent ended is killed too" eval '[ "$RC" = 1 ] && ! pgrep -f "^sleep 61" >/dev/null'
+pkill -9 -f "^sleep 61" 2>/dev/null
 mcp_world; echo holdclose > "$T/mcp-mode"; MCP_ENV=(MCP_HANDOFF_S=6); mcp_bg mcp 2027; MCP_ENV=(); mcp_wait '[ -s "$T/mcp-argv" ]' 100; sleep 2
 pkill -f "Revit 2027.Revit.exe"; sleep 0.5; run "2027" remove 2027   # Revit closed, the loader's bottle file closed: only the lock stops it
 check "mcp: while the launcher starts (its bottle file closed, no confirmation), remove is refused" eval '[ "$RC" != 0 ] && grep -q "Another task is running: ./revit mcp 2027 rvt2027-a" <<<"$OUT" && [ -d "$BOTTLES/rvt2027-a" ]'

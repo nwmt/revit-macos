@@ -15,7 +15,7 @@ exec 3>&1 1>&2   # fd 3 = the client's stdout, for the server only
 [ $# = 3 ] && [[ "$1" =~ ^[0-9]{4}$ ]] && { [ "$3" = 0 ] || [ "$3" = 1 ]; } \
   || { echo "Usage: scripts/mcp-launch.sh <year> <bottle> <0|1>"; exit 2; }
 YEAR="$1"; NAME="$2"; WRITE="$3"; B="$(bottle_path "$NAME")"; SFX="$(bottle_sfx "$NAME" "$YEAR")"
-TOKEN=""; WPID=""; LF=""; PHASE=starting
+TOKEN=""; WPID=""; LF=""; PHASE=starting; SEEN=""
 HANDOFF_S="${MCP_HANDOFF_S:-30}"   # how long the launcher may take to confirm (tests shorten it)
 
 checks() { # the bottle, a running Revit, a complete MCP Server install; sets ID (its variant)
@@ -26,28 +26,38 @@ checks() { # the bottle, a running Revit, a complete MCP Server install; sets ID
   mcp_ready "$ID" || die "The Revit MCP Server in $NAME is not complete ($(mcp_missing "$ID") is missing). Install it again: ./revit addins $YEAR$SFX --only $ID --accept-eula $ID"
 }
 descendants() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do echo "$c"; descendants "$c"; done; }
-own_pids() { # this connection's processes: the background wine and what it started, and every process with the token
-  # in its command line (each Windows process under Wine is a Mac process)
-  { [ -z "$WPID" ] || { kill -0 "$WPID" 2>/dev/null && echo "$WPID"; descendants "$WPID"; }
-    [ -z "$TOKEN" ] || pgrep -f -- "$TOKEN" 2>/dev/null; } | grep -vx -e "$$" -e "${BASHPID:-$$}" | sort -u
+started() { ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' '_'; }   # $1 = pid: its start time, one word
+own_scan() { # OWN = this connection's processes: the background wine and what it started, and every process with the token
+  # in its command line (each Windows process under Wine is a Mac process). Every one seen is remembered with its start
+  # time (in SEEN): a child whose parent has ended is no longer found from wine, and a reused PID is not ours. Runs in
+  # this shell, not in $(…), so SEEN keeps growing
+  local p s e found; OWN=""
+  found="$({ [ -z "$WPID" ] || { kill -0 "$WPID" 2>/dev/null && echo "$WPID"; descendants "$WPID"; }
+    [ -z "$TOKEN" ] || pgrep -f -- "$TOKEN" 2>/dev/null; } | grep -vx -e "$$" -e "${BASHPID:-$$}" | sort -u)"
+  for p in $found; do
+    s="$(started "$p")"; [ -n "$s" ] || continue
+    case " $SEEN " in *" $p:$s "*) ;; *) SEEN="$SEEN $p:$s" ;; esac
+  done
+  for e in $SEEN; do [ "$(started "${e%%:*}")" != "${e#*:}" ] || OWN="$OWN ${e%%:*}"; done
+  OWN="${OWN# }"
 }
 kill_own_tree() { # TERM, KILL after 3 s, then wait for wine; 1 when something is still there after 10 s
   local p i
-  p="$(own_pids)"; [ -z "$p" ] || kill -TERM $p 2>/dev/null
-  for i in $(seq 1 30); do [ -n "$(own_pids)" ] || break; sleep 0.1; done
-  p="$(own_pids)"; [ -z "$p" ] || kill -KILL $p 2>/dev/null
+  own_scan; [ -z "$OWN" ] || kill -TERM $OWN 2>/dev/null
+  for i in $(seq 1 30); do own_scan; [ -n "$OWN" ] || break; sleep 0.1; done
+  own_scan; [ -z "$OWN" ] || kill -KILL $OWN 2>/dev/null
   [ -z "$WPID" ] || wait "$WPID" 2>/dev/null
-  for i in $(seq 1 100); do [ -n "$(own_pids)" ] || return 0; sleep 0.1; done
+  for i in $(seq 1 100); do own_scan; [ -n "$OWN" ] || return 0; sleep 0.1; done
   return 1
 }
 finish() { # $1 = exit code: ends this connection's processes; before the handoff the lock (fd 9) stays held until
   # they are gone, so no late mcphost can appear in a bottle that is meanwhile removed
   FCODE="$1"; trap '' INT TERM HUP
   if ! kill_own_tree; then
-    echo "Processes of this connection did not end: $(own_pids | tr '\n' ' ')"
+    own_scan; echo "Processes of this connection did not end: $OWN"
     if [ "$PHASE" = starting ]; then
       trap 'exit "$FCODE"' INT TERM HUP
-      while [ -n "$(own_pids)" ]; do sleep 1; done
+      while own_scan; [ -n "$OWN" ]; do sleep 1; done
     fi
   fi
   [ -z "$LF" ] || rm -f "$LF"
