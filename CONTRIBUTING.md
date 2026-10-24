@@ -58,7 +58,7 @@ Each fact lives in one place. Other pages link to it instead of repeating it.
 | Status scale | README |
 | What `./revit test` checks | CONTRIBUTING (Test reports) |
 | The run record in a bottle | `docs/how-it-works.md` |
-| Revit MCP Server: what it turns on, install, connecting an AI assistant | `docs/mcp.md` |
+| MCP servers: what each turns on, install, connecting an AI assistant | `docs/mcp.md` |
 
 A version page has these sections, in this order: the status line, `## Works`, `## Known issues`, `## Not tested`,
 `## Notes` (only if needed).
