@@ -160,6 +160,10 @@ echo keep > "$T/outside/keep.dll"; mkzip "$T/new.zip" $ALL; pin_zip "$T/new.zip"
 expect "a release next to a linked folder" 0 "prebuilt shims v$V in build/"
 check "release: a linked folder in build/ keeps its files" test -f "$T/outside/keep.dll"
 
+# ---- mcphost: the launcher's modes (its behaviour is checked by the harness in a throwaway bottle) ----
+check "mcphost: the usage names --plain" grep -qF 'mcphost.exe --launch <token> [--gate <module> | --plain] -- <server exe>' \
+  "$REPO/tools/shims/mcphost/mcphost.c"
+
 # ---- build-release.sh ----
 reset; run "$R/scripts/build-release.sh" 9.9.9
 expect "build-release packs the shims" 0 "revit-macos-shims-9.9.9.zip"

@@ -3,7 +3,7 @@
  * mcphost -- starts Autodesk's Revit MCP Server (Autodesk.RevitMcpServer.Stdio.exe) in a bottle so that it finds Revit
  * under Wine. scripts/mcp-launch.sh (./revit mcp) runs it; it sits next to the server with mcppipes.dll.
  *
- *   mcphost.exe --launch <token> [--gate <module>] -- <server exe> [arguments...]
+ *   mcphost.exe --launch <token> [--gate <module> | --plain] -- <server exe> [arguments...]
  *   mcphost.exe --scan <generation> <out file> [pid...]   (internal: one scan of Revit's handles, see below)
  *
  * The server looks for Revit's pipe revit-mcp-<year>-<guid> by listing \\.\pipe\, which Wine cannot list. mcphost
@@ -35,6 +35,9 @@
  *    pipe, crashed wineserver (CrossOver 26.3); a Revit with a known pipe is therefore never scanned.
  * 6. If a Revit.exe runs and no scan found a pipe 20 s after the resume, one line on stderr says so; the server keeps
  *    running (Revit may still be opening).
+ * 7. --plain (pyRevit's agent, scripts/mcp-launch.sh --server pyrevit): only points 1 and 3, then mcphost waits for the
+ *    server and returns its exit code. No marker folder (nor removal of stale ones), no REVIT_MCP_PIPES, no mcppipes.dll,
+ *    no scans and no notice: that server finds Revit without listing \\.\pipe\.
  * Test build for the harness only: -DMCPHOST_TEST_SCAN_HANG (the scan sleeps 60 s).
  */
 #include <windows.h>
@@ -429,7 +432,7 @@ static BOOL token_ok(const WCHAR *t)
 
 static int usage(void)
 {
-    err("usage: mcphost.exe --launch <token> [--gate <module>] -- <server exe> [arguments...]");
+    err("usage: mcphost.exe --launch <token> [--gate <module> | --plain] -- <server exe> [arguments...]");
     return 2;
 }
 
@@ -450,8 +453,10 @@ int wmain(int argc, WCHAR **argv)
     }
     if (argc < 5 || lstrcmpW(argv[1], L"--launch") || !token_ok(argv[2])) return usage();
     const WCHAR *token = argv[2], *gate = L"coreclr.dll";
+    BOOL plain = FALSE;
     int i = 3;
     if (!lstrcmpW(argv[i], L"--gate")) { if (i + 1 >= argc) return usage(); gate = argv[i + 1]; i += 2; }
+    else if (!lstrcmpW(argv[i], L"--plain")) { plain = TRUE; i++; }
     if (i + 1 >= argc || lstrcmpW(argv[i], L"--")) return usage();
     i++;
 
@@ -462,13 +467,15 @@ int wmain(int argc, WCHAR **argv)
     if (!write_atomic(launch_file, line)) { err("mcphost: cannot write the launch confirmation"); return 4; }
     SetConsoleCtrlHandler(on_ctrl, TRUE);
 
-    FILETIME c, e, k, u;
-    GetProcessTimes(GetCurrentProcess(), &c, &e, &k, &u);
-    wsprintfW(folder, L"%s\\%lu-%08lx%08lx", BASE, GetCurrentProcessId(), c.dwHighDateTime, c.dwLowDateTime);
-    wsprintfW(scan_out, L"%s.scan", folder);
-    wsprintfW(scan_tmp, L"%s.scan.tmp", folder);
-    remove_stale_folders();
-    if (!CreateDirectoryW(folder, NULL)) { err("mcphost: cannot create the marker folder"); cleanup(); return 4; }
+    if (!plain) {
+        FILETIME c, e, k, u;
+        GetProcessTimes(GetCurrentProcess(), &c, &e, &k, &u);
+        wsprintfW(folder, L"%s\\%lu-%08lx%08lx", BASE, GetCurrentProcessId(), c.dwHighDateTime, c.dwLowDateTime);
+        wsprintfW(scan_out, L"%s.scan", folder);
+        wsprintfW(scan_tmp, L"%s.scan.tmp", folder);
+        remove_stale_folders();
+        if (!CreateDirectoryW(folder, NULL)) { err("mcphost: cannot create the marker folder"); cleanup(); return 4; }
+    }
 
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION lim = { 0 };
     lim.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
@@ -500,7 +507,7 @@ int wmain(int argc, WCHAR **argv)
         }
         si.lpAttributeList = attrs;
     }
-    SetEnvironmentVariableW(L"REVIT_MCP_PIPES", folder);
+    if (!plain) SetEnvironmentVariableW(L"REVIT_MCP_PIPES", folder);
     WCHAR *cmd = command_line(argc - i, argv + i);
     PROCESS_INFORMATION pi;
     if (!cmd || !CreateProcessW(argv[i], cmd, NULL, NULL, nl > 0, CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT,
@@ -514,6 +521,13 @@ int wmain(int argc, WCHAR **argv)
     }
     ResumeThread(pi.hThread); CloseHandle(pi.hThread);
     ULONGLONG resumed = GetTickCount64();
+    if (plain) {
+        DWORD rc = 1;
+        WaitForSingleObject(pi.hProcess, INFINITE);
+        GetExitCodeProcess(pi.hProcess, &rc);
+        cleanup();
+        return (int)rc;
+    }
 
     const char *stage = inject(&pi, gate, resumed + DEADLINE_MS, why);
     if (stage) {
