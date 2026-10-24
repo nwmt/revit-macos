@@ -441,9 +441,10 @@ int wmain(int argc, WCHAR **argv)
         for (WCHAR *c = argv[2]; *c; c++) if (*c < L'0' || *c > L'9') return usage();
         DWORD want[MAX_REVITS];
         for (int j = 4; j < argc; j++) {
-            want[j - 4] = 0;
+            ULONGLONG v = 0;
             if (!argv[j][0]) return usage();
-            for (WCHAR *c = argv[j]; *c; c++) { if (*c < L'0' || *c > L'9') return usage(); want[j - 4] = want[j - 4] * 10 + (*c - L'0'); }
+            for (WCHAR *c = argv[j]; *c; c++) { if (*c < L'0' || *c > L'9' || (v = v * 10 + (*c - L'0')) > MAXDWORD) return usage(); }
+            want[j - 4] = (DWORD)v;
         }
         return scan(argv[2], argv[3], argc - 4, want);
     }
