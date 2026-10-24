@@ -52,3 +52,43 @@ mcp_product_registered() { # $1 = id: its MSI is registered, asked of the runnin
   # behind by up to half a minute). Needs wine.sh
   w reg query "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\$(mcp_field "$1" 5)" >/dev/null 2>&1
 }
+
+# pyRevit's agent (./revit mcp --server pyrevit): its MCP server is pyrevit.exe mcp, started through our mcphost.exe
+# --plain. Files only, as above. tools/doctor.py holds the same paths and ini rules (PYREVIT_* there)
+PYREVIT_CLONE_REL="drive_c/users/crossover/AppData/Roaming/pyRevit-Master"
+PYREVIT_CONFIG_REL="drive_c/users/crossover/AppData/Roaming/pyRevit/pyRevit_config.ini"
+PYREVIT_INSTANCES_REL="drive_c/users/crossover/AppData/Roaming/pyRevit/agent/instances"
+PLAIN_HOST_REL="drive_c/ProgramData/revit-macos/mcphost/mcphost.exe"   # C:\ProgramData\revit-macos\mcphost\mcphost.exe
+pyrevit_agent_enabled() { # $1 = pyRevit_config.ini: 0 when its [agent] section says enabled = true (any case; pyRevit
+  # writes Windows line ends)
+  tr -d '\r' < "$1" 2>/dev/null | awk '
+    /^[[:space:]]*\[/ { s = $0; gsub(/[[:space:]]/, "", s); agent = (tolower(s) == "[agent]"); next }
+    agent { k = $0; sub(/=.*/, "", k); gsub(/[[:space:]]/, "", k); v = $0; if (!sub(/^[^=]*=/, "", v)) next
+            gsub(/[[:space:]]/, "", v); if (tolower(k) == "enabled") on = (tolower(v) == "true") }
+    END { exit !on }'
+}
+pyrevit_mcp_missing() { # $1 = year: the first missing piece, nothing when ready: not-offered (this project has no
+  # pyRevit for the year), not-installed, no-agent-runtime (pyRevit before 7), agent-off, not-registered (the agent has
+  # no instance file: not running in Revit). An instance file left by an ended Revit passes; pyrevit.exe has the last
+  # word then (its tools answer no_revit)
+  addin_load pyrevit
+  if [ -z "$(addin_files "$1")" ]; then echo not-offered
+  elif [ ! -d "$B/$PYREVIT_CLONE_REL" ]; then echo not-installed
+  elif [ ! -f "$B/$PYREVIT_CLONE_REL/pyrevitlib/pyrevit/agent/_runner.py" ]; then echo no-agent-runtime
+  elif ! pyrevit_agent_enabled "$B/$PYREVIT_CONFIG_REL"; then echo agent-off
+  elif ! ls "$B/$PYREVIT_INSTANCES_REL"/*.json >/dev/null 2>&1; then echo not-registered
+  fi
+  return 0
+}
+pyrevit_version_offered() { # $1 = year: major.minor of the pyRevit this project installs for it (4.8, 7.0)
+  addin_load pyrevit; addin_files "$1" | cut -f2 | sed -n 's/.*pyRevit_\([0-9]*\.[0-9]*\).*/\1/p' | head -1
+}
+plain_host_ensure() { # our mcphost.exe for --plain in the bottle, equal to $(shim_dir)/mcphost/mcphost.exe afterwards:
+  # written only when missing or different, through a temporary file beside it (a running copy is not touched).
+  # Under the lock. Needs shims.sh. 1 with the reason on stdout
+  local src t="$B/$PLAIN_HOST_REL" out
+  out="$(ensure_shim mcphost 2>&1)" || { tail -1 <<<"$out"; return 1; }
+  src="$(shim_dir)/mcphost/mcphost.exe"; [ -f "$src" ] || { echo "no $src"; return 1; }
+  cmp -s "$src" "$t" && return 0
+  mkdir -p "$(dirname "$t")" && cp "$src" "$t.tmp.$$" && mv -f "$t.tmp.$$" "$t" || { rm -f "$t.tmp.$$"; echo "cannot write $t"; return 1; }
+}

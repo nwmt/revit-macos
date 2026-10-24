@@ -62,9 +62,12 @@ reset() { # a fresh sandbox for each test
     || { echo "sandbox setup failed"; exit 1; }
   cp "$REPO/revit" "$R/"; cp -R "$REPO/tools" "$R/"; cp "$REPO/scripts/lib/common.sh" "$REPO/scripts/lib/versions.sh" "$R/scripts/lib/"
   mkdir -p "$R/scripts/profiles"; cp "$REPO"/scripts/profiles/*.sh "$R/scripts/profiles/"
-  cp "$REPO/scripts/lib/addins.sh" "$REPO/scripts/lib/mcp.sh" "$R/scripts/lib/" 2>/dev/null
+  cp "$REPO/scripts/lib/addins.sh" "$REPO/scripts/lib/mcp.sh" "$REPO/scripts/lib/shims.sh" "$R/scripts/lib/" 2>/dev/null
   [ ! -f "$REPO/scripts/mcp-launch.sh" ] || cp "$REPO/scripts/mcp-launch.sh" "$R/scripts/"; cp -R "$REPO/scripts/addins" "$REPO/scripts/steps" "$R/scripts/" 2>/dev/null
   stub "$R/install.sh"; stub "$R/scripts/run-steps.sh"; stub "$R/scripts/launch.sh"; stub "$R/scripts/smoke.sh"
+  # ensure_shim's builder: done when build/<shim>/ holds a file, else it fails
+  printf '#!/bin/bash\nfor f in "$(dirname "$0")/../build/$1"/*; do [ -f "$f" ] && exit 0; done\necho "no $1 to build"; exit 1\n' \
+    > "$R/scripts/build-shims.sh"; chmod +x "$R/scripts/build-shims.sh"
   cat > "$CXF/bin/wineserver" <<EOF
 #!/bin/bash
 echo "wineserver \$* | REVIT_YEAR=\${REVIT_YEAR:-} INSTALL_DRYRUN=\${INSTALL_DRYRUN:-} CX_RECREATE=\${CX_RECREATE:-} WINEPREFIX=\${WINEPREFIX:-}" >> "$CALLS"
@@ -798,7 +801,8 @@ mcp_install() { # $1 = bottle, $2 = variant folder: a complete MCP Server instal
   echo 6.3.44.3 > "$b/drive_c/ProgramData/revit-macos/adp"
 }
 mcp_cx() { # the fake CrossOver's wine plays mcphost.exe: records its arguments (and FD8/FD9 if they reached it), writes
-  # the launch confirmation, echoes stdin to stdout, exits with $T/mcp-rc. $T/mcp-mode: noconfirm | ignoreterm | holdclose
+  # the launch confirmation, echoes stdin to stdout, exits with $T/mcp-rc. $T/mcp-mode: noconfirm | ignoreterm | holdclose |
+  # delayconfirm (echoes at once, confirms once $T/mcp-go exists)
   cat > "$CXF/bin/wine" <<EOF
 #!/bin/bash
 [ "\$1" = --bottle ] || exit 0
@@ -812,8 +816,13 @@ case "\$(cat "$T/mcp-mode" 2>/dev/null)" in
   orphan) ( trap '' TERM; exec sleep 61 ) & sleep 60 ;;   # a child without the token that outlives its parent
   holdclose) sleep 1; exec 4<&-; sleep 60 ;;
 esac
-d="$BOTTLES/\$name/drive_c/users/crossover/AppData/Local/Temp/revit-macos-mcp"; mkdir -p "\$d"; echo \$\$ > "\$d/launch-\$tok"
-cat
+d="$BOTTLES/\$name/drive_c/users/crossover/AppData/Local/Temp/revit-macos-mcp"; mkdir -p "\$d"
+if [ "\$(cat "$T/mcp-mode" 2>/dev/null)" = delayconfirm ]; then
+  exec 6<&0; cat <&6 & c=\$!
+  until [ -e "$T/mcp-go" ]; do sleep 0.1; done; echo \$\$ > "\$d/launch-\$tok"; wait "\$c"
+else
+  echo \$\$ > "\$d/launch-\$tok"; cat
+fi
 exit "\$(cat "$T/mcp-rc" 2>/dev/null || echo 0)"
 EOF
   chmod +x "$CXF/bin/wine"
@@ -826,11 +835,13 @@ run_mcp() { # stdin from $MCP_IN (default: nothing), rest = ./revit arguments; O
     < "${MCP_IN:-/dev/null}" > "$T/mcp-out" 2> "$T/mcp-err"); RC=$?
   OUT="$(cat "$T/mcp-out")"; ERR="$(cat "$T/mcp-err")"; MCP_IN=""
 }
-mcp_bg() { # ./revit mcp in the background with a held-open stdin (fd 5 writes it) and INT at its default; sets LPID
-  rm -f "$T/mcp-in"; mkfifo "$T/mcp-in"; : > "$T/mcp-out"; : > "$T/mcp-err"
-  (cd / && exec env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" ${MCP_ENV[@]+"${MCP_ENV[@]}"} \
-    perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV' /bin/bash "$R/revit" "$@" < "$T/mcp-in" > "$T/mcp-out" 2> "$T/mcp-err") &
-  LPID=$!; exec 5>"$T/mcp-in"
+mcp_bg() { # $1 = connection a | b, rest = ./revit arguments: in the background with a held-open stdin (fd 5 writes a's,
+  # fd 6 b's) and INT at its default; sets LPID_<id>, output in $T/mcp-out-<id> and $T/mcp-err-<id>
+  local id="$1" fd; shift; [ "$id" = a ] && fd=5 || fd=6
+  rm -f "$T/mcp-in-$id"; mkfifo "$T/mcp-in-$id"; : > "$T/mcp-out-$id"; : > "$T/mcp-err-$id"
+  (exec 5>&- 6>&-; cd / && exec env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" ${MCP_ENV[@]+"${MCP_ENV[@]}"} \
+    perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV' /bin/bash "$R/revit" "$@" < "$T/mcp-in-$id" > "$T/mcp-out-$id" 2> "$T/mcp-err-$id") &
+  eval "LPID_$id=\$!"; eval "exec $fd>\"\$T/mcp-in-\$id\""
 }
 mcp_wait() { local i; for i in $(seq 1 ${2:-100}); do eval "$1" && return 0; sleep 0.1; done; return 1; }   # $1 = condition
 confirmed() { ls "$BOTTLES/rvt2027-a/drive_c/users/crossover/AppData/Local/Temp/revit-macos-mcp/"launch-* >/dev/null 2>&1; }
@@ -846,7 +857,7 @@ reset; bottle rvt2027-a 2027 2027; mcp_cx; fake_revit rvt2027-a 2027; run_mcp mc
 check "mcp: not installed → the install command" eval '[ "$RC" != 0 ] && grep -qF "Install it: ./revit addins 2027 --only revitmcp --accept-eula revitmcp" <<<"$ERR" && mcp_stdout_empty'
 reset; bottle rvt2027-a 2027 2027; run_mcp status --write; check "--write on another command" eval '[ "$RC" != 0 ] && grep -qx "Unknown option: --write" <<<"$ERR"'
 reset; run_mcp mcp 2027 rvt2027-a extra; check "mcp: extra arguments" eval '[ "$RC" != 0 ] && grep -q "Too many arguments" <<<"$ERR" && mcp_stdout_empty'
-reset; run "" --help; check "mcp is in the help" grep -qx "  mcp       connect an AI assistant to a running Revit (docs/mcp.md)" <<<"$OUT"
+reset; run "" --help; check "mcp is in the help" grep -qx "  mcp       connect an AI assistant to a running Revit (--server pyrevit; docs/mcp.md)" <<<"$OUT"
 for c in "$MCPW||--tool-permission=StableReadOnly" "$MCPW|--write|--tool-permission=Stable --tool-min-permission=StableReadOnly" \
   "$MCPE||--tool-permission=StableReadOnly" "$MCPE|--write|--tool-permission=Experimental --tool-min-permission=StableReadOnly"; do
   v="${c%%|*}"; f="$(cut -d'|' -f2 <<<"$c")"; want="${c##*|}"
@@ -856,10 +867,10 @@ for c in "$MCPW||--tool-permission=StableReadOnly" "$MCPW|--write|--tool-permiss
 done
 check "mcp: neither the lock (fd 9) nor fd 8 reaches the launcher" eval '! grep -qx -e FD9 -e FD8 "$T/mcp-argv"'
 mcp_world; echo 5 > "$T/mcp-rc"; run_mcp mcp 2027; check "mcp: EOF → the launcher's exit code" test "$RC" = 5
-mcp_world; mcp_bg mcp 2027; mcp_wait confirmed 100; mcp_wait 'lock_is_free' 50
+mcp_world; mcp_bg a mcp 2027; mcp_wait confirmed 100; mcp_wait 'lock_is_free' 50
 check "mcp: the lock is released after the handoff" lock_is_free
-echo ping >&5; mcp_wait 'grep -qx ping "$T/mcp-out"' 50; check "mcp: input after the handoff still reaches the server" grep -qx ping "$T/mcp-out"
-exec 5>&-; wait "$LPID"; check "mcp: EOF after the handoff → exit 0" test "$?" = 0
+echo ping >&5; mcp_wait 'grep -qx ping "$T/mcp-out-a"' 50; check "mcp: input after the handoff still reaches the server" grep -qx ping "$T/mcp-out-a"
+exec 5>&-; wait "$LPID_a"; check "mcp: EOF after the handoff → exit 0" test "$?" = 0
 for p in 'rm "$D/Autodesk.RevitMcpServer.Stdio.exe"|the MCP Server files' 'rm "$M"|the MCP add-in manifest' 'rm "$D/mcphost.exe"|mcphost.exe' \
   'rm "$D/mcppipes.dll"|mcppipes.dll' 'echo x >> "$D/mcphost.exe"|the current mcphost.exe' 'echo x >> "$D/mcppipes.dll"|the current mcppipes.dll' \
   'rm "$BOTTLES/rvt2027-a/drive_c/ProgramData/revit-macos/adp"|Autodesk analytics (ADP)'; do
@@ -869,9 +880,9 @@ for p in 'rm "$D/Autodesk.RevitMcpServer.Stdio.exe"|the MCP Server files' 'rm "$
   check "mcp refuses without ${p#*|}" eval '[ "$RC" != 0 ] && grep -qF "$want" <<<"$ERR" && [ ! -e "$T/mcp-argv" ]'
 done
 # the bottle goes between the first check and the lock: the check under the lock refuses, wine never starts
-mcp_world; touch "$T/hold"; MCP_ENV=(MCP_TEST_HOLD="$T/hold"); mcp_bg mcp 2027; mcp_wait '[ -e "$T/hold.reached" ]' 100
-chmod -R u+w "$BOTTLES/rvt2027-a"; stop_fakes; rm -rf "$BOTTLES/rvt2027-a"; rm "$T/hold"; exec 5>&-; wait "$LPID"; rc=$?; MCP_ENV=()
-check "mcp: bottle removed before the lock → refused under the lock" eval '[ "$rc" != 0 ] && grep -q "There is no bottle rvt2027-a" "$T/mcp-err" && [ ! -e "$T/mcp-argv" ]'
+mcp_world; touch "$T/hold"; MCP_ENV=(MCP_TEST_HOLD="$T/hold"); mcp_bg a mcp 2027; mcp_wait '[ -e "$T/hold.reached" ]' 100
+chmod -R u+w "$BOTTLES/rvt2027-a"; stop_fakes; rm -rf "$BOTTLES/rvt2027-a"; rm "$T/hold"; exec 5>&-; wait "$LPID_a"; rc=$?; MCP_ENV=()
+check "mcp: bottle removed before the lock → refused under the lock" eval '[ "$rc" != 0 ] && grep -q "There is no bottle rvt2027-a" "$T/mcp-err-a" && [ ! -e "$T/mcp-argv" ]'
 reset; bottle rvt2027-a 2027 2027; mcp_install rvt2027-a "$MCPW"; echo 'addin_plan() { return 1; }' >> "$R/scripts/lib/addins.sh"; run "" addins 2027 --only revitmcp --accept-eula revitmcp
 check "addins: a failing plan → refused, no runner" eval '[ "$RC" != 0 ] && grep -q "Could not plan" <<<"$OUT" && ! grep -q run-steps "$CALLS"'
 reset; bottle rvt2027-a 2027 2027; echo 'addin_plan() { :; }' >> "$R/scripts/lib/addins.sh"; run "" addins 2027 --only revitmcp --accept-eula revitmcp
@@ -883,8 +894,8 @@ for s in TERM:143 HUP:129 INT:130; do
   for ph in before after; do
     mcp_world; fake_mcphost rvt2027-a; other=$!
     [ "$ph" = before ] && echo noconfirm > "$T/mcp-mode"
-    mcp_bg mcp 2027; mcp_wait '[ -s "$T/mcp-argv" ]' 100; [ "$ph" = after ] && mcp_wait confirmed 100; sleep 0.5
-    kill -"${s%:*}" "$LPID"; wait "$LPID"; rc=$?; exec 5>&-
+    mcp_bg a mcp 2027; mcp_wait '[ -s "$T/mcp-argv" ]' 100; [ "$ph" = after ] && mcp_wait confirmed 100; sleep 0.5
+    kill -"${s%:*}" "$LPID_a"; wait "$LPID_a"; rc=$?; exec 5>&-
     check "mcp: $s ${s%:*} $ph the handoff → exit ${s#*:}, own launcher gone, the other client and Revit alive" \
       eval '[ "$rc" = "${s#*:}" ] && ! own_alive && kill -0 "$other" 2>/dev/null && pgrep -f "Revit 2027.Revit.exe" >/dev/null'
     rm -f "$T/mcp-mode"
@@ -900,11 +911,11 @@ check "mcp: a loader that ignores TERM → killed; Revit and the other client al
 mcp_world; echo orphan > "$T/mcp-mode"; MCP_ENV=(MCP_HANDOFF_S=2); run_mcp mcp 2027; MCP_ENV=()
 check "mcp: a child that ignores TERM after its parent ended is killed too" eval '[ "$RC" = 1 ] && ! pgrep -f "^sleep 61" >/dev/null'
 pkill -9 -f "^sleep 61" 2>/dev/null
-mcp_world; echo holdclose > "$T/mcp-mode"; MCP_ENV=(MCP_HANDOFF_S=6); mcp_bg mcp 2027; MCP_ENV=(); mcp_wait '[ -s "$T/mcp-argv" ]' 100; sleep 2
+mcp_world; echo holdclose > "$T/mcp-mode"; MCP_ENV=(MCP_HANDOFF_S=6); mcp_bg a mcp 2027; MCP_ENV=(); mcp_wait '[ -s "$T/mcp-argv" ]' 100; sleep 2
 pkill -f "Revit 2027.Revit.exe"; sleep 0.5; run "2027" remove 2027   # Revit closed, the loader's bottle file closed: only the lock stops it
 check "mcp: while the launcher starts (its bottle file closed, no confirmation), remove is refused" eval '[ "$RC" != 0 ] && grep -q "Another task is running: ./revit mcp 2027 rvt2027-a" <<<"$OUT" && [ -d "$BOTTLES/rvt2027-a" ]'
-wait "$LPID"; exec 5>&-; check "mcp: then the lock is free and nothing of it is left" eval 'lock_is_free && ! own_alive'
-reset; for a in "2027 rvt2027-a" "2027 rvt2027-a 2" "27 rvt2027-a 0"; do
+wait "$LPID_a"; exec 5>&-; check "mcp: then the lock is free and nothing of it is left" eval 'lock_is_free && ! own_alive'
+reset; for a in "2027 rvt2027-a 0" "2027 rvt2027-a 2 autodesk" "27 rvt2027-a 0 autodesk" "2027 rvt2027-a 0 foo" "2027 rvt2027-a 0 autodesk x"; do
   (cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" /bin/bash "$R/scripts/mcp-launch.sh" $a > "$T/o" 2> "$T/e"); rc=$?
   check "mcp-launch.sh $a: usage, exit 2, stdout empty" eval '[ "$rc" = 2 ] && [ ! -s "$T/o" ] && grep -q "^Usage: scripts/mcp-launch.sh" "$T/e"'
 done
@@ -912,5 +923,100 @@ reset; bottle rvt2027-a 2027 2027; run "" addins 2027 --only revitmcp
 check "addins --only revitmcp without consent: the notice, nothing runs" eval '[ "$RC" = 1 ] && grep -qF "turns ADP on in this bottle. To accept, add --accept-eula revitmcp: ./revit addins 2027 --only revitmcp --accept-eula revitmcp" <<<"$OUT" && ! grep -q run-steps "$CALLS"'
 reset; bottle rvt2027-a 2027 2027; run "" addins 2027 --only revitmcp --accept-eula revitmcp
 check "addins --only revitmcp with consent: the step runs with it" eval '[ "$RC" = 0 ] && called "run-steps.sh 2027 rvt2027-a revitmcp check |"'
+# ---- ./revit mcp --server pyrevit (pyRevit's agent through mcphost --plain) ----
+PYEXE='C:\users\crossover\AppData\Roaming\pyRevit-Master\bin\pyrevit.exe'; PLAINH='C:\ProgramData\revit-macos\mcphost\mcphost.exe'
+PYA="$BOTTLES/rvt2027-a/drive_c/users/crossover/AppData/Roaming"; PYH="$BOTTLES/rvt2027-a/drive_c/ProgramData/revit-macos/mcphost/mcphost.exe"
+pyrevit_world() { # $1 = year (2027): pyRevit 7 with its agent on (pyRevit writes Windows line ends), one agent instance,
+  # our mcphost in build/, the fake CrossOver and a fake Revit
+  local y="${1:-2027}" a; reset; bottle "rvt$y-a" "$y" "$y"; a="$BOTTLES/rvt$y-a/drive_c/users/crossover/AppData/Roaming"
+  mkdir -p "$a/pyRevit-Master/pyrevitlib/pyrevit/agent" "$a/pyRevit-Master/bin" "$a/pyRevit/agent/instances" "$R/build/mcphost"
+  touch "$a/pyRevit-Master/pyrevitlib/pyrevit/agent/_runner.py" "$a/pyRevit-Master/bin/pyrevit.exe"
+  printf '[core]\r\ncheckupdates = false\r\n\r\n[agent]\r\nenabled = True\r\npolicy = "ask"\r\n' > "$a/pyRevit/pyRevit_config.ini"
+  echo '{"pid": 416}' > "$a/pyRevit/agent/instances/416.json"; echo "fake mcphost.exe v2" > "$R/build/mcphost/mcphost.exe"
+  mcp_cx; fake_revit "rvt$y-a" "$y"
+}
+refused() { [ "$RC" != 0 ] && grep -qF -- "$1" <<<"$ERR" && mcp_stdout_empty && [ ! -e "$T/mcp-argv" ]; }   # $1 = stderr text
+launches() { ls "$BOTTLES/rvt2027-a/drive_c/users/crossover/AppData/Local/Temp/revit-macos-mcp/" 2>/dev/null | grep -c '^launch-'; }
+AGENT_OFF="Turn on pyRevit's agent: pyRevit → Settings → Agent Runtime → Agent Host, Save, then reload pyRevit."
+
+pyrevit_world; run_mcp mcp 2027 --server foo; check "mcp --server foo → the known servers" refused "Unknown MCP server: foo. Known: autodesk, pyrevit"
+pyrevit_world; run_mcp addins 2027 --server pyrevit
+check "--server on another command → refused" eval '[ "$RC" != 0 ] && grep -qxF -- "--server is for ./revit mcp only." <<<"$ERR"'
+pyrevit_world; run_mcp mcp 2027 --server pyrevit --write
+check "mcp --server pyrevit --write → refused" refused "pyRevit decides what an agent may change: pyRevit → Settings → Agent Runtime."
+pyrevit_world 2021; run_mcp mcp 2021 --server pyrevit; check "pyrevit on 2021 → not offered here" refused "pyRevit is not available for Revit 2021 here."
+pyrevit_world; rm -rf "$PYA/pyRevit-Master"; run_mcp mcp 2027 --server pyrevit
+check "pyrevit not installed → the install command" refused "pyRevit is not installed in rvt2027-a. Install it: ./revit addins 2027 --only pyrevit"
+pyrevit_world 2020; rm "$BOTTLES/rvt2020-a/drive_c/users/crossover/AppData/Roaming/pyRevit-Master/pyrevitlib/pyrevit/agent/_runner.py"
+run_mcp mcp 2020 --server pyrevit; check "pyRevit 4.8 (2020) → needs pyRevit 7" refused "pyRevit's agent needs pyRevit 7; Revit 2020 gets pyRevit 4.8 here."
+for ini in '[agent]\r\nenabled = false\r\n' '[agent]\r\npolicy = "auto"\r\n' '[core]\r\nenabled = true\r\n[agent]\r\npolicy = "ask"\r\n' '' none; do
+  pyrevit_world; if [ "$ini" = none ]; then rm "$PYA/pyRevit/pyRevit_config.ini"; else printf "$ini" > "$PYA/pyRevit/pyRevit_config.ini"; fi
+  run_mcp mcp 2027 --server pyrevit; check "pyrevit config parsing: agent off ($ini) → how to turn it on" refused "$AGENT_OFF"
+done
+for ini in '[agent]\nenabled=true\n' '[core]\r\nx = 1\r\n[agent]\r\npolicy = "auto"\r\nenabled = TRUE\r\n' '[agent]\r\n  enabled   =   true  \r\n'; do
+  pyrevit_world; printf "$ini" > "$PYA/pyRevit/pyRevit_config.ini"; run_mcp mcp 2027 --server pyrevit
+  check "pyrevit config parsing: agent on ($ini) → started" eval '[ "$RC" = 0 ] && [ -s "$T/mcp-argv" ]'
+done
+pyrevit_world; rm "$PYA/pyRevit/agent/instances/416.json"; run_mcp mcp 2027 --server pyrevit
+check "pyrevit agent not running in Revit → reload pyRevit" refused "pyRevit's agent is on but not running in this Revit: reload pyRevit or restart Revit."
+pyrevit_world; stop_fakes; run_mcp mcp 2027 --server pyrevit; check "pyrevit without Revit → open Revit first" refused "Open Revit 2027 with a model first."
+pyrevit_world; printf 'hello\n{"jsonrpc":"2.0"}\n' > "$T/in"; MCP_IN="$T/in"; run_mcp mcp 2027 --server pyrevit
+check "pyrevit: exit 0, stdout is the server's alone, stderr empty" eval '[ "$RC" = 0 ] && [ "$OUT" = "$(cat "$T/in")" ] && [ -z "$ERR" ]'
+check "pyrevit: mcphost --plain starts pyrevit.exe mcp --revit=2027" eval '[ "$(sed -n "1p;2p;4,8p" "$T/mcp-argv" | tr "\n" "|")" = "$PLAINH|--launch|--plain|--|$PYEXE|mcp|--revit=2027|" ]'
+check "pyrevit: a launch token, nothing after the server's arguments" eval 'sed -n 3p "$T/mcp-argv" | grep -Eqx "revit-mcp-[0-9a-f-]{36}" && [ "$(wc -l < "$T/mcp-argv")" -eq 8 ]'
+check "pyrevit: mcphost.exe delivered from build/" cmp -s "$PYH" "$R/build/mcphost/mcphost.exe"
+pyrevit_world; mkdir -p "$(dirname "$PYH")"; echo "old mcphost.exe" > "$PYH"; run_mcp mcp 2027 --server pyrevit
+check "pyrevit: an old mcphost.exe is replaced, no temporary file left" eval '[ "$RC" = 0 ] && cmp -s "$PYH" "$R/build/mcphost/mcphost.exe" && [ "$(ls "$(dirname "$PYH")")" = mcphost.exe ]'
+pyrevit_world; mkdir -p "$(dirname "$PYH")"; cp "$R/build/mcphost/mcphost.exe" "$PYH"; touch -t 202001010000 "$PYH"; m0="$(stat -f %m "$PYH")"; run_mcp mcp 2027 --server pyrevit
+check "pyrevit: the same mcphost.exe is not rewritten" eval '[ "$RC" = 0 ] && [ "$(stat -f %m "$PYH")" = "$m0" ]'
+pyrevit_world; rm -rf "$R/build/mcphost"; run_mcp mcp 2027 --server pyrevit; check "pyrevit: no mcphost.exe to deliver → refused" refused "Cannot get mcphost.exe"
+mcp_world; run_mcp mcp 2027; cp "$T/mcp-argv" "$TOP/argv-plain"; mcp_world; run_mcp mcp 2027 --server autodesk
+check "mcp --server autodesk = no flag (read-only)" eval '[ "$(sed 3d "$T/mcp-argv")" = "$(sed 3d "$TOP/argv-plain")" ]'
+mcp_world; run_mcp mcp 2027 --write; cp "$T/mcp-argv" "$TOP/argv-plain"; mcp_world; run_mcp mcp 2027 --server autodesk --write
+check "mcp --server autodesk = no flag (--write)" eval '[ "$(sed 3d "$T/mcp-argv")" = "$(sed 3d "$TOP/argv-plain")" ]'
+# two connections at once: the file is not rewritten, each echoes its own, closing one leaves the other
+pyrevit_world; mcp_bg a mcp 2027 --server pyrevit; mcp_wait '[ "$(launches)" -ge 1 ]' 100; mcp_wait lock_is_free 50; m1="$(stat -f %m "$PYH")"; sleep 1.1
+mcp_bg b mcp 2027 --server pyrevit; mcp_wait '[ "$(launches)" -ge 2 ]' 100
+echo from-a >&5; echo from-b >&6; mcp_wait 'grep -qx from-a "$T/mcp-out-a" && grep -qx from-b "$T/mcp-out-b"' 50
+check "pyrevit: two connections live together, each answers its own" eval 'kill -0 "$LPID_a" && kill -0 "$LPID_b" && [ "$(cat "$T/mcp-out-a")" = from-a ] && [ "$(cat "$T/mcp-out-b")" = from-b ]'
+check "pyrevit: the second connection did not rewrite mcphost.exe" test "$(stat -f %m "$PYH")" = "$m1"
+exec 5>&-; wait "$LPID_a"; echo again-b >&6; mcp_wait 'grep -qx again-b "$T/mcp-out-b"' 50
+check "pyrevit: closing one connection leaves the other" eval 'kill -0 "$LPID_b" && grep -qx again-b "$T/mcp-out-b"'
+exec 6>&-; wait "$LPID_b"
+# input sent before the handoff reaches the server byte for byte (both servers)
+for sv in pyrevit autodesk; do
+  if [ "$sv" = pyrevit ]; then pyrevit_world; else mcp_world; fi
+  echo delayconfirm > "$T/mcp-mode"; mcp_bg a mcp 2027 --server "$sv"; mcp_wait '[ -s "$T/mcp-argv" ]' 100
+  printf '{"jsonrpc":"2.0","id":1,"method":"initialize"}\n' >&5; sleep 0.5
+  check "$sv: not confirmed yet while the first input waits" eval '! confirmed'
+  touch "$T/mcp-go"; mcp_wait confirmed 100; mcp_wait 'grep -q initialize "$T/mcp-out-a"' 50
+  check "$sv: input sent before the handoff reaches the server unchanged" eval '[ "$(cat "$T/mcp-out-a")" = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}" ]'
+  exec 5>&-; wait "$LPID_a"; rm -f "$T/mcp-mode" "$T/mcp-go"
+done
+# the launcher's life cycle with pyRevit: signals with a second client alive, the deadline, a loader ignoring TERM
+for s in TERM:143 INT:130; do
+  for ph in before after; do
+    pyrevit_world; fake_mcphost rvt2027-a; other=$!
+    [ "$ph" = before ] && echo noconfirm > "$T/mcp-mode"
+    mcp_bg a mcp 2027 --server pyrevit; mcp_wait '[ -s "$T/mcp-argv" ]' 100; [ "$ph" = after ] && mcp_wait confirmed 100; sleep 0.5
+    kill -"${s%:*}" "$LPID_a"; wait "$LPID_a"; rc=$?; exec 5>&-
+    check "pyrevit: $s ${s%:*} $ph the handoff → exit ${s#*:}, own launcher gone, the other client and Revit alive" \
+      eval '[ "$rc" = "${s#*:}" ] && ! own_alive && kill -0 "$other" 2>/dev/null && pgrep -f "Revit 2027.Revit.exe" >/dev/null'
+    rm -f "$T/mcp-mode"
+  done
+done
+pyrevit_world; echo noconfirm > "$T/mcp-mode"; MCP_ENV=(MCP_HANDOFF_S=3); run_mcp mcp 2027 --server pyrevit; MCP_ENV=()
+check "pyrevit: no confirmation → refused after the deadline, nothing left" eval '[ "$RC" = 1 ] && grep -q "did not start within 3 s" <<<"$ERR" && mcp_stdout_empty && ! own_alive && lock_is_free'
+pyrevit_world; fake_mcphost rvt2027-a; other=$!; echo ignoreterm > "$T/mcp-mode"; MCP_ENV=(MCP_HANDOFF_S=2); run_mcp mcp 2027 --server pyrevit; MCP_ENV=()
+check "pyrevit: a loader that ignores TERM → killed; Revit and the other client alive" \
+  eval '[ "$RC" = 1 ] && ! own_alive && kill -0 "$other" 2>/dev/null && pgrep -f "Revit 2027.Revit.exe" >/dev/null'
+rm -f "$T/mcp-mode"
+# a live pyRevit connection with Revit closed and the lock free still keeps remove, rebuild and addins away
+for c in "2027|remove 2027|cxbottle" "2027|rebuild 2027|install.sh" "|addins 2027|run-steps.sh"; do
+  pyrevit_world; mcp_bg a mcp 2027 --server pyrevit; mcp_wait confirmed 100; mcp_wait lock_is_free 50; stop_fakes
+  run "${c%%|*}" $(cut -d'|' -f2 <<<"$c")
+  check "pyrevit connected, Revit closed: $(cut -d'|' -f2 <<<"$c") refused" eval '[ "$RC" != 0 ] && grep -q "through MCP" <<<"$OUT" && ! called "${c##*|}" && [ -d "$BOTTLES/rvt2027-a" ]'
+  exec 5>&-; wait "$LPID_a"
+done
 # ---- end ----
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]
