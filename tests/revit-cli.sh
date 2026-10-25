@@ -845,7 +845,12 @@ mcp_bg() { # $1 = connection a | b, rest = ./revit arguments: in the background 
 }
 mcp_wait() { local i; for i in $(seq 1 ${2:-100}); do eval "$1" && return 0; sleep 0.1; done; return 1; }   # $1 = condition
 confirmed() { ls "$BOTTLES/rvt2027-a/drive_c/users/crossover/AppData/Local/Temp/revit-macos-mcp/"launch-* >/dev/null 2>&1; }
-own_alive() { pgrep -f 'revit-mcp-[0-9a-f]{8}-' >/dev/null; }   # a process with a launch token in its arguments
+sandboxed() { # $1 = pgrep pattern: a process that matches and belongs to this sandbox (a real MCP client or Revit on
+  # this Mac matches the same patterns)
+  local p; for p in $(pgrep -f "$1" 2>/dev/null); do ps -o command= -p "$p" 2>/dev/null | grep -qF "$T/" && return 0; done; return 1
+}
+own_alive() { sandboxed 'revit-mcp-[0-9a-f]{8}-'; }   # a process with a launch token in its arguments
+revit_alive() { sandboxed 'Revit 2027.Revit.exe'; }   # the fake Revit (it holds a file of the sandbox open)
 lock_is_free() { perl -MFcntl=:flock -e 'open(my $f, ">>", $ARGV[0]) or exit 0; flock($f, LOCK_EX | LOCK_NB) or exit 1' "$H/Library/Application Support/revit-macos/lock"; }
 mcp_stdout_empty() { [ -z "$OUT" ]; }
 
@@ -897,7 +902,7 @@ for s in TERM:143 HUP:129 INT:130; do
     mcp_bg a mcp 2027; mcp_wait '[ -s "$T/mcp-argv" ]' 100; [ "$ph" = after ] && mcp_wait confirmed 100; sleep 0.5
     kill -"${s%:*}" "$LPID_a"; wait "$LPID_a"; rc=$?; exec 5>&-
     check "mcp: $s ${s%:*} $ph the handoff → exit ${s#*:}, own launcher gone, the other client and Revit alive" \
-      eval '[ "$rc" = "${s#*:}" ] && ! own_alive && kill -0 "$other" 2>/dev/null && pgrep -f "Revit 2027.Revit.exe" >/dev/null'
+      eval '[ "$rc" = "${s#*:}" ] && ! own_alive && kill -0 "$other" 2>/dev/null && revit_alive'
     rm -f "$T/mcp-mode"
   done
 done
@@ -907,7 +912,7 @@ check "mcp: no confirmation → own launcher gone, lock free" eval '! own_alive 
 sleep 2; check "mcp: no late launcher afterwards" eval '! own_alive && ! confirmed'
 mcp_world; fake_mcphost rvt2027-a; other=$!; echo ignoreterm > "$T/mcp-mode"; MCP_ENV=(MCP_HANDOFF_S=2); run_mcp mcp 2027; MCP_ENV=()
 check "mcp: a loader that ignores TERM → killed; Revit and the other client alive" \
-  eval '[ "$RC" = 1 ] && ! own_alive && kill -0 "$other" 2>/dev/null && pgrep -f "Revit 2027.Revit.exe" >/dev/null'
+  eval '[ "$RC" = 1 ] && ! own_alive && kill -0 "$other" 2>/dev/null && revit_alive'
 mcp_world; echo orphan > "$T/mcp-mode"; MCP_ENV=(MCP_HANDOFF_S=2); run_mcp mcp 2027; MCP_ENV=()
 check "mcp: a child that ignores TERM after its parent ended is killed too" eval '[ "$RC" = 1 ] && ! pgrep -f "^sleep 61" >/dev/null'
 pkill -9 -f "^sleep 61" 2>/dev/null
@@ -1001,7 +1006,7 @@ for s in TERM:143 INT:130; do
     mcp_bg a mcp 2027 --server pyrevit; mcp_wait '[ -s "$T/mcp-argv" ]' 100; [ "$ph" = after ] && mcp_wait confirmed 100; sleep 0.5
     kill -"${s%:*}" "$LPID_a"; wait "$LPID_a"; rc=$?; exec 5>&-
     check "pyrevit: $s ${s%:*} $ph the handoff → exit ${s#*:}, own launcher gone, the other client and Revit alive" \
-      eval '[ "$rc" = "${s#*:}" ] && ! own_alive && kill -0 "$other" 2>/dev/null && pgrep -f "Revit 2027.Revit.exe" >/dev/null'
+      eval '[ "$rc" = "${s#*:}" ] && ! own_alive && kill -0 "$other" 2>/dev/null && revit_alive'
     rm -f "$T/mcp-mode"
   done
 done
@@ -1009,7 +1014,7 @@ pyrevit_world; echo noconfirm > "$T/mcp-mode"; MCP_ENV=(MCP_HANDOFF_S=3); run_mc
 check "pyrevit: no confirmation → refused after the deadline, nothing left" eval '[ "$RC" = 1 ] && grep -q "did not start within 3 s" <<<"$ERR" && mcp_stdout_empty && ! own_alive && lock_is_free'
 pyrevit_world; fake_mcphost rvt2027-a; other=$!; echo ignoreterm > "$T/mcp-mode"; MCP_ENV=(MCP_HANDOFF_S=2); run_mcp mcp 2027 --server pyrevit; MCP_ENV=()
 check "pyrevit: a loader that ignores TERM → killed; Revit and the other client alive" \
-  eval '[ "$RC" = 1 ] && ! own_alive && kill -0 "$other" 2>/dev/null && pgrep -f "Revit 2027.Revit.exe" >/dev/null'
+  eval '[ "$RC" = 1 ] && ! own_alive && kill -0 "$other" 2>/dev/null && revit_alive'
 rm -f "$T/mcp-mode"
 # a live pyRevit connection with Revit closed and the lock free still keeps remove, rebuild and addins away
 for c in "2027|remove 2027|cxbottle" "2027|rebuild 2027|install.sh" "|addins 2027|run-steps.sh"; do
