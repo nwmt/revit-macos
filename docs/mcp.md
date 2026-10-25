@@ -91,12 +91,12 @@ can read and write your files too. Connect only assistants you trust.
 
 1. If pyRevit is not there yet, quit Revit and install it: `./revit addins 2027 --only pyrevit`.
 2. In Revit: **pyRevit → Settings → Agent Runtime (MCP)**, tick **Agent Host (Beta)** and choose **Ask for my approval
-   in Revit** under Model Changes. Save the settings, then reload pyRevit (**pyRevit → Reload**).
+   in Revit before every change** under Model Changes. Save the settings, then reload pyRevit (**pyRevit → Reload**).
 
 With "Ask for my approval", Revit asks before every change; "Auto" applies changes without asking. The buttons under
 "Connect an Agent" in those settings do not work on a Mac: use the command below instead.
 
-`./revit doctor 2027` then says "pyRevit's agent is on".
+`./revit doctor 2027 --all` then lists "pyRevit's agent is on".
 
 ### Connect
 
