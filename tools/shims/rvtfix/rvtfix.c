@@ -51,6 +51,16 @@
  *    Fix: replace user32's DestroyWindow export; before a window of ours is destroyed, move the Chrome_WidgetWin_*
  *    windows of another process inside it to HWND_MESSAGE. The browser then closes them itself.
  *
+ * 7. Maximize on a secondary monitor: Revit answers WM_GETMINMAXINFO with its monitor's work area and the work area's
+ *    origin relative to that monitor (e.g. 0,33). Windows moves such an answer onto the monitor the window maximizes
+ *    on; Wine (get_min_max_info) moves only its own defaults and takes the answer as absolute -> Revit lands at the
+ *    main monitor's origin with the other monitor's size. Fix: when a top-level window with a maximize box is shown
+ *    (WinEvent hook in the window's thread, after MFC/WPF have put their procedures), put our window procedure in
+ *    front; after the original answers on a secondary monitor, an answer of exactly that form (position = work area
+ *    relative to the monitor, size = work area) gets the work area's absolute origin. Other answers stay as they are.
+ *    Only in Revit.exe. The first show of an already maximized window comes before the hook: not fixed.
+ *    RVTFIX_MAXPOS set and empty disables.
+ *
  * 4 and 5 run when the DLL loads (LdrRegisterDllNotification), or at once if it is already loaded.
  *
  * Diagnostics: OutputDebugString with the "[rvtfix]" prefix (CX_DEBUGMSG=+debugstr).
@@ -348,6 +358,78 @@ static void fix_destroy(void)
     FlushInstructionCache(GetCurrentProcess(), thunk, 16);
 }
 
+/* --- 7. maximize on a secondary monitor --- */
+#define MAXPOS_PROP L"rvtfix.maxpos"   /* the original window procedure */
+static int maxpos_traces;
+static LRESULT CALLBACK maxpos_proc_w(HWND, UINT, WPARAM, LPARAM);
+static LRESULT CALLBACK maxpos_proc_a(HWND, UINT, WPARAM, LPARAM);
+
+static void maxpos_adjust(HWND hwnd, MINMAXINFO *m) /* Revit's answer for this monitor, relative to it -> absolute */
+{
+    MONITORINFO mi = { sizeof(mi) };
+    if (!GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi) || (mi.dwFlags & MONITORINFOF_PRIMARY))
+        return;   /* on the main monitor relative and absolute are the same */
+    if (m->ptMaxPosition.x != mi.rcWork.left - mi.rcMonitor.left || m->ptMaxPosition.y != mi.rcWork.top - mi.rcMonitor.top ||
+        m->ptMaxSize.x != mi.rcWork.right - mi.rcWork.left || m->ptMaxSize.y != mi.rcWork.bottom - mi.rcWork.top)
+        return;   /* absolute, Wine's defaults (it moves them after us) or another form: not guessed */
+    m->ptMaxPosition.x = mi.rcWork.left;
+    m->ptMaxPosition.y = mi.rcWork.top;
+    if (maxpos_traces++ < 16)
+        trace("maximize %p: position moved to %ld,%ld (secondary monitor)\n", hwnd, m->ptMaxPosition.x, m->ptMaxPosition.y);
+}
+
+static LRESULT maxpos_common(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, BOOL unicode)
+{
+    WNDPROC orig = (WNDPROC)GetPropW(hwnd, MAXPOS_PROP), ours = unicode ? maxpos_proc_w : maxpos_proc_a;
+    LRESULT r;
+    if (!orig) return unicode ? DefWindowProcW(hwnd, msg, wp, lp) : DefWindowProcA(hwnd, msg, wp, lp);
+    if (msg == WM_NCDESTROY) { /* the original goes back first: a procedure below that unhooks itself sees its own */
+        RemovePropW(hwnd, MAXPOS_PROP);
+        if (unicode && (WNDPROC)GetWindowLongPtrW(hwnd, GWLP_WNDPROC) == ours) SetWindowLongPtrW(hwnd, GWLP_WNDPROC, (LONG_PTR)orig);
+        if (!unicode && (WNDPROC)GetWindowLongPtrA(hwnd, GWLP_WNDPROC) == ours) SetWindowLongPtrA(hwnd, GWLP_WNDPROC, (LONG_PTR)orig);
+    }
+    r = unicode ? CallWindowProcW(orig, hwnd, msg, wp, lp) : CallWindowProcA(orig, hwnd, msg, wp, lp);
+    if (msg == WM_GETMINMAXINFO && lp) maxpos_adjust(hwnd, (MINMAXINFO *)lp);
+    return r;
+}
+static LRESULT CALLBACK maxpos_proc_w(HWND h, UINT m, WPARAM w, LPARAM l) { return maxpos_common(h, m, w, l, TRUE); }
+static LRESULT CALLBACK maxpos_proc_a(HWND h, UINT m, WPARAM w, LPARAM l) { return maxpos_common(h, m, w, l, FALSE); }
+
+/* a window is shown (in its own thread): after its own subclassing, so ours sees the final answer. Of the same type
+ * (ANSI or Unicode) as the window: SetWindowLongPtrW would make an ANSI window Unicode */
+static void CALLBACK maxpos_on_show(HWINEVENTHOOK hook, DWORD ev, HWND hwnd, LONG obj, LONG child, DWORD tid, DWORD time)
+{
+    WNDPROC orig;
+    BOOL unicode;
+    if (obj != OBJID_WINDOW || child != CHILDID_SELF || !hwnd || GetPropW(hwnd, MAXPOS_PROP)) return;
+    if (GetAncestor(hwnd, GA_PARENT) != GetDesktopWindow() || !(GetWindowLongW(hwnd, GWL_STYLE) & WS_MAXIMIZEBOX)) return;
+    if (GetWindowThreadProcessId(hwnd, NULL) != GetCurrentThreadId()) return;
+    unicode = IsWindowUnicode(hwnd);
+    orig = (WNDPROC)(unicode ? GetWindowLongPtrW(hwnd, GWLP_WNDPROC) : GetWindowLongPtrA(hwnd, GWLP_WNDPROC));
+    if (!orig || orig == maxpos_proc_w || orig == maxpos_proc_a) return;
+    if (!SetPropW(hwnd, MAXPOS_PROP, (HANDLE)orig)) return;   /* without it our procedure could not pass anything on */
+    SetLastError(0);
+    if (!(unicode ? SetWindowLongPtrW(hwnd, GWLP_WNDPROC, (LONG_PTR)maxpos_proc_w)
+                  : SetWindowLongPtrA(hwnd, GWLP_WNDPROC, (LONG_PTR)maxpos_proc_a)) && GetLastError())
+        RemovePropW(hwnd, MAXPOS_PROP);   /* refused: the window stays as it was, the next show tries again */
+}
+
+static void fix_maxpos(HINSTANCE inst)
+{
+    WCHAR path[MAX_PATH], *slash, env[8];
+    if (!GetModuleFileNameW(NULL, path, MAX_PATH) || !(slash = wcsrchr(path, L'\\')) || lstrcmpiW(slash + 1, L"Revit.exe"))
+        return;
+    SetLastError(0);   /* an empty variable leaves the last error as it was */
+    if (!GetEnvironmentVariableW(L"RVTFIX_MAXPOS", env, 8) && GetLastError() != ERROR_ENVVAR_NOT_FOUND) {
+        trace("maximize: disabled (RVTFIX_MAXPOS is empty)\n");
+        return;
+    }
+    if (SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_SHOW, inst, maxpos_on_show, GetCurrentProcessId(), 0, WINEVENT_INCONTEXT))
+        trace("maximize: windows on a secondary monitor get its origin\n");
+    else
+        trace("maximize: no WinEvent hook (%lu)\n", GetLastError());
+}
+
 static void fix_dragdrop(void)
 {
     HMODULE ole = LoadLibraryW(L"ole32.dll");
@@ -372,6 +454,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
         fix_webview2();
         fix_cef();
         fix_autodesk();
+        fix_maxpos(inst);
         watch_dlls(); /* under the loader lock: no DLL loads between the checks above and this */
     }
     return TRUE;
