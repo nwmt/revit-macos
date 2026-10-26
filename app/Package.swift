@@ -18,6 +18,9 @@ let package = Package(
         .target(name: "TrackpadIO", dependencies: ["TrackpadCore", "TrackpadState"], path: "Sources/TrackpadIO"),
         .testTarget(name: "TrackpadIOTests", dependencies: ["TrackpadIO", "TrackpadCore", "TrackpadState"],
                     path: "Tests/TrackpadIOTests", exclude: ["Fixtures"]),
+        // <App> Trackpad.app: the event tap and its system glue (app/make-bundle.sh puts it in Contents/Helpers)
+        .executableTarget(name: "TrackpadHelper", dependencies: ["TrackpadCore", "TrackpadIO", "TrackpadState"],
+                          path: "Sources/TrackpadHelper"),
         .target(name: "AppCore", dependencies: ["TrackpadState"], path: "Sources/AppCore"),
         .executableTarget(name: "AppMain", dependencies: ["AppCore"], path: "Sources/AppMain"),
         .testTarget(name: "AppCoreTests", dependencies: ["AppCore", "TrackpadState"], path: "Tests/AppCoreTests", exclude: ["Fixtures"]),
