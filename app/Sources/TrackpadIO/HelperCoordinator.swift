@@ -118,7 +118,7 @@ final class UnionBox: @unchecked Sendable {
             let u = union
             let c = ports.clients.make(year: b.year, bottle: b.bottle) { DisplayMap.scale(hello: $0, cgUnion: u.value) }
             let name = b.bottle
-            c.onChange { s in Task { @MainActor [weak self] in await self?.clientChanged(bottle: name, s) } }
+            c.onChange { [weak self] s in Task { @MainActor in await self?.clientChanged(bottle: name, s) } }
             bottles[b.bottle] = (b.year, c)
             c.start()
         }
