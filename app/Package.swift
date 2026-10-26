@@ -7,7 +7,7 @@ import PackageDescription
 
 let package = Package(
     name: "AppMain",
-    platforms: [.macOS("26.0")],
+    platforms: [.macOS("27.0")],
     targets: [
         .target(name: "AppCore", path: "Sources/AppCore"),
         .executableTarget(name: "AppMain", dependencies: ["AppCore"], path: "Sources/AppMain"),
