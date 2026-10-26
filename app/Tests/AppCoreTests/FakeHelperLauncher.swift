@@ -8,7 +8,7 @@ import TrackpadState
     var launched: [HelperArgs] = []
     var calls: [String] = []
     var quitsOnTerminate = true, quitsOnForce = true
-    var holding = false
+    var holding = false, failLaunch = false
     private var gate: CheckedContinuation<Void, Never>?
     private var next: Int32 = 900
 
@@ -21,6 +21,7 @@ import TrackpadState
         calls.append("launch\(args.recoverOnly ? " recover-only" : args.recover ? " recover" : "")")
         launched.append(args)
         if holding { await withCheckedContinuation { gate = $0 } }
+        if failLaunch { throw CocoaError(.executableLoad) }
         next += 1
         let h = HelperInstance(pid: next, start: "t\(next)")
         instances.append(h)

@@ -95,3 +95,37 @@ func ready(_ c: HittestClient) -> Bool { eventually { if case .ready = c.status 
     #expect(ready(c))
     #expect(c.query(WinePoint(x: 2, y: 2)) == nil)     // the slow fake answers late again; the old answer is not this one
 }
+
+/// A scale that fails the first time (the screens changed meanwhile), then fits.
+final class FirstNil: @unchecked Sendable {
+    private let lock = NSLock(); private var calls = 0
+    func scale(_ r: CGRect) -> Int? { lock.withLock { calls += 1; return calls == 1 ? nil : 2 } }
+}
+
+// final review 4: the screens did not fit (the old hello), a restart gives a new process whose hello fits. (The race
+// of a restart while a process is being created is closed by construction: restart() ends the generation itself.)
+@Test func restartAfterAWrongLayoutGetsReady() {
+    let f = Fake(), first = FirstNil()
+    let c = HittestClient(engine: fixture("fake-revit-hittest.sh"), year: 2027, bottle: "rvt2027-t",
+                          environment: ["PATH": "/usr/bin:/bin", "FAKE_HIT_COUNT": f.count.path], log: TrackpadLog(url: f.dir.appending(path: "l")),
+                          scale: { first.scale($0) }, timing: ClientTiming(hello: 1, reply: 0.15, restart: 0.2, termGrace: 0.3))
+    c.start(); defer { c.shutdown() }
+    #expect(eventually { c.status == .notReady("unknown display layout") })
+    c.restart()
+    #expect(ready(c))
+}
+
+@Test func statusChangesAreReported() {
+    let f = Fake(), c = f.client("crash")
+    let seen = Seen()
+    c.onChange { seen.add($0) }
+    c.start(); defer { c.shutdown() }
+    #expect(eventually(5) { seen.all.contains { if case .failed = $0 { return true }; return false } })
+    #expect(seen.all.contains(.ready(scale: 2)))
+}
+
+final class Seen: @unchecked Sendable {
+    private let lock = NSLock(); private var list: [ClientStatus] = []
+    func add(_ s: ClientStatus) { lock.withLock { list.append(s) } }
+    var all: [ClientStatus] { lock.withLock { list } }
+}

@@ -25,6 +25,8 @@ import TrackpadState
     /// Hands the cancel to the gesture machine on the tap's thread and returns once its posts (the middle button's up)
     /// are sent.
     func cancel(_ r: CancelReason) async
+    /// The cancel, its posts and the tap's end in one step on the tap's thread: no gesture can start in between.
+    func cancelAndDisable(_ r: CancelReason) async
     func cursor() -> CGPoint
 }
 
@@ -47,6 +49,7 @@ public protocol HelperClient: HitQuerying {
     func stop()
     func restart()
     func shutdown()                         // stop and wait for its processes (the helper is exiting)
+    func onChange(_ f: @escaping @Sendable (ClientStatus) -> Void)   // called when its status changes
 }
 
 extension HittestClient: HelperClient {}

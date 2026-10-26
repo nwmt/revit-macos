@@ -69,11 +69,12 @@ final class UnionBox: @unchecked Sendable {
             tapOn = true; state.posting = true
             log.line("tap on")
         } else if !trusted && tapOn {
-            await ports.tap.cancel(.permissionLost)
-            ports.tap.disable(); tapOn = false; state.posting = false
+            await ports.tap.cancelAndDisable(.permissionLost)
+            tapOn = false; state.posting = false
             log.line("permission lost: tap off")
         } else if tapOn && revits.isEmpty {
-            ports.tap.disable(); tapOn = false
+            await ports.tap.cancelAndDisable(.switchOff)
+            tapOn = false
             log.line("no Revit: tap off")
         }
         state.tap = tapOn
@@ -116,6 +117,8 @@ final class UnionBox: @unchecked Sendable {
         if bottles[b.bottle] == nil {
             let u = union
             let c = ports.clients.make(year: b.year, bottle: b.bottle) { DisplayMap.scale(hello: $0, cgUnion: u.value) }
+            let name = b.bottle
+            c.onChange { s in Task { @MainActor [weak self] in await self?.clientChanged(bottle: name, s) } }
             bottles[b.bottle] = (b.year, c)
             c.start()
         }
@@ -134,8 +137,24 @@ final class UnionBox: @unchecked Sendable {
         await checkPermission()
     }
 
+    /// A bottle's hittest is no longer ready (or is again): a gesture over that bottle's Revit ends at once.
+    public func clientChanged(bottle: String, _ s: ClientStatus) async {
+        guard bottles[bottle] != nil else { return }
+        if case .ready = s {} else {
+            for (pid, b) in revits.sorted(by: { $0.key < $1.key }) where b == bottle { await ports.tap.cancel(.hittestFailed(pid)) }
+        }
+        await refreshBottles()
+    }
+
     public func activated(_ pid: Int32) async {
         await ports.tap.cancel(.activated(pid))
+    }
+
+    /// The first sign of a display change, at once: the gesture ends and every hittest starts again, so no decision is
+    /// made with the old screens until a fresh hello fits (displaysChanged follows when the changes have settled).
+    public func blockForDisplays() async {
+        await ports.tap.cancel(.displays)
+        for v in bottles.values { v.client.restart() }
     }
 
     /// The screens changed: no gesture goes on, every hittest starts again and must agree with the new screens; while
@@ -161,7 +180,7 @@ final class UnionBox: @unchecked Sendable {
         disables = disables.filter { now - $0 < TrackpadConstants.tapDisableWindow } + [now]
         log.line("tap disabled by macOS")
         guard disables.count > TrackpadConstants.tapDisablesToError, tapOn else { return }
-        ports.tap.disable(); tapOn = false; state.tap = false
+        await ports.tap.cancelAndDisable(.tapDisabled); tapOn = false; state.tap = false
         state.error = "macOS turned the event tap off too often"
         log.line("tap off: \(state.error!)")
         save()
@@ -169,8 +188,8 @@ final class UnionBox: @unchecked Sendable {
 
     public func shutdown(reason: String) async {
         guard !exited else { return }
-        await ports.tap.cancel(.switchOff)
-        if tapOn { ports.tap.disable(); tapOn = false }
+        await ports.tap.cancelAndDisable(.switchOff)
+        tapOn = false
         state.tap = false
         for v in bottles.values { v.client.shutdown() }
         bottles = [:]; revits = [:]

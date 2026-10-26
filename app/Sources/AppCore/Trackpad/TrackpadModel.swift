@@ -23,17 +23,18 @@ public enum TrackpadLine: Equatable, Sendable {
     @ObservationIgnored let data: () -> URL?
     @ObservationIgnored let placement: () -> String?
     @ObservationIgnored let parent: () async -> (Int32, String)?
-    @ObservationIgnored let sleep: (Double) async -> Void
+    @ObservationIgnored let sleep: @MainActor (Double) async -> Void
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var current: HelperInstance?
     @ObservationIgnored private var session = ""
     @ObservationIgnored private var expected: Set<HelperInstance> = []
     @ObservationIgnored private var crashes = 0
+    @ObservationIgnored private var needsRecover = false       // a helper crashed: the next one lets the button go first
     public static let section = "Device Control and Data Access"   // System Settings → Privacy & Security, macOS 27
 
     public init(launcher: any HelperLauncher, resetter: any PermissionResetter, defaults: UserDefaults, engine: URL,
                 data: @escaping () -> URL?, placement: @escaping () -> String?, parent: @escaping () async -> (Int32, String)?,
-                helperID: String, sleep: @escaping (Double) async -> Void = { try? await Task.sleep(for: .seconds($0)) }) {
+                helperID: String, sleep: @escaping @MainActor (Double) async -> Void = { try? await Task.sleep(for: .seconds($0)) }) {
         self.launcher = launcher; self.resetter = resetter; self.defaults = defaults; self.engine = engine; self.data = data
         self.placement = placement; self.parent = parent; self.helperID = helperID; self.sleep = sleep
         enabled = defaults.bool(forKey: "trackpadEnabled")
@@ -59,10 +60,16 @@ public enum TrackpadLine: Equatable, Sendable {
         if expected.remove(h) != nil { if current == h { current = nil }; return }
         guard current == h else { return }
         current = nil
-        crashes += 1
+        crashes += 1; needsRecover = true
         if enabled && crashes >= 3 { line = .error(String(localized: "The helper stopped \(crashes) times")); return }
+        let g = generation
         await sleep(10)   // at most one start every 10 s
-        await launchFresh(recover: enabled, recoverOnly: !enabled)
+        if !enabled {     // off now: only the button, if no helper has let it go meanwhile
+            if needsRecover { await launchFresh(recover: false, recoverOnly: true) }
+            return
+        }
+        guard g == generation else { return }   // the switch moved meanwhile: that start recovered already
+        await launchFresh(recover: true, recoverOnly: false)
     }
 
     /// The permission no longer fits the helper (it changed): stop it, reset its entry, ask again.
@@ -103,8 +110,12 @@ public enum TrackpadLine: Equatable, Sendable {
         guard let d = data(), let (pid, start) = await parent(), g == generation else { return }
         session = UUID().uuidString
         let args = HelperArgs(session: session, parentPid: pid, parentStart: start, engine: engine, data: d,
-                              recover: recover, recoverOnly: recoverOnly)
-        guard let h = try? await launcher.launch(args) else { line = .error(String(localized: "The helper could not start")); return }
+                              recover: recover || (needsRecover && !recoverOnly), recoverOnly: recoverOnly)
+        guard let h = try? await launcher.launch(args) else {
+            if g == generation && (enabled || recoverOnly) { line = .error(String(localized: "The helper could not start")) }
+            return
+        }
+        if args.recover || recoverOnly { needsRecover = false }
         if g != generation || (!enabled && !recoverOnly) {   // the switch moved meanwhile: undo
             expected.insert(h); launcher.terminate(h); return
         }

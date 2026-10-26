@@ -26,9 +26,10 @@ func isRevit(_ a: NSRunningApplication) -> Bool {
     func create() -> Bool { thread.create() }
     func probePosting() async -> Bool { await thread.probePosting() }
     func disable() { thread.disable() }
-    func post(_ posts: [Post]) { thread.post(posts) }
+    func post(_ posts: [Post]) { thread.perform { [thread] in thread.post(posts) } }   // its button state is that thread's
     func setContext(_ c: DecideContext) { thread.setContext(c) }
     func cancel(_ r: CancelReason) async { await thread.cancel(r) }
+    func cancelAndDisable(_ r: CancelReason) async { await thread.cancelAndDisable(r) }
     func cursor() -> CGPoint { CGEvent(source: nil)?.location ?? .zero }
 }
 

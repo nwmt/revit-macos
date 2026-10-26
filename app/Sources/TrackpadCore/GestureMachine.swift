@@ -62,6 +62,7 @@ public final class GestureMachine {
     private var cur = CGPoint.zero, mods: Mods = [], last = 0.0
     private var remainder = 0.0                 // wheel pixels not sent yet
     private var dropMomentum = false            // the momentum after this gesture is ours to drop
+    private var droppedEarly = false            // cancelled between "may begin" and "began": its "began" is dropped too
 
     public init(decide: @escaping (CGPoint) -> Target?) { self.decide = decide }
 
@@ -83,18 +84,22 @@ public final class GestureMachine {
 
     /// Ends what we own: the button up if it is down; the rest of this gesture and its momentum are dropped.
     private func drop() -> [Post] {
-        let owned = target != nil || pending.map { $0 != nil } == true
         var out: [Post] = []
         if case .panning = state { out = [.up(cur, mods)] }
-        guard owned else { return out }
+        guard target != nil || pendingTarget != nil else { return out }
+        droppedEarly = pendingTarget != nil
         state = .dropping; pending = nil; dropMomentum = true
         return out
     }
 
+    /// A gesture decided at "may begin" that has not begun yet.
+    private var pendingTarget: Target? { if case .some(.some(let t)) = pending { return t }; return nil }
+
     private func cancel(_ r: CancelReason) -> [Post] {
+        let t = target ?? pendingTarget
         switch r {
-        case .targetGone(let p), .hittestFailed(let p): return target?.pid == p ? drop() : []
-        case .activated(let p): return target != nil && target?.pid != p ? drop() : []
+        case .targetGone(let p), .hittestFailed(let p): return t?.pid == p ? drop() : []
+        case .activated(let p): return t != nil && t?.pid != p ? drop() : []
         default: return drop()
         }
     }
@@ -109,7 +114,7 @@ public final class GestureMachine {
     private func endActive() -> [Post] {
         var out: [Post] = []
         if case .panning = state { out = [.up(cur, mods)] }
-        state = .idle; pending = nil
+        state = .idle; pending = nil; droppedEarly = false
         return out
     }
 
@@ -130,6 +135,7 @@ public final class GestureMachine {
             pending = .some(d); state = d == nil ? .passing : .idle
             return (d == nil, pre)
         case 1:
+            if state == .dropping && droppedEarly { return (false, []) }   // the same touch, cancelled before it began
             var pre: [Post] = []
             let d: Target?
             if let p = pending, state == .idle || state == .passing { d = p; pending = nil }
@@ -159,7 +165,7 @@ public final class GestureMachine {
                 r = (!ownedPending, [])
             case .pinching: r = (true, [])
             }
-            if case .pinching = state {} else { state = .idle; pending = nil }
+            if case .pinching = state {} else { state = .idle; pending = nil; droppedEarly = false }
             return r
         default:
             return (true, [])
@@ -181,6 +187,7 @@ public final class GestureMachine {
     private func magnify(_ m: MagnifyIn) -> (Bool, [Post]) {
         switch m.phase {
         case .mayBegin, .began:
+            if m.phase == .began && state == .dropping && droppedEarly { return (false, []) }
             if m.phase == .began, let p = pending, state == .idle || state == .passing {
                 pending = nil
                 return pinch(p, m, [])

@@ -227,3 +227,18 @@ func run(_ m: GestureMachine, _ inputs: [Input]) -> (posts: [Post], pass: [Bool]
     _ = run(m, [sc(began)])
     #expect(run(m, [.otherGesture]) == ([], [true])); #expect(m.state == .panning(Target(pid: 500)))
 }
+
+// final review 3: a gesture accepted at "may begin" is cancelled too
+@Test func cancelBetweenMayBeginAndBegan() {
+    for reason: CancelReason in [.activated(77), .targetGone(500), .hittestFailed(500), .switchOff] {
+        let m = Decide().make()
+        _ = run(m, [sc(mayBegin)])
+        #expect(run(m, [.cancel(reason)]).posts.isEmpty, "\(reason)")
+        let r = run(m, [sc(began), sc(changed, 1, 0), sc(ended)])
+        #expect(r.posts.isEmpty, "\(reason)"); #expect(r.pass == [false, false, false], "\(reason)")
+    }
+    let m = Decide().make()
+    _ = run(m, [sc(mayBegin)])
+    #expect(run(m, [.cancel(.targetGone(501))]).posts.isEmpty)
+    #expect(run(m, [sc(began)]).posts == [.down(pt(10, 10), [])])   // another Revit's end: this gesture goes on
+}

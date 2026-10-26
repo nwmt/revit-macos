@@ -31,15 +31,12 @@ func engineToRun(_ args: HelperArgs, bundled: Bool) -> URL? {
     return e
 }
 
-/// The process's start time as ps prints it (the app passes its own this way).
+/// The process's start time as ps prints it (the app passes its own this way). Through Spawn, as everything the helper
+/// starts: ps gets none of its permission.
 func started(_ pid: Int32) -> String? {
-    let p = Process(), out = Pipe()
-    p.executableURL = URL(fileURLWithPath: "/bin/ps"); p.arguments = ["-o", "lstart=", "-p", String(pid)]
-    p.environment = ["LANG": "en_US.UTF-8", "PATH": "/usr/bin:/bin"]
-    p.standardOutput = out; p.standardError = FileHandle.nullDevice
-    guard (try? p.run()) != nil else { return nil }
-    let d = out.fileHandleForReading.readDataToEndOfFile(); p.waitUntilExit()
-    let s = String(decoding: d, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let r = Spawn.output(["/bin/ps", "-o", "lstart=", "-p", String(pid)],
+                               environment: ["LANG": "en_US.UTF-8", "PATH": "/usr/bin:/bin"]), r.status == 0 else { return nil }
+    let s = String(decoding: r.data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
     return s.isEmpty ? nil : s
 }
 
@@ -106,11 +103,13 @@ func started(_ pid: Int32) -> String? {
     }
 
     private var screensPending = false
-    /// One display change comes as a callback per screen: they are taken together, half a second later.
+    /// One display change comes as a callback per screen. The first one blocks gestures at once; the screens are read
+    /// again half a second later, when the callbacks have settled.
     func screensChanged() {
         guard !screensPending else { return }
         screensPending = true
         Task { @MainActor in
+            await coordinator.blockForDisplays()
             try? await Task.sleep(nanoseconds: 500_000_000)
             screensPending = false
             await coordinator.displaysChanged()

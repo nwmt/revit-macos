@@ -35,6 +35,7 @@ import TrackpadState
         if cancelDelay > 0 { try? await Task.sleep(nanoseconds: cancelDelay) }
         j.lines.append("cancelled \(r)")   // the machine's up has been posted by now
     }
+    func cancelAndDisable(_ r: CancelReason) async { j.lines.append("cancelAndDisable \(r)"); on = false }
     func cursor() -> CGPoint { where_ }
 }
 
@@ -59,7 +60,9 @@ final class FakeClient: HelperClient, @unchecked Sendable {
     var reply: HitReply?
     var asked: [WinePoint] = []
     var restarts = 0
+    var watcher: (@Sendable (ClientStatus) -> Void)?
     init(_ bottle: String, _ j: Journal) { self.bottle = bottle; self.journal = j }
+    func onChange(_ f: @escaping @Sendable (ClientStatus) -> Void) { watcher = f }
     func query(_ p: WinePoint) -> HitReply? { asked.append(p); return reply }
     func start() { MainActor.assumeIsolated { journal.lines.append("start \(bottle)") } }
     func stop() { MainActor.assumeIsolated { journal.lines.append("stop \(bottle)") } }

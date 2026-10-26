@@ -21,7 +21,7 @@ import TrackpadState
     w.revit(500); await c.revitLaunched(500)
     #expect(w.j.lines.contains("create")); #expect(w.state.states.last?.tap == true); #expect(w.state.states.last?.posting == true)
     await c.revitTerminated(500)
-    #expect(w.j.lines.last == "disable"); #expect(w.state.states.last?.tap == false)
+    #expect(w.j.lines.last == "cancelAndDisable switchOff"); #expect(w.state.states.last?.tap == false)
 }
 
 @MainActor @Test func postingProbeFailsRestarts() async {
@@ -41,7 +41,7 @@ import TrackpadState
     let w = World(); w.revit(500); let c = w.coordinator()
     await c.start()
     w.perm.isTrusted = false; await c.checkPermission()
-    #expect(w.j.lines.suffix(3) == ["cancel permissionLost", "cancelled permissionLost", "disable"])
+    #expect(w.j.lines.last == "cancelAndDisable permissionLost")   // one step on the tap's thread (final review 1)
     #expect(w.state.states.last?.trusted == false); #expect(w.state.states.last?.tap == false)
     w.perm.isTrusted = true; await c.checkPermission()
     #expect(w.j.lines.last == "probe"); #expect(w.state.states.last?.tap == true)
@@ -80,7 +80,7 @@ import TrackpadState
     await c.start()
     w.tap.cancelDelay = 50_000_000
     await c.shutdown(reason: "test")
-    let i = w.j.lines.firstIndex(of: "cancelled switchOff"), s = w.j.lines.firstIndex(of: "shutdown rvt2027-a")
+    let i = w.j.lines.firstIndex(of: "cancelAndDisable switchOff"), s = w.j.lines.firstIndex(of: "shutdown rvt2027-a")
     #expect(i != nil && s != nil && i! < s!); #expect(c.exited)
 }
 
@@ -149,9 +149,9 @@ import TrackpadState
     let w = World(); w.revit(500); let c = w.coordinator()
     await c.start()
     for _ in 0..<5 { await c.tapDisabledByMacOS(); w.clock.t += 1 }
-    #expect(w.state.states.last?.error == nil); #expect(w.j.lines.last != "disable")
+    #expect(w.state.states.last?.error == nil); #expect(w.j.lines.last != "cancelAndDisable tapDisabled")
     await c.tapDisabledByMacOS()
-    #expect(w.state.states.last?.error != nil); #expect(w.j.lines.last == "disable")
+    #expect(w.state.states.last?.error != nil); #expect(w.j.lines.last == "cancelAndDisable tapDisabled")
     let v = World(); v.revit(500); let d = v.coordinator(); await d.start()
     for _ in 0..<10 { await d.tapDisabledByMacOS(); v.clock.t += 20 }   // spread over minutes: no error
     #expect(v.state.states.last?.error == nil)
@@ -202,5 +202,50 @@ import TrackpadState
     w.revit(600); await c.syncRevits()
     #expect(w.clients.made["rvt2027-a"] != nil); #expect(w.j.lines.contains("create"))
     w.ws.pids = []; await c.syncRevits()
-    #expect(w.j.lines.contains("stop rvt2027-a")); #expect(w.j.lines.last == "disable")
+    #expect(w.j.lines.contains("stop rvt2027-a")); #expect(w.j.lines.last == "cancelAndDisable switchOff")
+}
+
+// final review 2: hittest failing during a gesture cancels it for that bottle's Revits
+@MainActor @Test func hittestFailureCancelsTheBottlesGesture() async {
+    let w = World(); w.revit(500); let c = w.coordinator()
+    await c.start()
+    let cl = w.clients.made["rvt2027-a"]!
+    #expect(cl.watcher != nil)                           // the coordinator listens to the client
+    cl.status = .notReady("no answer twice")
+    await c.clientChanged(bottle: "rvt2027-a", cl.status)
+    #expect(w.j.lines.contains("cancelled hittestFailed(500)"))
+    #expect(w.state.states.last?.bottles["rvt2027-a"]?.error == "no answer twice")
+    let n = w.j.lines.count
+    cl.status = .ready(scale: 2); await c.clientChanged(bottle: "rvt2027-a", cl.status)
+    #expect(w.j.lines.count == n)                        // ready again: nothing to cancel
+}
+
+// final review 6: the helper's own middle button does not count as a button held by the user
+@Test func ownMiddleButtonIsNotAHeldButton() {
+    #expect(!Decider.userButtonsDown(left: false, right: false, center: true, ownCenterDown: true))
+    #expect(Decider.userButtonsDown(left: false, right: false, center: true, ownCenterDown: false))
+    #expect(Decider.userButtonsDown(left: true, right: false, center: true, ownCenterDown: true))
+    #expect(Decider.userButtonsDown(left: false, right: true, center: false, ownCenterDown: false))
+    #expect(!Decider.userButtonsDown(left: false, right: false, center: false, ownCenterDown: false))
+}
+
+// final review 5: every display change cancels at once; one arriving while the first is handled runs it again
+@MainActor @Test func displayChangesDuringOneAreTakenTogether() async {
+    let w = World(); w.revit(500); let c = w.coordinator()
+    await c.start()
+    let cl = w.clients.made["rvt2027-a"]!
+    w.tap.cancelDelay = 20_000_000
+    let first = Task { await c.displaysChanged() }
+    while !w.j.lines.contains("cancel displays") { await Task.yield() }
+    await c.displaysChanged()                            // while the first one is still at work
+    await first.value
+    #expect(w.j.lines.filter { $0 == "cancelled displays" }.count == 2)
+    #expect(cl.restarts == 2)                            // the second change made the clients start again once more
+}
+
+@MainActor @Test func blockForDisplaysCancelsAndStopsDecisionsAtOnce() async {
+    let w = World(); w.revit(500); let c = w.coordinator()
+    await c.start()
+    await c.blockForDisplays()
+    #expect(w.j.lines.last == "cancelled displays"); #expect(w.clients.made["rvt2027-a"]!.restarts == 1); #expect(w.clock.slept.isEmpty)
 }

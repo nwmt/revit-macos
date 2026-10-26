@@ -11,6 +11,19 @@ public enum Spawn {
     private static let disclaim: Disclaim? = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "responsibility_spawnattrs_setdisclaim")
         .map { unsafeBitCast($0, to: Disclaim.self) }   // RTLD_DEFAULT; in libquarantine
 
+    /// The program's exit status and its whole stdout (short outputs: ps, the engine's status --json).
+    public static func output(_ argv: [String], environment: [String: String]) -> (status: Int32, data: Data)? {
+        var o: [Int32] = [-1, -1]
+        guard pipe(&o) == 0 else { return nil }
+        let p = run(argv, environment: environment, stdin: -1, stdout: o[1], newGroup: false)
+        close(o[1])
+        let d = FileHandle(fileDescriptor: o[0], closeOnDealloc: true).readDataToEndOfFile()
+        guard let p else { return nil }
+        var st: Int32 = 0
+        while waitpid(p, &st, 0) == -1 && errno == EINTR {}
+        return ((st & 0x7f) == 0 ? (st >> 8) & 0xff : 128 + (st & 0x7f), d)
+    }
+
     /// argv[0] is the program's path. stdin/stdout: a descriptor to give it, or -1 for /dev/null; stderr is /dev/null.
     /// nil when it could not start, or when the disclaim is not available (then nothing starts at all).
     public static func run(_ argv: [String], environment: [String: String], stdin: Int32, stdout: Int32, newGroup: Bool) -> pid_t? {

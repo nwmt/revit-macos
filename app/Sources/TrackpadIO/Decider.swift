@@ -18,6 +18,12 @@ public struct DecideContext: Sendable {
 }
 
 public enum Decider {
+    /// A mouse button the user holds. The middle button is ours while a pan runs (the helper's own down, whose up is
+    /// sent only after the next gesture is decided): then it does not count (final review: pan → pinch).
+    public static func userButtonsDown(left: Bool, right: Bool, center: Bool, ownCenterDown: Bool) -> Bool {
+        left || right || (center && !ownCenterDown)
+    }
+
     public static func decide(at p: CGPoint, windows: [WinInfo], buttonsDown: Bool, context: DecideContext,
                               log: TrackpadLog? = nil) -> Target? {
         guard !buttonsDown else { return nil }

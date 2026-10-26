@@ -32,7 +32,12 @@ public final class HittestClient: HitQuerying, @unchecked Sendable {
     private let scale: @Sendable (CGRect) -> Int?, timing: ClientTiming
     private let cond = NSCondition()
     // under cond
-    private var state = ClientStatus.stopped
+    private var state = ClientStatus.stopped {   // a change goes to the watcher, off the lock
+        didSet {
+            if state != oldValue, let w = watcher { let s = state; DispatchQueue.global().async { w(s) } }
+        }
+    }
+    private var watcher: (@Sendable (ClientStatus) -> Void)?
     private var stopped = true, restartNow = false
     private var generation = 0
     private var pid: pid_t = 0, input: Int32 = -1
@@ -50,6 +55,8 @@ public final class HittestClient: HitQuerying, @unchecked Sendable {
 
     public var status: ClientStatus { cond.lock(); defer { cond.unlock() }; return state }
 
+    public func onChange(_ f: @escaping @Sendable (ClientStatus) -> Void) { cond.lock(); watcher = f; cond.unlock() }
+
     public func start() {
         cond.lock()
         guard stopped else { cond.unlock(); return }
@@ -58,15 +65,19 @@ public final class HittestClient: HitQuerying, @unchecked Sendable {
         Thread.detachNewThread { self.supervise() }
     }
 
-    /// A new process now (the screens changed): the failure count starts over.
+    /// A new process now (the screens changed): the failure count starts over. The current generation ends here, also
+    /// one whose process is still being started (the supervisor then ends that process instead of keeping it).
     public func restart() {
         cond.lock()
         guard !stopped else { cond.unlock(); return }
         restartNow = true; failures = 0
-        let gen = generation
+        generation += 1; state = .starting
+        let fd = input, p = pid
+        input = -1
         cond.broadcast()
         cond.unlock()
-        end(gen, "restart")
+        if fd >= 0 { close(fd) }
+        if p > 0 { terminateLater(p) }
     }
 
     public func stop() {
@@ -146,7 +157,7 @@ public final class HittestClient: HitQuerying, @unchecked Sendable {
                 let current = generation == gen
                 if current { pid = p; input = inFD }
                 cond.unlock()
-                if !current { close(inFD) }
+                if !current { close(inFD); terminateLater(p) }   // restarted or stopped while it was starting
                 let reader = Thread { self.read(outFD, gen) }
                 reader.start()
                 DispatchQueue.global().asyncAfter(deadline: .now() + timing.hello) { self.helloDeadline(gen) }

@@ -11,10 +11,17 @@ import TrackpadState
     let data = tempDir()
     var placement = "ok"
     var slept: [Double] = []
+    var holdSleep = false
+    private var sleepGate: CheckedContinuation<Void, Never>?
+    var sleeping: Bool { sleepGate != nil }
+    func releaseSleep() { holdSleep = false; sleepGate?.resume(); sleepGate = nil }
     lazy var model = TrackpadModel(launcher: launcher, resetter: resetter, defaults: defaults,
                                    engine: URL(fileURLWithPath: "/e/revit"), data: { [unowned self] in self.data },
                                    placement: { [unowned self] in self.placement }, parent: { (77, "Mon Oct 26 10:00:00 2026") },
-                                   helperID: "io.example.testapp.trackpad", sleep: { [unowned self] s in self.slept.append(s) })
+                                   helperID: "io.example.testapp.trackpad", sleep: { @MainActor [unowned self] s in
+                                       self.slept.append(s)
+                                       if self.holdSleep { await withCheckedContinuation { self.sleepGate = $0 } }
+                                   })
     func state(_ h: HelperInstance, trusted: Bool = true, tap: Bool = true, error: String? = nil, session: String? = nil) {
         let s = HelperState(session: session ?? launcher.launched.last!.session, pid: h.pid, start: h.start, trusted: trusted,
                             posting: tap, tap: tap, error: error, restart: nil, bottles: [:])
@@ -198,4 +205,31 @@ import TrackpadState
         let m = MenuContent.make(status: s, watched: nil, failure: nil, busy: false, trackpad: line)
         #expect((m.trackpad != nil) == shown, "\(line)")
     }
+}
+
+// final review 7: the restart after a crash waits 10 s; a helper started meanwhile is not replaced by it
+@MainActor @Test func staleCrashRestartLeavesTheNewHelper() async {
+    let w = TrackpadWorld(); let m = w.model
+    await m.setEnabled(true)
+    let h = w.launcher.instances[0]
+    w.holdSleep = true
+    w.launcher.gone(h)
+    let t = Task { await m.helperExited(h) }
+    while !w.sleeping { await Task.yield() }
+    await m.setEnabled(false)
+    w.holdSleep = false
+    await m.setEnabled(true)                              // a new helper: it lets the button go itself
+    w.releaseSleep(); await t.value
+    #expect(w.launcher.calls == ["launch", "launch recover"]); #expect(w.launcher.instances.count == 1)
+}
+
+// final review 8: a launch that fails after the switch went off leaves "off"
+@MainActor @Test func lateLaunchFailureKeepsOff() async {
+    let w = TrackpadWorld(); w.launcher.holding = true; w.launcher.failLaunch = true
+    let m = w.model
+    let t = Task { await m.setEnabled(true) }
+    while w.launcher.launched.isEmpty { await Task.yield() }
+    await m.setEnabled(false)
+    w.launcher.release(); await t.value
+    #expect(m.line == .off)
 }

@@ -38,16 +38,8 @@ public struct EngineStatusReader: EnginePort {
         let engine = engine, environment = environment
         return await withCheckedContinuation { cont in
             DispatchQueue.global().async {   // through Spawn: the engine gets none of the helper's permission
-                var o: [Int32] = [-1, -1]
-                guard pipe(&o) == 0 else { cont.resume(returning: []); return }
-                let p = Spawn.run(["/bin/bash", engine.path, "status", "--json"], environment: environment, stdin: -1,
-                                  stdout: o[1], newGroup: false)
-                close(o[1])
-                let d = FileHandle(fileDescriptor: o[0], closeOnDealloc: true).readDataToEndOfFile()
-                guard let p else { cont.resume(returning: []); return }
-                var st: Int32 = 0
-                while waitpid(p, &st, 0) == -1 && errno == EINTR {}
-                let s = st == 0 ? try? JSONDecoder().decode(Status.self, from: d) : nil
+                let r = Spawn.output(["/bin/bash", engine.path, "status", "--json"], environment: environment)
+                let s = r?.status == 0 ? try? JSONDecoder().decode(Status.self, from: r!.data) : nil
                 cont.resume(returning: (s?.bottles ?? []).compactMap { b in
                     Int(b.year).map { EngineBottle(bottle: b.name, year: $0, pids: b.revitPids ?? []) }
                 })

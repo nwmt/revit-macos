@@ -26,3 +26,9 @@ import Testing
     var s: Int32 = 0; waitpid(p, &s, 0)
     #expect(String(decoding: buf[0..<max(n, 0)], as: UTF8.self) == "ping\n")
 }
+
+@Test func outputOfAProgram() throws {
+    let r = try #require(Spawn.output(["/bin/echo", "a b"], environment: [:]))
+    #expect(r.status == 0); #expect(String(decoding: r.data, as: UTF8.self) == "a b\n")
+    #expect(Spawn.output(["/bin/sh", "-c", "exit 3"], environment: [:])?.status == 3)
+}

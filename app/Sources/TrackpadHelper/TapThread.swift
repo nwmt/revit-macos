@@ -17,6 +17,7 @@ final class TapThread: @unchecked Sendable {
     private let events = CGEventSource(stateID: .hidSystemState)
     private let lock = NSLock()
     private var probeSeen = false
+    private var ownDown = false                 // our middle button is down (this thread only)
     private let log: TrackpadLog
     var onDisabled: (@Sendable () -> Void)?   // macOS turned the tap off (it is on again already)
 
@@ -70,12 +71,20 @@ final class TapThread: @unchecked Sendable {
         return true
     }
 
-    func disable() {
-        onThread {
-            if let t = self.tap { CGEvent.tapEnable(tap: t, enable: false); CFMachPortInvalidate(t) }
-            if let s = self.tapSource { CFRunLoopRemoveSource(self.loop, s, .commonModes) }
-            if let k = self.ticker { CFRunLoopTimerInvalidate(k) }
-            self.tap = nil; self.tapSource = nil; self.ticker = nil
+    func disable() { onThread { self.disableHere() } }
+
+    private func disableHere() {
+        if let t = tap { CGEvent.tapEnable(tap: t, enable: false); CFMachPortInvalidate(t) }
+        if let s = tapSource { CFRunLoopRemoveSource(loop, s, .commonModes) }
+        if let k = ticker { CFRunLoopTimerInvalidate(k) }
+        tap = nil; tapSource = nil; ticker = nil
+    }
+
+    /// The cancel, its posts (the button up) and the end of the tap in one block on this thread: no event can start a
+    /// gesture in between.
+    func cancelAndDisable(_ r: CancelReason) async {
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            perform { _ = self.feed(.cancel(r)); self.disableHere(); c.resume() }
         }
     }
 
@@ -147,7 +156,10 @@ final class TapThread: @unchecked Sendable {
     }
 
     private func decide(_ p: CGPoint) -> Target? {
-        let buttons = [CGMouseButton.left, .right, .center].contains { CGEventSource.buttonState(.combinedSessionState, button: $0) }
+        let s = CGEventSourceStateID.combinedSessionState
+        let buttons = Decider.userButtonsDown(left: CGEventSource.buttonState(s, button: .left),
+                                              right: CGEventSource.buttonState(s, button: .right),
+                                              center: CGEventSource.buttonState(s, button: .center), ownCenterDown: ownDown)
         return Decider.decide(at: p, windows: buttons ? [] : windows(), buttonsDown: buttons, context: context, log: log)
     }
 
@@ -165,9 +177,9 @@ final class TapThread: @unchecked Sendable {
         for p in posts {
             let e: CGEvent?
             switch p {
-            case .down(let at, let m): e = mouse(.otherMouseDown, at, m)
+            case .down(let at, let m): e = mouse(.otherMouseDown, at, m); ownDown = true
             case .drag(let at, let m): e = mouse(.otherMouseDragged, at, m)
-            case .up(let at, let m): e = mouse(.otherMouseUp, at, m)
+            case .up(let at, let m): e = mouse(.otherMouseUp, at, m); ownDown = false
             case .wheel(let px, let at):
                 e = CGEvent(scrollWheelEvent2Source: events, units: .pixel, wheelCount: 1, wheel1: px, wheel2: 0, wheel3: 0)
                 e?.location = at
