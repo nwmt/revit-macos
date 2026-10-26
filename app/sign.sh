@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Signs <App>.app ad hoc (no Developer ID yet), inside-out: every Mach-O image first, deepest path first, then the
-# bundle, which seals everything else (scripts, Python's .py files, static archives) as resources. Refuses an image
+# Signs <App>.app ad hoc (no Developer ID yet), inside-out: every Mach-O image first, deepest path first, then each
+# nested bundle in Contents/Helpers with its own bundle ID (the trackpad helper; its CDHash goes to <inventory>.cdhash,
+# app/check-helper-cdhash.sh compares it), then the bundle, which seals everything else (scripts, Python's .py files, static archives) as resources. Refuses an image
 # built for a newer macOS than the app's minimum. No hardened runtime: with ad hoc signatures (no Team ID) library
 # validation would refuse Python's own extensions.
 # Usage: app/sign.sh <app> <minimum macOS> [inventory file]   (the inventory: "<path in the app><TAB><archs>" per image)
@@ -38,6 +39,12 @@ for f in "${sorted[@]}"; do
   [ -z "$INV" ] || printf '%s\t%s\n' "${f#"$APP/"}" "$archs" >> "$INV"
 done
 for f in "${sorted[@]}"; do codesign --force --sign - --timestamp=none "$f" 2>/dev/null || die "cannot sign ${f#"$APP/"}"; done
+for h in "$APP"/Contents/Helpers/*.app; do
+  [ -d "$h" ] || continue
+  id="$(plutil -extract CFBundleIdentifier raw -o - "$h/Contents/Info.plist")" || die "no bundle ID in ${h#"$APP/"}"
+  codesign --force --sign - --timestamp=none --identifier "$id" "$h" || die "cannot sign ${h#"$APP/"}"
+  [ -z "$INV" ] || codesign -dvvv "$h" 2>&1 | sed -n 's/^CDHash=//p' > "$INV.cdhash"
+done
 codesign --force --sign - --timestamp=none --identifier "$APP_BUNDLE_ID" "$APP" || die "cannot sign $APP"
 codesign --verify --strict --deep --verbose=2 "$APP" 2>&1 | grep -v '^\(.*: valid on disk\|.*: satisfies its Designated Requirement\)$' >&2 || true
 codesign --verify --strict --deep "$APP" || die "$APP does not verify"

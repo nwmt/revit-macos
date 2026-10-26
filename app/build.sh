@@ -18,9 +18,10 @@ for s in "$(basename "$SEVENZIP_SRC_URL")" "$(basename "$CABEXTRACT_URL")"; do [
 
 echo ">> building the app" >&2
 swift build --package-path "$ROOT/app" -c release --arch arm64
-BIN="$(swift build --package-path "$ROOT/app" -c release --arch arm64 --show-bin-path)/AppMain"
-"$ROOT/app/make-bundle.sh" "$APP" "$BIN" "$D/tools" "$VER"
+BP="$(swift build --package-path "$ROOT/app" -c release --arch arm64 --show-bin-path)"
+"$ROOT/app/make-bundle.sh" "$APP" "$BP/AppMain" "$D/tools" "$VER" "$BP/TrackpadHelper"
 "$ROOT/app/sign.sh" "$APP" "$APP_MIN_MACOS" "$D/inventory.txt"
+"$ROOT/app/check-helper-cdhash.sh" "$D/inventory.txt.cdhash" "$ROOT/app/app.conf"
 
 # smoke test: the engine from the signed bundle, as the app starts it (a minimal PATH, a fresh HOME: no real data)
 echo ">> smoke test" >&2
