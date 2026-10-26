@@ -222,16 +222,18 @@ bottle_years() { # the Revit years of bottle path $1: its description (new-bottl
   local d; for d in "$1/drive_c/Program Files/Autodesk/Revit "[0-9][0-9][0-9][0-9]; do [ -d "$d" ] && echo "${d##* }"; done
   return 0
 }
-revit_running() { # $1 = bottle path, $2 = year: a Revit.exe of that year with files open in that bottle. The bottle's
-  # background services (licensing) run for hours without Revit, so "wineserver is up" is not the test. Output goes
-  # through variables, not `| grep -q`: under pipefail an early grep exit gives the writer SIGPIPE
-  local p rb out; rb="$(cd "$1" 2>/dev/null && pwd -P)" || return 1   # lsof prints real paths
+revit_pids() { # $1 = bottle path, $2 = year: the Mac PIDs of the Revit.exe of that year with files open in that bottle,
+  # one per line. The bottle's background services (licensing) run for hours without Revit, so "wineserver is up" is
+  # not the test. Output goes through variables, not `| grep -q`: under pipefail an early grep exit gives the writer
+  # SIGPIPE
+  local p rb out; rb="$(cd "$1" 2>/dev/null && pwd -P)" || return 0   # lsof prints real paths
   for p in $(pgrep -f "Autodesk.Revit $2.Revit\.exe" 2>/dev/null); do
     out="$(lsof -p "$p" -Fn 2>/dev/null)"
-    grep -qF "n$rb/" <<<"$out" && return 0
+    ! grep -qF "n$rb/" <<<"$out" || echo "$p"
   done
-  return 1
+  return 0
 }
+revit_running() { [ -n "$(revit_pids "$1" "$2")" ]; }   # $1 = bottle path, $2 = year: revit_pids finds one
 mcp_running() { # $1 = bottle path: our MCP launcher (mcphost.exe, scripts/mcp-launch.sh) with files open in that
   # bottle; the CrossOver loader that has mcphost.exe in its arguments counts too. Output through variables, as above
   local p rb out; rb="$(cd "$1" 2>/dev/null && pwd -P)" || return 1

@@ -169,8 +169,8 @@ if [ "$CMD" = status ]; then
     ys="$(bottle_years "$b" | sort -u | tr '\n' ' ')"; ys="${ys% }"
     case "$ys" in [0-9][0-9][0-9][0-9]) ;; *) continue ;; esac   # one Revit year, or not ours
     n="$(basename "$b")"; rv=false; [ -f "$(revit_dir_unix "$b" "$ys")/Revit.exe" ] && rv=true
-    run_=false; revit_running "$b" "$ys" && run_=true
-    b_json+="${b_json:+,}{\"name\":$(json_str "$n"),\"year\":$(json_str "$ys"),\"revit\":$rv,\"running\":$run_,\"addins\":[$(status_addins "$b" "$ys")]}"
+    pids="$(revit_pids "$b" "$ys" | paste -sd, -)"; run_=false; [ -z "$pids" ] || run_=true
+    b_json+="${b_json:+,}{\"name\":$(json_str "$n"),\"year\":$(json_str "$ys"),\"revit\":$rv,\"running\":$run_,\"revit_pids\":[$pids],\"addins\":[$(status_addins "$b" "$ys")]}"
     human+="$(printf '  %-14s Revit %s%s' "$n" "$ys" "$([ $run_ = true ] && echo ', running')")"$'\n'
   done
   busy=false; lock_free || busy=true

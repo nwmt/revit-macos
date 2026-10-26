@@ -47,8 +47,24 @@ public struct Bottle: Decodable, Equatable, Sendable {
     public let year: String
     public let revit: Bool                  // Revit.exe is there
     public let running: Bool
+    public let revitPids: [Int32]           // the Mac processes of its Revit.exe; [] from an engine without the key
     public let addins: [String]
     public var yearNumber: Int? { Int(year) }
+
+    public init(name: String, year: String, revit: Bool, running: Bool, revitPids: [Int32] = [], addins: [String]) {
+        self.name = name; self.year = year; self.revit = revit; self.running = running; self.revitPids = revitPids
+        self.addins = addins
+    }
+
+    enum CodingKeys: String, CodingKey { case name, year, revit, running, revitPids, addins }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(name: try c.decode(String.self, forKey: .name), year: try c.decode(String.self, forKey: .year),
+                  revit: try c.decode(Bool.self, forKey: .revit), running: try c.decode(Bool.self, forKey: .running),
+                  revitPids: try c.decodeIfPresent([Int32].self, forKey: .revitPids) ?? [],
+                  addins: try c.decode([String].self, forKey: .addins))
+    }
 }
 
 public struct InstallerInfo: Decodable, Equatable, Sendable {

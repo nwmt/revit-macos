@@ -368,11 +368,17 @@ revit_exe() { touch "$BOTTLES/$1/drive_c/Program Files/Autodesk/Revit $2/Revit.e
 reset; bottle rvt2024-a 2024 2024; revit_exe rvt2024-a 2024; bottle rvt2025-b 2025 ""; bottle exp "" ""; run "" status --json
 expect "status --json" 0 '"bottles":['
 check "status: valid JSON" eval 'printf "%s" "$OUT" | /usr/bin/perl -MJSON::PP -e "local \$/; JSON::PP->new->decode(<STDIN>)"'
-check "status: a Revit bottle" grep -qF '{"name":"rvt2024-a","year":"2024","revit":true,"running":false,"addins":[]}' <<<"$OUT"
+check "status: a Revit bottle" grep -qF '{"name":"rvt2024-a","year":"2024","revit":true,"running":false,"revit_pids":[],"addins":[]}' <<<"$OUT"
 check "status: a half-installed bottle" grep -qF '{"name":"rvt2025-b","year":"2025","revit":false,' <<<"$OUT"
 check "status: a non-Revit bottle is left out" eval '! grep -q "\"exp\"" <<<"$OUT"'
 reset; bottle rvt2024-a 2024 2024; revit_exe rvt2024-a 2024; fake_revit rvt2024-a 2024; run "" status --json
 check "status: running" grep -qF '"name":"rvt2024-a","year":"2024","revit":true,"running":true' <<<"$OUT"
+reset; for b in rvt2027-a rvt2027-b; do bottle $b 2027 2027; revit_exe $b 2027; done; bottle rvt2025-a 2025 2025; revit_exe rvt2025-a 2025
+fake_revit rvt2027-a 2027; p27a=$!; fake_revit rvt2027-b 2027; p27b=$!; fake_revit rvt2025-a 2025; p25=$!; run "" status --json
+check "status: revit_pids, each bottle its own Revit processes" eval 'grep -qF "\"name\":\"rvt2027-a\",\"year\":\"2027\",\"revit\":true,\"running\":true,\"revit_pids\":[$p27a]" <<<"$OUT" &&
+  grep -qF "\"name\":\"rvt2027-b\",\"year\":\"2027\",\"revit\":true,\"running\":true,\"revit_pids\":[$p27b]" <<<"$OUT" &&
+  grep -qF "\"name\":\"rvt2025-a\",\"year\":\"2025\",\"revit\":true,\"running\":true,\"revit_pids\":[$p25]" <<<"$OUT"'
+run "" status; check "status: the human list has no pids" eval '! grep -q "$p27a" <<<"$OUT"'
 reset; fake_lock "install.sh 2024 rvt2024-a"; run "" status --json
 check "status: busy with its owner" grep -qF '"busy":{"busy":true,"command":"install.sh 2024 rvt2024-a"' <<<"$OUT"
 reset; run "" status --json; check "status: CrossOver found in the fake" grep -qF '"crossover":{"found":true' <<<"$OUT"

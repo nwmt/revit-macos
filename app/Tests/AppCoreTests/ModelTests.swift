@@ -12,6 +12,7 @@ func data(_ s: String) -> Data { Data(s.utf8) }
     #expect(s.busy.busy); #expect(s.busy.pidNumber == 4242); #expect(s.busy.pgidNumber == 4242); #expect(s.busy.runId == "app-20261017-101500-ab12")
     #expect(s.busy.pidStart == "Sat Oct 17 10:15:00 2026"); #expect(s.busy.ctx == "/tmp/data/logs/runs/app-20261017-101500-ab12")
     #expect(s.bottles.count == 1); #expect(s.bottles[0].yearNumber == 2025); #expect(s.bottles[0].addins == ["pyrevit"])
+    #expect(s.bottles[0].revitPids.isEmpty)
     #expect(s.app?.placement == "move"); #expect(s.app?.data == "/tmp/home/Library/Application Support/Test App")
 }
 
@@ -24,11 +25,18 @@ func data(_ s: String) -> Data { Data(s.utf8) }
     let s = try EngineStatus.decode(try Data(contentsOf: fixture("json/status-clone.json")))
     #expect(s.busy.pidNumber == nil); #expect(s.busy.pgidNumber == nil)
     #expect(Bottle(name: "x", year: "", revit: false, running: false, addins: []).yearNumber == nil)
+    #expect(Bottle(name: "x", year: "", revit: false, running: false, addins: []).revitPids.isEmpty)
+}
+
+@Test func revitPidsDecode() throws {
+    let s = try EngineStatus.decode(data(#"{"crossover":{"found":true,"path":"/x","version":"26.3.0","supported":true},"rosetta":true,"msls31":false,"busy":{"busy":false,"command":"","run_id":"","pid":"","pid_start":"","pgid":"","ctx":""},"bottles":[{"name":"b","year":"2027","revit":true,"running":true,"revit_pids":[4711,4712],"addins":[]}]}"#))
+    #expect(s.bottles[0].running); #expect(s.bottles[0].revitPids == [4711, 4712])
 }
 
 @Test func extraKeysAreIgnored() throws {
     let s = try EngineStatus.decode(data(#"{"future":1,"crossover":{"found":true,"path":"/x","version":"26.3.0","supported":true,"future":1},"rosetta":true,"msls31":false,"busy":{"busy":false,"command":"","run_id":"","pid":"","pid_start":"","pgid":"","ctx":""},"bottles":[{"name":"b","year":"2024","revit":false,"running":false,"addins":[],"future":1}]}"#))
     #expect(s.bottles.map(\.name) == ["b"])
+    #expect(s.bottles[0].revitPids.isEmpty)   // an older engine: no revit_pids
 }
 
 @Test func installerInfoDecodes() throws {
