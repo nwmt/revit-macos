@@ -305,7 +305,8 @@ if sign_tools "$T/stools" && sign_bundle "$SB" "$T/stools"; then
   adhoc=1; while IFS="$TAB" read -r p _; do d="$(codesign -dv "$SB/$p" 2>&1)"; grep -q "Signature=adhoc" <<<"$d" || adhoc=0; done < "$T/inv.txt"
   check "sign: every image is signed ad hoc" eval '[ "$adhoc" = 1 ] && [ -s "$T/inv.txt" ]'
   check "sign: the app verifies --deep --strict" codesign --verify --strict --deep "$SB"
-  check "sign: the helper is signed as its own bundle, with its bundle ID" eval 'codesign -dv "$SB/Contents/Helpers/Test App Trackpad.app" 2>&1 | grep -qx "Identifier=io.example.testapp.trackpad"'
+  hsig="$(codesign -dv "$SB/Contents/Helpers/Test App Trackpad.app" 2>&1)"   # a variable: grep -q in a pipe would SIGPIPE codesign
+  check "sign: the helper is signed as its own bundle, with its bundle ID" eval 'grep -qx "Identifier=io.example.testapp.trackpad" <<<"$hsig"'
   check "sign: the helper's CDHash next to the inventory" eval 'grep -qxE "[0-9a-f]{40}" "$T/inv.txt.cdhash" && [ "$(wc -l < "$T/inv.txt.cdhash" | tr -d " ")" = 1 ] &&
     [ "$(cat "$T/inv.txt.cdhash")" = "$(codesign -dvvv "$SB/Contents/Helpers/Test App Trackpad.app" 2>&1 | sed -n "s/^CDHash=//p")" ]'
   hconf() { printf "TRACKPAD_HELPER_VERSION=1.0.0\nTRACKPAD_HELPER_CDHASH='%s'\n" "$1" > "$T/hc.conf"; }
