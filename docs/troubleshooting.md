@@ -227,6 +227,30 @@ Revit 2020, 2021, 2023, 2024, 2025, 2027
 Expected: it is turned off, because with it Dynamo draws black squares, lags or crashes. Graphs run and results show
 in Revit views.
 
+## Trackpad (menu bar app)
+
+### Two-finger scrolling does not pan in Revit
+
+Check that **Trackpad in Revit** is on in the app's Settings and that its line says **On**. If it asks for permission:
+System Settings → Privacy & Security → Device Control and Data Access, turn on **<app name> Trackpad**. The gestures
+work in Revit 2027's views; in other years and in schedules, lists and Properties scrolling stays scrolling.
+
+### The trackpad stopped working after an update
+
+macOS ties the permission to the helper, and a new helper needs it again; the old entry stays in the list but does
+nothing. In the app's Settings press **Ask again**. If that does not help: in System Settings → Privacy & Security →
+Device Control and Data Access, remove **<app name> Trackpad** with −, then turn **Trackpad in Revit** off and on.
+
+### Revit acts as if the middle mouse button were held
+
+The helper ended in the middle of a gesture while the app was not running to start it again. Click the middle
+button of a mouse in Revit, or quit Revit.
+
+### Schedules pan instead of scrolling
+
+The app tells schedules from views by their English titles. With Revit in another language, turn **Trackpad in
+Revit** off while you work in schedules.
+
 ## If it does not work for you
 
 Autodesk does not support Revit on macOS. If this setup does not fit your work, the usual options are:
