@@ -30,7 +30,7 @@ stub() { # a script that only records how it was called
   mkdir -p "$(dirname "$1")"
   cat > "$1" <<EOF
 #!/bin/bash
-echo "\$(basename "\$0") \$* | REVIT_YEAR=\${REVIT_YEAR:-} INSTALL_DRYRUN=\${INSTALL_DRYRUN:-} CX_RECREATE=\${CX_RECREATE:-} WINEPREFIX=\${WINEPREFIX:-} RUN_KIND=\${RUN_KIND:-} EULA=\${REVIT_ACCEPT_EULA:-} REUSE=\${REVIT_REUSE_EXTRACTED:-} REEXTRACT=\${REVIT_REEXTRACT:-}" >> "$CALLS"
+echo "\$(basename "\$0") \$* | REVIT_YEAR=\${REVIT_YEAR:-} INSTALL_DRYRUN=\${INSTALL_DRYRUN:-} CX_RECREATE=\${CX_RECREATE:-} WINEPREFIX=\${WINEPREFIX:-} RUN_KIND=\${RUN_KIND:-} EULA=\${REVIT_ACCEPT_EULA:-} REUSE=\${REVIT_REUSE_EXTRACTED:-} REEXTRACT=\${REVIT_REEXTRACT:-} RETINA=\${REVIT_RETINA:-} KEYS=\${REVIT_KEYS:-}" >> "$CALLS"
 EOF
   chmod +x "$1"
 }
@@ -539,6 +539,46 @@ reset; mkdir -p "$T/mine"; touch "$T/mine/a.exe"; rm -rf "$R/installers/revit202
 expect "link-installer links the folder" 0 "Revit 2024 installer:"
 check "the link is there" test -L "$R/installers/revit2024"
 reset; run "" link-installer 2024 "$T"; expect "link-installer refuses a folder with files" 1 "already holds files"
+
+# ---- set: Retina and Mac keys (2027) ----
+reset; bottle rvt2027-a 2027 2027; run "" set 2027
+expect "set without settings: the usage and where to see the current ones" 1 "Usage: ./revit set 2027 retina=on|compact|off keys=mac|windows. ./revit doctor 2027 shows"
+check "set without settings: nothing runs" not_called "run-steps.sh"
+reset; bottle rvt2027-a 2027 2027; run "" set 2027 retina=off
+expect "set retina=off" 0 "Revit 2027 (rvt2027-a): retina=off. Applies the next time Revit starts."
+check "set retina=off: the retina step, with its value, as a steps run" called "run-steps.sh 2027 rvt2027-a retina | REVIT_YEAR= INSTALL_DRYRUN= CX_RECREATE= WINEPREFIX= RUN_KIND=steps"
+check "set retina=off: the value reaches the step" called "RETINA=off KEYS="
+check "set retina: a note on the window size" grep -qF "The first start may open Revit's window at another size" <<<"$OUT"
+reset; bottle rvt2027-a 2027 2027; run "" set 2027 keys=windows
+check "set keys=windows: the mackeys step" called "run-steps.sh 2027 rvt2027-a mackeys |"
+check "set keys=windows: the value reaches the step" called "RETINA= KEYS=windows"
+check "set keys: no note on the window size" eval '! grep -q "window at another size" <<<"$OUT"'
+reset; bottle rvt2027-a 2027 2027; run "" set 2027 retina=compact keys=mac
+check "set both: both steps" called "run-steps.sh 2027 rvt2027-a retina mackeys |"
+reset; bottle rvt2027-b 2027 2027; run "" set 2027 rvt2027-b retina=on
+check "set: the bottle before the settings" called "run-steps.sh 2027 rvt2027-b retina |"
+reset; bottle rvt2027-b 2027 2027; run "" set 2027 retina=on rvt2027-b
+check "set: the bottle after the settings" called "run-steps.sh 2027 rvt2027-b retina |"
+reset; bottle rvt2027-b 2027 2027; run "" set 2027 rvt2027-b rvt2027-c retina=on
+expect "set: two bottles" 1 "Too many arguments. Example: ./revit set 2027 [bottle] retina=off"
+reset; bottle rvt2027-a 2027 2027; run "" set 2027 colour=red; expect "set: an unknown setting" 1 "Unknown setting: colour. Settings: retina, keys"
+reset; bottle rvt2027-a 2027 2027; run "" set 2027 retina=big; expect "set: an unknown value" 1 "retina is on, compact or off"
+reset; bottle rvt2027-a 2027 2027; run "" set 2027 keys=pc; expect "set: an unknown keys value" 1 "keys is mac or windows"
+reset; bottle rvt2027-a 2027 2027; run "" set 2027 retina=on retina=off; expect "set: a setting twice" 1 "retina is given twice."
+check "set: nothing runs after a bad setting" not_called "run-steps.sh"
+reset; bottle rvt2026-a 2026 2026; run "" set 2026 retina=off; expect "set: only where the profile has the steps" 1 "Retina and Mac keys are tested on Revit 2027 only."
+reset; run "" set 2027 retina=off; expect "set: no bottle" 1 "There is no bottle rvt2027-a"
+reset; bottle rvt2027-a 2027 2027; fake_revit rvt2027-a 2027; run "" set 2027 retina=off
+expect "set refuses while Revit runs" 1 "Revit 2027 is running in rvt2027-a"; check "set: nothing runs while Revit runs" not_called "run-steps.sh"
+reset; bottle rvt2027-a 2027 2027; fake_lock "bench-rfo rvt2027-a"; run "" set 2027 retina=off
+expect "set refuses while another task holds the lock" 1 "Another task is running: bench-rfo rvt2027-a."
+reset; bottle rvt2027-a 2027 2027; run "" set 2027 retina=off --events "$T/ev"
+check "set events: start names the default bottle" eval 'EV | head -1 | grep -qF "\"command\":\"set\",\"year\":2027,\"bottle\":\"rvt2027-a\","'
+check "set events: one end" eval '[ "$(EV | grep -c "\"event\":\"end\"")" = 1 ] && EV | tail -1 | grep -q "\"event\":\"end\""'
+for args in "rvt2027-b retina=off" "retina=off rvt2027-b"; do
+  reset; bottle rvt2027-b 2027 2027; run "" set 2027 $args --events "$T/ev"
+  check "set events: start names the bottle ($args)" eval 'EV | head -1 | grep -qF "\"bottle\":\"rvt2027-b\","'
+done
 
 # ---- addins: list, only, import ----
 reset; run "" addins list 2025 --json; expect "addins list --json" 0 '"id":"pyrevit"'

@@ -59,6 +59,7 @@ Usage: ./revit <command> <year> [bottle]
   doctor    check an installed Revit, its bottle and this Mac, change nothing (no year: this Mac and CrossOver)
   report    make a report for a GitHub issue, with personal data removed (no year: this Mac and the last runs)
   addins    add RevitLookup and pyRevit (--only <add-ins>; ./revit addins list <year>)
+  set       turn Retina display and Mac keys on or off (2027; set retina=off)
   import    add a file the install needs from your Windows PC (import msls31 <file>)
   cache     show or clear downloaded and unpacked installer files (cache clear --yes)
   stop      quit a Revit that hangs
@@ -107,6 +108,16 @@ while [ $# -gt 0 ]; do
   shift
 done
 CMD="${POS[0]:-}"; YEAR_ARG="${POS[1]:-}"; NAME="${POS[2]:-}"
+SETS=()   # ./revit set: the words with "=" are settings, the one without is the bottle (bottle names have no "=")
+if [ "$CMD" = set ]; then
+  NAME=""
+  for w in ${POS[@]+"${POS[@]:2}"}; do
+    case "$w" in
+      *=*) SETS+=("$w") ;;
+      *) if [ -z "$NAME" ]; then NAME="$w"; else FLAG_ERR="Too many arguments. Example: ./revit set 2027 [bottle] retina=off"; fi ;;
+    esac
+  done
+fi
 [ "$REUSE_X$REEXTRACT" != 11 ] || FLAG_ERR="Use --reuse-extracted or --reextract, not both."
 [ "$LOG" = 0 ] || [ "$CMD" = test ] || FLAG_ERR="--log is for ./revit test only."
 [ "$DRY" = 0 ] || [ "$CMD" = remove ] || [ "$CMD" = rebuild ] || FLAG_ERR="--dry-run is for ./revit remove and rebuild only."
@@ -124,7 +135,7 @@ if [ "$CMD" = mcp ]; then   # stdout belongs to the MCP client: no events, no mo
     *) FLAG_ERR="Unknown MCP server: $SERVER. Known: autodesk, pyrevit" ;;
   esac
 fi
-SUPERVISED=0; case "$CMD" in install|check|addins|rebuild|test) SUPERVISED=1 ;; esac
+SUPERVISED=0; case "$CMD" in install|check|addins|rebuild|test|set) SUPERVISED=1 ;; esac
 sup_traps() { # signals noted, not ignored (an ignored signal would be inherited by the child), from here to the child
   trap 'SIG_GOT=INT' INT; trap 'SIG_GOT=TERM' TERM; trap 'SIG_GOT=HUP' HUP
 }
@@ -149,7 +160,7 @@ if [ -n "$EVENTS_DIR" ]; then
 fi
 [ -z "$FLAG_ERR" ] || die "$FLAG_ERR"
 case "$CMD" in
-  install|check|doctor|report|addins|import|cache|stop|logs|debug|rebuild|remove|status|find-installer|link-installer|test|mcp) ;;
+  install|check|doctor|report|addins|import|cache|stop|logs|debug|rebuild|remove|status|find-installer|link-installer|test|mcp|set) ;;
   ""|help|-h|--help) usage; exit 0 ;;
   *) echo "Unknown command: $CMD" >&2; echo >&2; usage >&2; exit 1 ;;
 esac
@@ -473,6 +484,27 @@ case "$CMD" in
     echo "Open the folder: open \"$DATA/logs/$NAME\""
     echo "To report a problem, see \"Report a problem\" in docs/troubleshooting.md." ;;
   mcp) need_crossover; exec "$ROOT/scripts/mcp-launch.sh" "$YEAR" "$NAME" "$WRITE" "$SERVER" ;;
+  set)   # Retina and Mac keys: the steps retina and mackeys (scripts/steps/fixes.sh) with the values given
+    in_list retina ${STEPS[@]+"${STEPS[@]}"} || die "Retina and Mac keys are tested on Revit 2027 only."
+    [ ${#SETS[@]} -gt 0 ] || die "Usage: ./revit set $YEAR$SFX retina=on|compact|off keys=mac|windows. ./revit doctor $YEAR$SFX shows the current ones."
+    list=(); seen=" "
+    for kv in "${SETS[@]}"; do
+      k="${kv%%=*}"; v="${kv#*=}"
+      case "$seen" in *" $k "*) die "$k is given twice." ;; esac; seen+="$k "
+      case "$k=$v" in
+        retina=on|retina=compact|retina=off) export REVIT_RETINA="$v"; list+=(retina) ;;
+        keys=mac|keys=windows) export REVIT_KEYS="$v"; list+=(mackeys) ;;
+        retina=*) die "retina is on, compact or off: ./revit set $YEAR$SFX retina=off" ;;
+        keys=*) die "keys is mac or windows: ./revit set $YEAR$SFX keys=windows" ;;
+        *) die "Unknown setting: $k. Settings: retina, keys" ;;
+      esac
+    done
+    need_crossover; bottle_guard must_exist "$YEAR" "$NAME"; not_busy
+    echo "Revit $YEAR ($NAME): ${SETS[*]}. Applies the next time Revit starts."
+    in_list retina "${list[@]}" \
+      && echo "The first start may open Revit's window at another size: maximize it, quit Revit and start it again."
+    run_ctx_new; sup_traps; lock_take --no-trap "./revit set $YEAR $NAME"; bottle_guard must_exist "$YEAR" "$NAME"
+    export RUN_KIND=steps; supervise "$ROOT/scripts/run-steps.sh" "$YEAR" "$NAME" "${list[@]}" ;;
   debug)
     need_crossover; bottle_guard must_exist "$YEAR" "$NAME"; not_busy
     "$ROOT/scripts/launch.sh" "$YEAR" "$NAME" || exit 1
