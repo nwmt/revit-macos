@@ -260,32 +260,16 @@ public final class HittestClient: HitQuerying, @unchecked Sendable {
         }
     }
 
-    /// /bin/bash <engine> hittest <year> <bottle> in a new process group: stdin and stdout are pipes to us, stderr
-    /// /dev/null (its messages name paths of this Mac; the exit code says enough). No other descriptor of ours.
+    /// /bin/bash <engine> hittest <year> <bottle> in a new process group (Spawn: it disclaims the helper's permission):
+    /// stdin and stdout are pipes to us, stderr /dev/null (its messages name paths of this Mac; the exit code says enough).
     private func spawn() -> (pid_t, Int32, Int32)? {
         var inP: [Int32] = [-1, -1], outP: [Int32] = [-1, -1]
         guard pipe(&inP) == 0 else { return nil }
         guard pipe(&outP) == 0 else { close(inP[0]); close(inP[1]); return nil }
-        var attr: posix_spawnattr_t? = nil, fa: posix_spawn_file_actions_t? = nil
-        posix_spawnattr_init(&attr); defer { posix_spawnattr_destroy(&attr) }
-        posix_spawn_file_actions_init(&fa); defer { posix_spawn_file_actions_destroy(&fa) }
-        posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK))
-        posix_spawnattr_setpgroup(&attr, 0)
-        var def = sigset_t(); sigemptyset(&def)
-        for s in [SIGINT, SIGTERM, SIGHUP, SIGPIPE] { sigaddset(&def, s) }
-        posix_spawnattr_setsigdefault(&attr, &def)
-        var mask = sigset_t(); sigemptyset(&mask); posix_spawnattr_setsigmask(&attr, &mask)
-        posix_spawn_file_actions_adddup2(&fa, inP[0], 0)
-        posix_spawn_file_actions_adddup2(&fa, outP[1], 1)
-        posix_spawn_file_actions_addopen(&fa, 2, "/dev/null", O_WRONLY, 0)
-        let argv = ["/bin/bash", engine.path, "hittest", String(year), bottle]
-        var cArgv: [UnsafeMutablePointer<CChar>?] = argv.map { strdup($0) } + [nil]
-        var cEnvp: [UnsafeMutablePointer<CChar>?] = environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
-        defer { for p in cArgv { free(p) }; for p in cEnvp { free(p) } }
-        var p: pid_t = 0
-        let rc = posix_spawn(&p, "/bin/bash", &fa, &attr, &cArgv, &cEnvp)
+        let p = Spawn.run(["/bin/bash", engine.path, "hittest", String(year), bottle], environment: environment,
+                          stdin: inP[0], stdout: outP[1], newGroup: true)
         close(inP[0]); close(outP[1])
-        guard rc == 0 else { close(inP[1]); close(outP[0]); return nil }
+        guard let p else { close(inP[1]); close(outP[0]); return nil }
         _ = fcntl(inP[1], F_SETFL, O_NONBLOCK); _ = fcntl(inP[1], F_SETNOSIGPIPE, 1)
         _ = fcntl(inP[1], F_SETFD, FD_CLOEXEC); _ = fcntl(outP[0], F_SETFD, FD_CLOEXEC)
         log.line("hittest \(bottle): started")

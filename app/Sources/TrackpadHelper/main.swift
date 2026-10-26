@@ -21,9 +21,9 @@ if let id = Bundle.main.bundleIdentifier,
 /// starts runs with it: so a bundled helper never takes the engine from its arguments, only from the app around it
 /// (<App>.app/Contents/Helpers/<App> Trackpad.app → <App>.app/Contents/Resources/engine/revit). Only a helper built
 /// outside a bundle (development: it has no permission of its own) takes --engine.
-func engineToRun(_ args: HelperArgs) -> URL? {
+func engineToRun(_ args: HelperArgs, bundled: Bool) -> URL? {
     let me = Bundle.main.bundleURL.resolvingSymlinksInPath()
-    guard me.pathExtension == "app" else { return args.engine }
+    guard bundled else { return args.engine }
     let contents = me.deletingLastPathComponent().deletingLastPathComponent()
     guard me.deletingLastPathComponent().lastPathComponent == "Helpers", contents.lastPathComponent == "Contents" else { return nil }
     let e = contents.appending(path: "Resources/engine/revit").resolvingSymlinksInPath()
@@ -57,8 +57,10 @@ func started(_ pid: Int32) -> String? {
         guard started(args.parentPid) == args.parentStart.trimmingCharacters(in: .whitespaces) else { exit(0) }   // the app that started us is gone
         let log = TrackpadLog(url: args.data.appending(path: "logs/trackpad.log"))
         let tap = TapThread(log: log)
-        guard let engine = engineToRun(args) else { exit(2) }   // a helper copied out of its app does nothing
-        let env = engineEnvironment(from: ProcessInfo.processInfo.environment, bundled: Bundle.main.bundleURL.pathExtension == "app")
+        // one decision for both: a helper in an .app is bundled (the engine of its app, the account's environment)
+        let bundled = Bundle.main.bundleURL.resolvingSymlinksInPath().pathExtension == "app"
+        guard let engine = engineToRun(args, bundled: bundled) else { exit(2) }   // a helper copied out of its app does nothing
+        let env = engineEnvironment(from: ProcessInfo.processInfo.environment, bundled: bundled)
         let ports = HelperPorts(workspace: MacWorkspace(), permission: MacPermission(), tap: MacTap(tap),
                                 engine: EngineStatusReader(engine: engine, environment: env), display: MacDisplay(),
                                 clients: MacClients(engine: engine, environment: env, log: log),
