@@ -18,3 +18,9 @@ import Testing
     let env = engineEnvironment(from: ["HOME": "/h", "TMPDIR": "/t", "SECRET": "x", "PATH": "/x", "REVIT_CX": "/cx"])
     #expect(env == ["HOME": "/h", "TMPDIR": "/t", "REVIT_CX": "/cx", "PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "en_US.UTF-8"])
 }
+
+@Test func aBundledHelperTakesNothingFromItsEnvironment() {
+    let env = engineEnvironment(from: ["HOME": "/evil", "REVIT_CX": "/evil", "REVIT_DATA": "/evil", "TMPDIR": "/evil"], bundled: true)
+    #expect(env["REVIT_CX"] == nil); #expect(env["REVIT_DATA"] == nil)
+    #expect(env["HOME"] == NSHomeDirectoryForUser(NSUserName())); #expect(env["TMPDIR"] != "/evil"); #expect(env["TMPDIR"] != nil)
+}

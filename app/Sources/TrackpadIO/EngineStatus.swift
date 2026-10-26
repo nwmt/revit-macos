@@ -1,11 +1,22 @@
-// The engine as the helper uses it: revit status --json for the bottles and their Revit processes, with the same small
-// environment the app gives the engine (AppCore's EngineEnvironment; the helper does not link AppCore).
+// The engine as the helper uses it: revit status --json for the bottles and their Revit processes, with the small
+// environment the app gives the engine (AppCore's EngineEnvironment; the helper does not link AppCore), without the
+// tests' FAKE_ variables: what the helper starts runs with its permission.
 import Foundation
 
-public func engineEnvironment(from env: [String: String]) -> [String: String] {
+/// From the helper's environment (development), or — bundled: whoever starts the helper sets its environment, and
+/// REVIT_CX, REVIT_DATA or HOME would steer what the engine runs with the helper's permission — from the account only.
+public func engineEnvironment(from env: [String: String], bundled: Bool = false) -> [String: String] {
     var out: [String: String] = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "en_US.UTF-8"]
+    if bundled {
+        if let pw = getpwuid(getuid()) {
+            out["HOME"] = String(cString: pw.pointee.pw_dir)
+            out["USER"] = String(cString: pw.pointee.pw_name); out["LOGNAME"] = out["USER"]
+        }
+        var buf = [CChar](repeating: 0, count: Int(PATH_MAX))
+        if confstr(_CS_DARWIN_USER_TEMP_DIR, &buf, buf.count) > 0 { out["TMPDIR"] = String(cString: buf) }
+        return out
+    }
     for k in ["HOME", "USER", "LOGNAME", "TMPDIR", "REVIT_DATA", "REVIT_LOCK_DIR", "REVIT_CX"] { if let v = env[k] { out[k] = v } }
-    for (k, v) in env where k.hasPrefix("FAKE_") { out[k] = v }
     return out
 }
 
