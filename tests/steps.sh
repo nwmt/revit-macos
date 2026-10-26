@@ -9,7 +9,8 @@ CLEAN_ENV=(-u REVIT_DATA -u REVIT_LOCK_DIR -u SHIMS_DIR -u REVIT_BUNDLED -u REVI
   -u REVIT_ACCEPT_EULA -u REVIT_SOURCE_LIST -u REVIT_REUSE_EXTRACTED -u REVIT_REEXTRACT -u REVIT_UNPACK_AGAIN
   -u REVIT_FOR_BOTTLE -u INSTALL_PARENT -u W_CACHE -u SHIMS_FROM_SOURCE -u RUN_DIR -u RUN_KIND -u CX_RECREATE
   -u INSTALL_DRYRUN -u REVIT_LANG -u ODIS_PKGS -u REVIT_THEME -u REVIT_YEAR -u SMOKE_TIMEOUT -u SMOKE_START_WAIT
-  -u SMOKE_STALL -u SMOKE_WORKER_WAIT -u SMOKE_POLL -u SMOKE_PREP_TIMEOUT -u REVIT_CX_TMP)
+  -u SMOKE_STALL -u SMOKE_WORKER_WAIT -u SMOKE_POLL -u SMOKE_PREP_TIMEOUT -u REVIT_CX_TMP
+  -u REVIT_RETINA -u REVIT_KEYS -u SETTINGS_SAVE_WAIT)
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)" && [ -d "$TMP" ] || { echo "mktemp failed" >&2; exit 1; }
 TOP="$(cd "$TMP" && pwd -P)" || exit 1
@@ -100,7 +101,7 @@ reset; in_repo 'load_profile 2020; profile_json; load_profile 2027; profile_json
 check "profile_json: one JSON object per profile, with its lists" eval '/usr/bin/perl -MJSON::PP -ne '"'"'my $j = decode_json($_);
   exit 1 unless ref $j->{STEPS} eq "ARRAY" && ref $j->{PKGS} eq "ARRAY" && ref $j->{RICHEDIT} eq "ARRAY"; print "$j->{YEAR} ",
   scalar @{$j->{STEPS}}, " $j->{STEPS}[0] ", scalar @{$j->{PKGS}}, " $j->{DOTNET} [$j->{ENSCAPE}] $j->{RVTFIX_ENV}[0]\n"'"'"' <<<"$OUT" |
-  tr "\n" "|" | grep -qxF "2020 21 netfx 0 netfx47 [3] RVTFIX_CEF_ARGS=|2027 22 vc 32 net10 [4] |"'
+  tr "\n" "|" | grep -qxF "2020 21 netfx 0 netfx47 [3] RVTFIX_CEF_ARGS=|2027 24 vc 32 net10 [4] |"'
 reset; mkdir -p "$T/real"; ln -s "$T/real" "$T/link"; ln -s "$T/nowhere" "$T/dangling"
 in_repo 'for p in "$HOME/not/there/yet" "'"$T"'/link/sub" "'"$T"'/dangling"; do free_gb "$p"; volume_id "$p"; done'
 check "free_gb and volume_id: a number for a path that is not there, a link, a link to nothing" \
@@ -551,6 +552,59 @@ reset; mkbottle rvt2027-t 2027 2027; run_steps 2027 rvt2027-t downloads; expect 
 check "downloads: the folder is in the bottle" test -d "$BOTTLES/rvt2027-t/drive_c/users/crossover/AppData/Local/Downloads"
 check "downloads: Windows' Downloads folder points into the bottle" \
   called "[{374DE290-123F-4565-9164-39C4925E467B}] [/t] [REG_EXPAND_SZ] [/d] [%USERPROFILE%\\AppData\\Local\\Downloads]"
+# retina, mackeys: registry values for Wine's Mac driver and DPI. Outside an install a step waits until Wine has saved
+# them (user.reg, system.reg); here the files are written ahead, as Wine would have saved them, or not at all
+regfile() { # $1 = bottle, $2 = user.reg | system.reg, then "[key]" or value lines, as Wine writes them
+  local f="$BOTTLES/$1/$2"; shift 2; printf '%s\n' "$@" >> "$f"
+}
+MD='[Software\\Wine\\Mac Driver] 1792953065'; CPD='[Control Panel\\Desktop] 1792953065'
+FHK='[System\\CurrentControlSet\\Hardware Profiles\\Current\\Software\\Fonts] 1792952095'
+APPMD='[Software\\Wine\\AppDefaults\\Revit.exe\\Mac Driver] 1792953065'
+reset; mkbottle rvt2027-t 2027 2027
+regfile rvt2027-t user.reg "$MD" '"RetinaMode"="y"' "" "$CPD" '"LogPixels"=dword:000000c0'
+regfile rvt2027-t system.reg "$FHK" '"LogPixels"=dword:000000c0'
+STEP_ENV=(RUN_KIND=steps); run_steps 2027 rvt2027-t retina; expect "retina" 0 "RetinaMode=y, LogPixels=192 ("
+check "retina: RetinaMode=y for the Mac driver" called "[reg] [add] [HKCU\\Software\\Wine\\Mac Driver] [/v] [RetinaMode] [/d] [y] [/f]"
+check "retina: LogPixels 192 for the user" called "[HKCU\\Control Panel\\Desktop] [/v] [LogPixels] [/t] [REG_DWORD] [/d] [192] [/f]"
+check "retina: LogPixels 192 for the machine" \
+  called "[HKLM\\System\\CurrentControlSet\\Hardware Profiles\\Current\\Software\\Fonts] [/v] [LogPixels] [/t] [REG_DWORD] [/d] [192] [/f]"
+check "retina: no note when Wine has saved them" eval '! grep -q "not saved" "$RUN/summary.txt"'
+check "retina: the bottle is not stopped" not_called "wineserver"
+check "retina: a run of its own is in the run record" test "$(last_run rvt2027-t | cut -d' ' -f1-5)" = "steps 2027 ok requested=retina done=retina"
+reset; mkbottle rvt2027-t 2027 2027; STEP_ENV=(REVIT_RETINA=compact SETTINGS_SAVE_WAIT=1); run_steps 2027 rvt2027-t retina
+expect "retina=compact: 144, and a note while Wine has not saved it" 0 "RetinaMode=y, LogPixels=144 (Wine has not saved them to disk yet"
+reset; mkbottle rvt2027-t 2027 2027; STEP_ENV=(REVIT_RETINA=off SETTINGS_SAVE_WAIT=1); run_steps 2027 rvt2027-t retina
+expect "retina=off: RetinaMode=n, 96" 0 "RetinaMode=n, LogPixels=96"
+check "retina=off: 96 for the machine too" called "Fonts] [/v] [LogPixels] [/t] [REG_DWORD] [/d] [96] [/f]"
+reset; mkbottle rvt2027-t 2027 2027; mkdir -p "$T/run"; STEP_ENV=(REVIT_RETINA=off INSTALL_PARENT=1 RUN_DIR="$T/run")
+run_steps 2027 rvt2027-t retina; expect "retina under an install: no wait, no note" 0 "LogPixels=96 ("
+check "retina under an install: no note" eval '! grep -q "not saved" "$T/run/summary.txt"'
+reset; mkbottle rvt2027-t 2027 2027; STEP_ENV=(REVIT_RETINA=big); run_steps 2027 rvt2027-t retina
+expect "retina: an unknown value fails the step" 1 "retina"; check "retina: the log says why" grep -q "unknown REVIT_RETINA=big" "$RUN/retina.log"
+check "retina: nothing written for an unknown value" not_called "[RetinaMode]"
+reset; mkbottle rvt2027-t 2027 2027; rule "reg add HKCU\\Software\\Wine\\Mac Driver /v RetinaMode" 1; run_steps 2027 rvt2027-t retina
+expect "retina: a failed reg add fails the step" 1 "retina"; check "retina: no LogPixels after a failed RetinaMode" not_called "[LogPixels]"
+reset; mkbottle rvt2027-t 2027 2027; regfile rvt2027-t user.reg "$MD" '"LeftCommandIsCtrl"="y"' '"RightCommandIsCtrl"="y"' '"LeftOptionIsAlt"="y"'
+rule "reg query HKCU\\Software\\Wine\\AppDefaults\\Revit.exe\\Mac Driver" 1; run_steps 2027 rvt2027-t mackeys
+expect "mackeys" 0 "Cmd → Ctrl, left Option → Alt ("
+check "mackeys: Cmd is Ctrl, left Option is Alt" eval 'called "Mac Driver] [/v] [LeftCommandIsCtrl] [/d] [y] [/f]" &&
+  called "Mac Driver] [/v] [RightCommandIsCtrl] [/d] [y] [/f]" && called "Mac Driver] [/v] [LeftOptionIsAlt] [/d] [y] [/f]"'
+check "mackeys: no Revit.exe values to remove" not_called "[delete]"
+check "mackeys: no note when Wine has saved them" eval '! grep -q "not saved" "$RUN/summary.txt"'
+reset; mkbottle rvt2027-t 2027 2027; regfile rvt2027-t user.reg "$MD" '"LeftCommandIsCtrl"="y"' '"RightCommandIsCtrl"="y"' '"LeftOptionIsAlt"="y"' \
+  "" "$APPMD" '"LeftCommandIsCtrl"="n"'
+STEP_ENV=(SETTINGS_SAVE_WAIT=1); run_steps 2027 rvt2027-t mackeys
+check "mackeys: values for Revit.exe, which Wine reads first, are removed" eval 'called "[reg] [delete] [HKCU\\Software\\Wine\\AppDefaults\\Revit.exe\\Mac Driver] [/v] [LeftCommandIsCtrl] [/f]" &&
+  called "[delete] [HKCU\\Software\\Wine\\AppDefaults\\Revit.exe\\Mac Driver] [/v] [LeftOptionIsAlt] [/f]"'
+expect "mackeys: a note while the removed value is still on disk" 0 "(Wine has not saved them to disk yet"
+reset; mkbottle rvt2027-t 2027 2027; rule "reg query HKCU\\Software\\Wine\\AppDefaults\\Revit.exe\\Mac Driver" 2
+run_steps 2027 rvt2027-t mackeys; expect "mackeys: a failed reg query fails the step" 1 "mackeys"
+check "mackeys: the log says why" grep -q "reg query returned 2" "$RUN/mackeys.log"; check "mackeys: nothing written then" not_called "[add]"
+reset; mkbottle rvt2027-t 2027 2027; rule "reg query HKCU\\Software\\Wine\\AppDefaults" 1; STEP_ENV=(REVIT_KEYS=windows SETTINGS_SAVE_WAIT=1)
+run_steps 2027 rvt2027-t mackeys; expect "mackeys=windows: Wine's default, with the note" 0 "Cmd → Alt, Option types characters (Wine's default) (Wine has not"
+check "mackeys=windows: n" called "Mac Driver] [/v] [LeftCommandIsCtrl] [/d] [n] [/f]"
+reset; mkbottle rvt2027-t 2027 2027; STEP_ENV=(REVIT_KEYS=pc); run_steps 2027 rvt2027-t mackeys
+expect "mackeys: an unknown value fails the step" 1 "mackeys"; check "mackeys: nothing done for it" not_called "[reg]"
 reset; mkbottle rvt2024-t 2024 2024; run_steps 2024 rvt2024-t pdfprinter
 expect "pdfprinter" 0 "pdfprinter"
 check "pdfprinter: the port path is quoted for /bin/sh (the sandbox path has a space)" called "|'$R/scripts/ps2pdf-port.sh'"

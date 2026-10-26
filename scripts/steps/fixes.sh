@@ -1,5 +1,6 @@
 # Install steps: our fixes for Wine inside Revit — shims, Microsoft's RichEdit, DXVK for Direct3D 9, the WebView2
-# browser, the Downloads folder, the PDF printer. Nothing changes an Autodesk file on disk. Sourced by scripts/run-steps.sh.
+# browser, the Downloads folder, the PDF printer — and Retina and Mac keys. Nothing changes an Autodesk file on disk.
+# Sourced by scripts/run-steps.sh.
 
 step_ncryptshim() { # Wine's ncrypt cannot import a private ECDSA P-256 key (ECCPRIVATEBLOB) → assert in
   # PersistenceDB\DataIntegrity.cpp:52 and "unrecoverable error" at startup. Our ncrypt.dll (tools/shims/ncryptshim), for
@@ -103,6 +104,74 @@ step_downloads() { # Load Autodesk Family stays at 100%: the WebView2 browser sa
   w reg add "$k\\User Shell Folders" /v "$id" /t REG_EXPAND_SZ /d '%USERPROFILE%\AppData\Local\Downloads' /f || return 1
   w reg add "$k\\Shell Folders" /v "$id" /t REG_SZ /d 'C:\users\crossover\AppData\Local\Downloads' /f || return 1
   detail "Downloads (Windows) → C:\\users\\crossover\\AppData\\Local\\Downloads"
+}
+
+settings_saved() { # $1 = user.reg or system.reg, $2 = key as the file writes it (Software\\Wine\\Mac Driver), $3 = the
+  # value's line ("RetinaMode"="y"), or -"Name": no such value there (nor the key). Names and keys in any case, as Wine.
+  # Through ENVIRON: awk -v would read the backslashes as escapes
+  K="[$2]" V="$3" awk 'BEGIN { key = tolower(ENVIRON["K"]); want = ENVIRON["V"]; gone = substr(want, 1, 1) == "-"
+      if (gone) { name = tolower(substr(want, 2)) "=" } else { name = tolower(substr(want, 1, index(want, "=")))
+        val = substr(want, index(want, "=") + 1) } }
+    /^\[/ { sec = (tolower(substr($0, 1, length(key))) == key) ; next }
+    sec && tolower(substr($0, 1, length(name))) == name { seen = 1; if (!gone && substr($0, length(name) + 1) == val) hit = 1 }
+    END { exit gone ? seen : !hit }' "$1" 2>/dev/null || return 1
+}
+settings_wait() { # $@ = "<file>|<key>|<line>" for settings_saved. wineserver writes the registry to disk on exit and every
+  # 30 s; ./revit doctor and the RFO benchmark read the files. Waits up to 45 s for what this step wrote, outside an
+  # install (nothing reads the files right after it there). Sets SAVE_NOTE when they are not on disk yet
+  local i p f k l ok
+  SAVE_NOTE=""
+  [ -z "${INSTALL_PARENT:-}" ] || return 0
+  for i in $(seq 1 "${SETTINGS_SAVE_WAIT:-45}"); do
+    ok=1
+    for p in "$@"; do
+      f="${p%%|*}"; k="${p#*|}"; l="${k#*|}"; k="${k%%|*}"
+      settings_saved "$B/$f" "$k" "$l" || { ok=0; break; }
+    done
+    [ $ok = 0 ] || return 0
+    sleep 1
+  done
+  SAVE_NOTE=" (Wine has not saved them to disk yet: ./revit doctor may show the old ones for a minute)"
+}
+
+step_retina() { # Revit is blurry on a Retina screen: Wine sees the screen at half its pixels and 96 DPI, and macOS
+  # scales it up. RetinaMode gives Wine all the pixels, LogPixels 192 keeps the layout the same size (Revit is DPI-aware);
+  # Wine reads both when a program starts. REVIT_RETINA=on (default) | compact (144: smaller text, more room) | off
+  local m d k='HKCU\Control Panel\Desktop' f='HKLM\System\CurrentControlSet\Hardware Profiles\Current\Software\Fonts'
+  case "${REVIT_RETINA:-on}" in
+    on) m=y; d=192 ;; compact) m=y; d=144 ;; off) m=n; d=96 ;;
+    *) echo "unknown REVIT_RETINA=$REVIT_RETINA (on, compact, off)"; return 1 ;;
+  esac
+  w reg add 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /d "$m" /f || return 1
+  w reg add "$k" /v LogPixels /t REG_DWORD /d "$d" /f || return 1
+  w reg add "$f" /v LogPixels /t REG_DWORD /d "$d" /f || return 1
+  settings_wait "user.reg|Software\\\\Wine\\\\Mac Driver|\"RetinaMode\"=\"$m\"" \
+    "user.reg|Control Panel\\\\Desktop|\"LogPixels\"=dword:$(printf %08x "$d")" \
+    "system.reg|System\\\\CurrentControlSet\\\\Hardware Profiles\\\\Current\\\\Software\\\\Fonts|\"LogPixels\"=dword:$(printf %08x "$d")"
+  detail "RetinaMode=$m, LogPixels=$d$SAVE_NOTE"
+}
+
+step_mackeys() { # Wine maps Cmd to Alt: Cmd alone opens the ribbon's KeyTips, Cmd+S opens a ribbon tab. Cmd → Ctrl
+  # (Cmd+Z, S, C, V), left Option → Alt (KeyTips), right Option still types characters. Wine reads these from
+  # AppDefaults\Revit.exe first: values there are removed. REVIT_KEYS=mac (default) | windows (Wine's default)
+  local v n rc app='HKCU\Software\Wine\AppDefaults\Revit.exe\Mac Driver' saved=()
+  case "${REVIT_KEYS:-mac}" in mac) v=y ;; windows) v=n ;; *) echo "unknown REVIT_KEYS=$REVIT_KEYS (mac, windows)"; return 1 ;; esac
+  for n in LeftCommandIsCtrl RightCommandIsCtrl LeftOptionIsAlt; do
+    w reg query "$app" /v "$n" >/dev/null 2>&1; rc=$?
+    case "$rc" in
+      0) w reg delete "$app" /v "$n" /f || return 1
+         saved+=("user.reg|Software\\\\Wine\\\\AppDefaults\\\\Revit.exe\\\\Mac Driver|-\"$n\"") ;;
+      1) ;;
+      *) echo "reg query returned $rc"; return 1 ;;
+    esac
+  done
+  for n in LeftCommandIsCtrl RightCommandIsCtrl LeftOptionIsAlt; do
+    w reg add 'HKCU\Software\Wine\Mac Driver' /v "$n" /d "$v" /f || return 1
+    saved+=("user.reg|Software\\\\Wine\\\\Mac Driver|\"$n\"=\"$v\"")
+  done
+  settings_wait "${saved[@]}"
+  if [ "$v" = y ]; then detail "Cmd → Ctrl, left Option → Alt$SAVE_NOTE"
+  else detail "Cmd → Alt, Option types characters (Wine's default)$SAVE_NOTE"; fi
 }
 
 pdf_port_script() { # the printer port runs this path for every print job; it is stored in the bottle, so it must not

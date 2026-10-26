@@ -180,6 +180,8 @@ FIXES = {
                        lambda p, y: [("shim", "pdfprinter", "rvt-pdf", "drive_c/rvt-pdf/add_printer.exe"),
                                      ("present", "spool", f"{S32}/spool/drivers/x64/3/revitpdf.ppd")]),
     "dynamo": _fix("Dynamo's 3D preview draws black squares, lags or crashes"),
+    "retina": _fix("text and drawings are blurry on a Retina screen", why="the settings group reads the registry"),
+    "mackeys": _fix("Cmd works as Alt: Cmd+S opens a ribbon tab", why="the settings group reads the registry"),
     "revitlookup": _fix("RevitLookup", why="the add-ins checks list it"),
     "pyrevit": _fix("pyRevit", why="the add-ins checks list it"),
     "trust": _fix("Revit asks about signed add-ins on every start"),

@@ -5,6 +5,6 @@ Plan:
   4. scripts/new-bottle.sh 2027 rvt2027-a
   5. scripts/run-steps.sh 2027 rvt2027-a
   6. scripts/make-apps.sh 2027 rvt2027-a
-Steps: vc fonts dotnet licensing svcshim idmgr rvt pkgs asc revitini register ncryptshim webview2 d3d9dxvk richedit tlbpin warpshim gdoff rvtfix wv2fix downloads dynamo
+Steps: vc fonts dotnet licensing svcshim idmgr rvt pkgs asc revitini register ncryptshim webview2 d3d9dxvk richedit tlbpin warpshim gdoff rvtfix wv2fix downloads dynamo retina mackeys
 
 Fix the items marked ✗ and run ./revit install 2027 again.
