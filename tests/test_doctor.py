@@ -651,6 +651,128 @@ class PyrevitAgent(Sandbox):
         self.assertNotIn("doctor.internal", [c.id for c in cs])
         self.assertEqual(sorted(self.mcp(cs)), ["mcp.pyrevit.ready", "mcp.ready"])
 
+class Settings(Sandbox):
+    """The settings group: what the retina and mackeys steps wrote, read from user.reg and system.reg."""
+    profile = dict(PROFILE, STEPS=STEPS + ["retina", "mackeys"])
+    MAC, APP = "[Software\\\\Wine\\\\Mac Driver] 1", "[Software\\\\Wine\\\\AppDefaults\\\\Revit.exe\\\\Mac Driver] 1"
+    CPD, FONTS = "[Control Panel\\\\Desktop] 1", "[System\\\\CurrentControlSet\\\\Hardware Profiles\\\\Current\\\\Software\\\\Fonts] 1"
+
+    def regs(self, mac=None, app=None, hkcu=None, hklm="dword:00000060"):
+        """mac, app: {name: raw value}; hkcu, hklm: LogPixels as Wine writes it, None = no value."""
+        def key(head, vals):
+            return "" if vals is None else head + "\n" + "".join('"%s"=%s\n' % kv for kv in vals.items()) + "\n"
+        lp = lambda v: None if v is None else {"LogPixels": v}
+        self.write(os.path.join(self.b, "user.reg"), "WINE REGISTRY Version 2\n\n" + key(self.MAC, mac or {}) +
+                   key(self.APP, app) + key(self.CPD, lp(hkcu) or {}))
+        self.write(os.path.join(self.b, "system.reg"), "WINE REGISTRY Version 2\n\n" + key(self.FONTS, lp(hklm) or {}))
+
+    def group(self, **kw):
+        return {c.id: c for c in self.checks(**kw) if c.group == "settings"}
+
+    ON = {"RetinaMode": '"y"', "LeftCommandIsCtrl": '"y"', "RightCommandIsCtrl": '"y"', "LeftOptionIsAlt": '"y"'}
+
+    def test_what_the_steps_set(self):
+        for retina, dpi, title in (('"y"', "000000c0", "Retina on (192 DPI)"), ('"y"', "00000090", "Retina compact (144 DPI)"),
+                                   ('"n"', "00000060", "Retina off (96 DPI)")):
+            with self.subTest(title=title):
+                self.regs(mac=dict(self.ON, RetinaMode=retina), hkcu="dword:" + dpi, hklm="dword:" + dpi)
+                cs = self.group()
+                self.assertEqual(list(cs), ["settings.display"])
+                self.assertEqual((cs["settings.display"].status, cs["settings.display"].title),
+                                 ("info", title + "; Cmd works as Ctrl"))
+                self.assertEqual(cs["settings.display"].fix, "./revit set 2025 retina=on keys=mac: sharp text, Cmd+S saves"
+                                 if "off" in title else "")
+
+    def test_a_bottle_from_before_the_steps(self):
+        self.regs()   # Wine's defaults: nothing in the Mac driver key, 96 for the machine
+        cs = self.by_id(self.checks())
+        self.assertEqual((cs["settings.display"].title, cs["settings.display"].fix),
+                         ("Retina off (96 DPI); Cmd works as Alt", "./revit set 2025 retina=on keys=mac: sharp text, Cmd+S saves"))
+        self.records_clear()
+        self.record(requested=STEPS)   # installed before the steps existed: no rebuild for them
+        self.assertEqual(self.problems(self.checks()), [])
+        self.assertIn("· Retina off (96 DPI); Cmd works as Alt", "\n".join(dr.render(self.checks())))
+
+    def test_the_command_names_the_bottle(self):
+        self.regs()
+        self.checks()
+        self.facts["sfx"] = " rvt2025-step"
+        c = {c.id: c for c in dr.run_checks(self.facts)}["settings.display"]
+        self.assertEqual(c.fix, "./revit set 2025 rvt2025-step retina=on keys=mac: sharp text, Cmd+S saves")
+
+    def test_dpi_as_wine_reads_it(self):
+        for hkcu, hklm, want in ((None, "dword:000000c0", "on"), ("dword:00000000", "dword:000000c0", "on"),
+                                 ("dword:000000c0", "dword:00000060", "on"), (None, None, "warn")):
+            with self.subTest(hkcu=hkcu, hklm=hklm):
+                self.regs(mac=self.ON, hkcu=hkcu, hklm=hklm)
+                cs = self.group()
+                if want == "warn":   # 96 with Retina on: tiny
+                    self.assertEqual(cs["settings.retina"].status, "warn")
+                    self.assertEqual(cs["settings.retina"].fix, "./revit set 2025 retina=on")
+                else:
+                    self.assertEqual(cs["settings.display"].title, "Retina on (192 DPI); Cmd works as Ctrl")
+
+    def test_states_no_setting_gives(self):
+        for mac, hkcu, why in ((dict(self.ON, RetinaMode='"n"'), "dword:000000c0", "Retina off at 192 DPI"),
+                               (self.ON, "dword:00000078", "Retina on at 120 DPI"),
+                               (self.ON, '"192"', "not readable"),
+                               (dict(self.ON, RetinaMode="dword:00000079"), "dword:000000c0", "not readable")):
+            with self.subTest(why=why):
+                self.regs(mac=mac, hkcu=hkcu)
+                cs = self.group()
+                self.assertEqual(sorted(cs), ["settings.retina"])
+                self.assertIn("(%s)" % why, cs["settings.retina"].title)
+
+    def test_booleans_as_wine_reads_them(self):
+        for v, on in (('"Y"', True), ('"true"', True), ('"1"', True), ('"N"', False), ('""', False), (None, False)):
+            with self.subTest(v=v):
+                mac = {k: v for k in self.ON if k != "RetinaMode"} if v else {}
+                self.regs(mac=dict(mac, RetinaMode='"y"'), hkcu="dword:000000c0")
+                self.assertEqual(self.group()["settings.display"].title,
+                                 "Retina on (192 DPI); Cmd works as " + ("Ctrl" if on else "Alt"))
+        self.regs(mac=dict(self.ON, RetinaMode='""'), hkcu="dword:00000060")
+        self.assertEqual(self.group()["settings.display"].title, "Retina off (96 DPI); Cmd works as Ctrl")
+
+    def test_keys(self):
+        self.regs(mac=dict(self.ON, LeftOptionIsAlt='"n"'), hkcu="dword:000000c0")
+        cs = self.group()
+        self.assertEqual((sorted(cs), cs["settings.keys"].fix), (["settings.keys"], "./revit set 2025 keys=mac"))
+        self.regs(mac=self.ON, app={"LeftCommandIsCtrl": '"n"'}, hkcu="dword:000000c0")   # Wine reads Revit.exe's first
+        cs = self.group()
+        self.assertEqual(sorted(cs), ["settings.keys"])
+        self.assertIn("leftcommandisctrl n (Revit.exe)", cs["settings.keys"].detail)
+        self.regs(mac={"RetinaMode": '"y"'}, app={k: '"y"' for k in self.ON if k != "RetinaMode"}, hkcu="dword:000000c0")
+        self.assertEqual(self.group()["settings.display"].title, "Retina on (192 DPI); Cmd works as Ctrl")
+        self.regs(mac=dict(self.ON, LeftCommandIsCtrl="dword:00000079"), hkcu="dword:000000c0")
+        self.assertEqual(sorted(self.group()), ["settings.keys"])
+
+    def test_no_settings_group_without_the_steps_or_the_registry(self):
+        self.regs()
+        self.assertEqual(self.group(profile=PROFILE), {})
+        os.remove(os.path.join(self.b, "system.reg"))
+        self.assertEqual(self.group(), {})   # bottle.registry says so
+
+    def test_a_failed_setting_is_no_reason_to_rebuild(self):
+        self.regs()
+        self.records_clear()
+        self.record(result="partial", failed=["retina"])
+        cs = self.by_id(self.checks())
+        self.assertEqual(cs["install.last"].status, "ok")
+        self.assertIn("settings.display", cs)
+        self.records_clear()
+        self.record(result="partial", failed=["retina", "tlbpin"])
+        c = self.by_id(self.checks())["install.last"]
+        self.assertEqual((c.status, c.detail), ("warn", "steps: tlbpin"))
+        self.records_clear()
+        d = os.path.join(self.data, "logs", self.name, "20261001-100000-install")
+        self.write(os.path.join(d, "summary.txt"), "".join("   %-10s exit=0     x (1 s)\n" % s for s in self.profile["STEPS"]))
+        self.write(os.path.join(d, "failed.txt"), "mackeys\n")
+        self.assertEqual(self.by_id(self.checks())["install.last"].status, "ok")
+        self.write(os.path.join(d, "failed.txt"), "mackeys\ntlbpin\n")
+        c = self.by_id(self.checks())["install.last"]
+        self.assertEqual((c.status, c.detail), ("warn", "steps: tlbpin"))
+
+
 class Logs(Sandbox):
     """The logs group: the newest logs of the bottle against tools/signatures.py."""
     RUN = "20261016-120000"   # the install the run record names; the record says when it began

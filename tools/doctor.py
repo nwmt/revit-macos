@@ -45,7 +45,7 @@ import bottleread  # noqa: E402
 import runlog  # noqa: E402
 import signatures  # noqa: E402
 
-GROUPS = ("host", "crossover", "bottles", "bottle", "install", "fixes", "addins", "mcp", "logs")
+GROUPS = ("host", "crossover", "bottles", "bottle", "install", "fixes", "settings", "addins", "mcp", "logs")
 S32 = "drive_c/windows/system32"
 AL = "drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing"
 WV2 = "drive_c/Program Files (x86)/Microsoft/EdgeWebView/Application"
@@ -53,6 +53,15 @@ NETFX_DIR = "drive_c/windows/Microsoft.NET/Framework64/v4.0.30319"
 DESKTOP = "drive_c/Program Files/dotnet/shared/Microsoft.WindowsDesktop.App"
 DOCUMENTS = "drive_c/users/crossover/Documents"
 NDP_KEY = "Software\\Microsoft\\NET Framework Setup\\NDP\\v4\\Full"
+# the steps retina and mackeys (scripts/steps/fixes.sh): settings, not fixes. Wine reads RetinaMode from MAC_DRIVER, the
+# keys from Revit.exe's AppDefaults first, LogPixels from DESKTOP_KEY (user.reg), then FONTS_HKLM (system.reg), then 96
+SETTING_STEPS = ("retina", "mackeys")
+MAC_DRIVER = "Software\\Wine\\Mac Driver"
+MAC_DRIVER_APP = "Software\\Wine\\AppDefaults\\Revit.exe\\Mac Driver"
+DESKTOP_KEY = "Control Panel\\Desktop"
+FONTS_HKLM = "System\\CurrentControlSet\\Hardware Profiles\\Current\\Software\\Fonts"
+KEY_VALUES = ("leftcommandisctrl", "rightcommandisctrl", "leftoptionisalt")
+RETINA = {("y", 192): "on", ("y", 144): "compact", ("n", 96): "off"}   # ./revit set retina=…
 CLONE_MARKER = "revit-macos/smoke-clone"   # in a temporary copy that ./revit test makes
 BUILTIN = b"Wine builtin DLL"
 # the CrossOver files the fixes copy with another marker (scripts/steps/fixes.sh): source, the copy's marker
@@ -867,7 +876,16 @@ def collect_bottle(ctx):
     b["logs"] = collect_logs(ctx, p, b["records"])
     b["mcp"] = collect_mcp(ctx, p)
     b["pyrevit_agent"] = collect_pyrevit_agent(p)
+    if any(s in (ctx.profile.get("STEPS") or []) for s in SETTING_STEPS):
+        b["settings"] = collect_settings(p)
     return b
+
+
+def collect_settings(p):
+    """The registry values the steps retina and mackeys write, as reg_values gives them; None: no such file."""
+    user, system = os.path.join(p, "user.reg"), os.path.join(p, "system.reg")
+    return {"mac": reg_values(user, MAC_DRIVER), "app": reg_values(user, MAC_DRIVER_APP),
+            "hkcu": reg_values(user, DESKTOP_KEY), "hklm": reg_values(system, FONTS_HKLM)}
 
 
 def collect(ctx):
@@ -1112,7 +1130,7 @@ def install_checks(f, b):
         date = str(last.get("time", ""))[:10]
         later = recs[recs.index(last) + 1:]
         fixed = {s for r in later for s in r.get("done") or []}
-        left = [s for s in last.get("failed") or [] if s not in fixed]
+        left = [s for s in last.get("failed") or [] if s not in fixed and s not in SETTING_STEPS]
         res = last.get("result")
         if res == "ok" or (res == "partial" and not left):
             out.append(Check("install.last", "ok", f"the last install ({date}) finished"))
@@ -1129,10 +1147,11 @@ def install_checks(f, b):
                              detail=f"failed{at}" if at else "", fix=rebuild(f), doc=DOC["start-over"]))
     elif b.get("summary"):
         s = b["summary"]
-        if s["failed"]:
+        sf = [x for x in s["failed"] if x not in SETTING_STEPS]   # settings: the settings group says what to do
+        if sf:
             out.append(Check("install.last", "warn", f"the last install ({s['date']}) left fixes undone: " +
-                             "; ".join(FIXES.get(x, {}).get("symptom", x) for x in s["failed"]),
-                             detail="steps: " + " ".join(s["failed"]), fix=rebuild(f), doc=DOC["start-over"]))
+                             "; ".join(FIXES.get(x, {}).get("symptom", x) for x in sf),
+                             detail="steps: " + " ".join(sf), fix=rebuild(f), doc=DOC["start-over"]))
         else:
             out.append(Check("install.last", "ok", f"the last install ({s['date']}) finished",
                              detail="from its log: the bottle has no run record"))
@@ -1142,7 +1161,7 @@ def install_checks(f, b):
     ran = ran_steps(b)
     steps = [s for s in f["profile"].get("STEPS") or []]
     if ran is not None:
-        miss = [s for s in steps if s not in ran]
+        miss = [s for s in steps if s not in ran and s not in SETTING_STEPS]
         if miss:
             out.append(Check("install.steps", "warn", f"this bottle lacks fixes this project has now ({len(miss)}): " +
                              "; ".join(FIXES.get(s, {}).get("symptom", s) for s in miss),
@@ -1312,6 +1331,64 @@ def fixes_checks(f, b):
         out.append(runtime_check(f, b, step, sp[0]) if sp[0] in ("webview2", "dotnet", "netfx") else
                    file_check(f, b, step, sp))
     return out
+
+
+def wine_bool(v):
+    """A Mac driver option as Wine reads it (IS_OPTION_TRUE, winemac.drv): a string whose first letter is y, t or 1 is
+    on; no value or another string is off. Another type is None: Wine reads its first bytes as text, we do not guess."""
+    if v is None:
+        return False
+    if v[0] != "sz":
+        return None
+    return bool(v[1]) and v[1][0] in "yYtT1"
+
+
+def effective_dpi(hkcu, hklm):
+    """The DPI Wine uses (win32u get_system_dpi): HKCU's LogPixels unless missing or 0, then HKLM's, then 96. None when
+    one it would read is not a number."""
+    for v in (hkcu, hklm):
+        if v is None:
+            continue
+        if v[0] != "dword" or v[1] is None:
+            return None
+        if v[1]:
+            return v[1]
+    return 96
+
+
+def settings_checks(f, b):
+    """What the retina and mackeys steps set, for a year whose profile has them: one note, or a warning for a state no
+    ./revit set gives."""
+    s = b.get("settings")
+    if not s or s.get("mac") is None or s.get("hklm") is None:
+        return []
+    y, sfx = f["year"], f["sfx"]
+    cmd = f"./revit set {y}{sfx}"
+    mac, app = s["mac"] or {}, s.get("app") or {}
+    hkcu, hklm = (s.get("hkcu") or {}).get("logpixels"), (s["hklm"] or {}).get("logpixels")
+    retina, dpi = wine_bool(mac.get("retinamode")), effective_dpi(hkcu, hklm)
+    keys = [wine_bool(app[k] if k in app else mac.get(k)) for k in KEY_VALUES]
+    def val(v):
+        return "none" if v is None else f"{v[1]}" if v[0] in ("sz", "dword") else f"{v[0]} {v[1]}"
+    detail = f"RetinaMode {val(mac.get('retinamode'))}, LogPixels {val(hkcu)} (user), {val(hklm)} (machine); " + \
+             ", ".join(f"{k} {val(app[k] if k in app else mac.get(k))}" + (" (Revit.exe)" if k in app else "")
+                       for k in KEY_VALUES)
+    out = []
+    mode = None if retina is None or dpi is None else RETINA.get(("y" if retina else "n", dpi))
+    if mode is None:
+        what = "not readable" if retina is None or dpi is None else \
+            f"Retina {'on' if retina else 'off'} at {dpi} DPI"
+        out.append(Check("settings.retina", "warn", f"the display settings do not fit together ({what}): Revit may "
+                         "look tiny, or large and blurry", detail=detail, fix=f"{cmd} retina=on"))
+    if None in keys or len(set(keys)) > 1:
+        out.append(Check("settings.keys", "warn", "the Cmd and Option keys are set only in part", detail=detail,
+                         fix=f"{cmd} keys=mac"))
+    if out:
+        return out
+    shown = {"on": "Retina on (192 DPI)", "compact": "Retina compact (144 DPI)", "off": "Retina off (96 DPI)"}[mode]
+    shown += "; Cmd works as Ctrl" if keys[0] else "; Cmd works as Alt"
+    fix = "" if mode != "off" and keys[0] else f"{cmd} retina=on keys=mac: sharp text, Cmd+S saves"
+    return [Check("settings.display", "info", shown, detail=detail, fix=fix)]
 
 
 def addin_checks(f):
@@ -1531,7 +1608,7 @@ def bottle_checks(f):
     out += app_checks(f, b)
     out += install_checks(f, b) + since_install(f, b)
     if b.get("revit_exe"):
-        out += fixes_checks(f, b) + addin_checks(f) + mcp_checks(f, b) + pyrevit_agent_checks(f, b)
+        out += fixes_checks(f, b) + settings_checks(f, b) + addin_checks(f) + mcp_checks(f, b) + pyrevit_agent_checks(f, b)
     return out + logs_checks(f, b)
 
 
