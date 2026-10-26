@@ -9,9 +9,14 @@ let package = Package(
     name: "AppMain",
     platforms: [.macOS("27.0")],
     targets: [
-        .target(name: "AppCore", path: "Sources/AppCore"),
+        // the trackpad helper's state file and arguments: the one format the app and the helper share
+        .target(name: "TrackpadState", path: "Sources/TrackpadState"),
+        // the trackpad gestures' logic without system calls: hittest's protocol, the coordinate scale, the view rule
+        .target(name: "TrackpadCore", path: "Sources/TrackpadCore"),
+        .testTarget(name: "TrackpadCoreTests", dependencies: ["TrackpadCore"], path: "Tests/TrackpadCoreTests"),
+        .target(name: "AppCore", dependencies: ["TrackpadState"], path: "Sources/AppCore"),
         .executableTarget(name: "AppMain", dependencies: ["AppCore"], path: "Sources/AppMain"),
-        .testTarget(name: "AppCoreTests", dependencies: ["AppCore"], path: "Tests/AppCoreTests", exclude: ["Fixtures"]),
+        .testTarget(name: "AppCoreTests", dependencies: ["AppCore", "TrackpadState"], path: "Tests/AppCoreTests", exclude: ["Fixtures"]),
         // a test helper (app/test.sh builds it): starts a run as the app does and exits at once; not in the bundle
         .executableTarget(name: "SpawnProbe", dependencies: ["AppCore"], path: "Tests/SpawnProbe"),
     ]
