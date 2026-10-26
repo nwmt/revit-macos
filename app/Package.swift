@@ -22,7 +22,7 @@ let package = Package(
         .executableTarget(name: "TrackpadHelper", dependencies: ["TrackpadCore", "TrackpadIO", "TrackpadState"],
                           path: "Sources/TrackpadHelper"),
         .target(name: "AppCore", dependencies: ["TrackpadState"], path: "Sources/AppCore"),
-        .executableTarget(name: "AppMain", dependencies: ["AppCore"], path: "Sources/AppMain"),
+        .executableTarget(name: "AppMain", dependencies: ["AppCore", "TrackpadState"], path: "Sources/AppMain"),
         .testTarget(name: "AppCoreTests", dependencies: ["AppCore", "TrackpadState"], path: "Tests/AppCoreTests", exclude: ["Fixtures"]),
         // a test helper (app/test.sh builds it): starts a run as the app does and exits at once; not in the bundle
         .executableTarget(name: "SpawnProbe", dependencies: ["AppCore"], path: "Tests/SpawnProbe"),

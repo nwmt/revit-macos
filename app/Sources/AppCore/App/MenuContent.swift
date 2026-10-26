@@ -6,13 +6,22 @@ public struct MenuContent: Equatable {
     public let bottles: [BottleItem]
     public let activity: Activity?
     public let changesEnabled: Bool
+    public var trackpad: String?            // "Trackpad: …" while the switch is on and the helper cannot work
 
     /// busy = AppModel.isBusy (it also knows a start under way).
-    public static func make(status: EngineStatus?, watched: WatchedRun?, failure: Failure?, busy: Bool) -> MenuContent {
+    public static func make(status: EngineStatus?, watched: WatchedRun?, failure: Failure?, busy: Bool,
+                            trackpad: TrackpadLine = .off) -> MenuContent {
         let bottles = (status?.bottles ?? []).compactMap { b in
             b.yearNumber.map { BottleItem(title: "Revit \($0) · \(b.name)", year: $0, bottle: b.name, running: b.running) }
         }
-        return MenuContent(bottles: bottles, activity: activity(status: status, watched: watched, failure: failure), changesEnabled: !busy)
+        var m = MenuContent(bottles: bottles, activity: activity(status: status, watched: watched, failure: failure), changesEnabled: !busy)
+        switch trackpad {
+        case .waiting: m.trackpad = String(localized: "Trackpad: needs permission")
+        case .lost, .lostManual: m.trackpad = String(localized: "Trackpad: permission lost")
+        case .error: m.trackpad = String(localized: "Trackpad: not working")
+        default: break
+        }
+        return m
     }
 
     static func activity(status: EngineStatus?, watched w: WatchedRun?, failure: Failure?) -> Activity? {

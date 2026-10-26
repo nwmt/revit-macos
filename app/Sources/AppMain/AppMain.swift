@@ -53,6 +53,7 @@ struct AppMain: App {
     let app: AppModel?
     let wizard: WizardModel?
     let settings: SettingsModel?
+    let trackpad: TrackpadModel?
     /// What the menu shows. Rebuilding an open menu closes its submenus, so it is updated only while no menu is open
     /// (AppKit says when menu tracking begins and ends) and only when it differs.
     private(set) var menu: MenuContent?
@@ -74,7 +75,8 @@ struct AppMain: App {
 
     func syncMenu() {
         guard !menuOpen, let app else { return }
-        let m = MenuContent.make(status: app.status, watched: app.watched, failure: app.failure, busy: app.isBusy)
+        let m = MenuContent.make(status: app.status, watched: app.watched, failure: app.failure, busy: app.isBusy,
+                                 trackpad: trackpad?.line ?? .off)
         if m != menu { menu = m }
     }
 
@@ -98,10 +100,18 @@ struct AppMain: App {
             let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
             settings = SettingsModel(app: m, login: LoginItemService(), updates: UpdateChecker(repo: repo, current: version, fetch: Self.fetch),
                                      defaults: .standard)
+            let launcher = MacHelperLauncher(appName: name), pe = ProcessEngine(engine: engine, environment: [:])
+            let t = TrackpadModel(launcher: launcher, resetter: MacPermissionResetter(), defaults: .standard, engine: engine,
+                                  data: { [weak m] in m?.dataFolder }, placement: { [weak m] in m?.status?.app?.placement },
+                                  parent: { await pe.processStart(pid: getpid()).map { (getpid(), $0) } },
+                                  helperID: launcher.id)
+            launcher.onExit = { [weak t] h in Task { await t?.helperExited(h) } }
+            trackpad = t
         } else {
             app = nil
             wizard = nil
             settings = nil
+            trackpad = nil
         }
         for (name, open) in [(NSMenu.didBeginTrackingNotification, true), (NSMenu.didEndTrackingNotification, false)] {
             NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
@@ -133,6 +143,7 @@ struct MenuLabel: View {
     private func run() async {
         guard let app = env.app else { return }
         await app.launch()
+        await env.trackpad?.start()
         env.syncMenu()
         if app.status?.app?.placement == "move" { Placement.ask(name: env.name) }
         if app.watched != nil {
@@ -144,6 +155,7 @@ struct MenuLabel: View {
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(1))
             await app.poll()
+            if tick % 2 == 0 { env.trackpad?.refresh() }
             env.syncMenu()
             tick += 1
             if tick % 60 == 1, !env.repo.isEmpty { await env.settings?.checkUpdatesIfDue(now: Date()) }   // once a minute; it checks once a day

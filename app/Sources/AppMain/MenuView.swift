@@ -19,6 +19,10 @@ struct MenuView: View {
             Button(a.isFailure ? "⚠︎ \(a.title)" : a.title) { env.router.open(.run) }
             Divider()
         }
+        if let t = m.trackpad {
+            Button("⚠︎ \(t)") { env.router.open(.settings) }
+            Divider()
+        }
         Button("Add Revit version…") { env.router.open(.wizard) }.disabled(!m.changesEnabled)
         Divider()
         Button("Settings…") { env.router.open(.settings) }
