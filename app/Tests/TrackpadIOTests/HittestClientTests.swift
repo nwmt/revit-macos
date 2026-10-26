@@ -21,7 +21,7 @@ struct Fake {
 func ready(_ c: HittestClient) -> Bool { eventually { if case .ready = c.status { return true }; return false } }
 
 @Test func readyAndAnswers() {
-    let f = Fake(), c = f.client("normal"); c.start(); defer { c.stop() }
+    let f = Fake(), c = f.client("normal"); c.start(); defer { c.shutdown() }
     #expect(ready(c)); #expect(c.status == .ready(scale: 2))
     let r = c.query(WinePoint(x: 1512, y: 900))
     #expect(r?.chain == [HitWindow(cls: "AfxFrameOrView140u", title: ""), HitWindow(cls: "A", title: "Floor Plan: 1512 900")])
@@ -29,18 +29,18 @@ func ready(_ c: HittestClient) -> Bool { eventually { if case .ready = c.status 
 }
 
 @Test func unknownDisplayLayoutIsNotReady() {
-    let f = Fake(), c = f.client("normal", scale: nil); c.start(); defer { c.stop() }
+    let f = Fake(), c = f.client("normal", scale: nil); c.start(); defer { c.shutdown() }
     #expect(eventually { c.status == .notReady("unknown display layout") })
     #expect(c.query(WinePoint(x: 1, y: 2)) == nil)
 }
 
 @Test func noHelloRestarts() {
-    let f = Fake(), c = f.client("nohello"); c.start(); defer { c.stop() }
+    let f = Fake(), c = f.client("nohello"); c.start(); defer { c.shutdown() }
     #expect(eventually(5) { f.starts >= 2 })
 }
 
 @Test func slowAnswersTimeOutThenRestart() {
-    let f = Fake(), c = f.client("slow"); c.start(); defer { c.stop() }
+    let f = Fake(), c = f.client("slow"); c.start(); defer { c.shutdown() }
     #expect(ready(c))
     let t = Date(); #expect(c.query(WinePoint(x: 1, y: 1)) == nil); #expect(Date().timeIntervalSince(t) < 0.25)
     usleep(400_000)                                    // the late answer arrives: it is not taken by the next query
@@ -49,23 +49,23 @@ func ready(_ c: HittestClient) -> Bool { eventually { if case .ready = c.status 
 }
 
 @Test func wrongSeqIsDropped() {
-    let f = Fake(), c = f.client("wrongseq"); c.start(); defer { c.stop() }
+    let f = Fake(), c = f.client("wrongseq"); c.start(); defer { c.shutdown() }
     #expect(ready(c)); #expect(c.query(WinePoint(x: 1, y: 1)) == nil)
 }
 
 @Test func overlongLineRestarts() {
-    let f = Fake(), c = f.client("long"); c.start(); defer { c.stop() }
+    let f = Fake(), c = f.client("long"); c.start(); defer { c.shutdown() }
     #expect(ready(c)); _ = c.query(WinePoint(x: 1, y: 1))
     #expect(eventually(5) { f.starts >= 2 })
 }
 
 @Test func busyRetriesWithoutFailing() {
-    let f = Fake(), c = f.client("busy"); c.start(); defer { c.stop() }
+    let f = Fake(), c = f.client("busy"); c.start(); defer { c.shutdown() }
     #expect(eventually(5) { f.starts >= 4 }); #expect(eventually { c.status == .retryLater })
 }
 
 @Test func threeCrashesFail() {
-    let f = Fake(), c = f.client("crash"); c.start(); defer { c.stop() }
+    let f = Fake(), c = f.client("crash"); c.start(); defer { c.shutdown() }
     #expect(eventually(5) { if case .failed = c.status { return true }; return false })
     let n = f.starts; usleep(600_000); #expect(f.starts == n); #expect(n == 3)
 }
@@ -73,7 +73,7 @@ func ready(_ c: HittestClient) -> Bool { eventually { if case .ready = c.status 
 @Test func stopEndsTheGroupAndStartsNothing() {
     let f = Fake(), c = f.client("normal"); c.start()
     #expect(ready(c)); #expect(alive("sleep 61."))
-    c.stop()
+    c.shutdown()
     #expect(c.status == .stopped)
     #expect(eventually(3) { !alive("sleep 61.") })
     let n = f.starts; usleep(600_000); #expect(f.starts == n)
@@ -84,10 +84,11 @@ func ready(_ c: HittestClient) -> Bool { eventually { if case .ready = c.status 
     #expect(ready(c))
     DispatchQueue.global().asyncAfter(deadline: .now() + 0.05) { c.stop() }
     let t = Date(); #expect(c.query(WinePoint(x: 1, y: 1)) == nil); #expect(Date().timeIntervalSince(t) < 0.2)
+    c.shutdown()
 }
 
 @Test func lateAnswerOfAnOldProcessIsNotTaken() {
-    let f = Fake(), c = f.client("slow"); c.start(); defer { c.stop() }
+    let f = Fake(), c = f.client("slow"); c.start(); defer { c.shutdown() }
     #expect(ready(c))
     #expect(c.query(WinePoint(x: 1, y: 1)) == nil)
     c.restart()                                        // a new process, a new generation

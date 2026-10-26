@@ -81,6 +81,22 @@ public final class HittestClient: HitQuerying, @unchecked Sendable {
         log.line("hittest \(bottle): stopped")
     }
 
+    /// stop(), then wait up to timing.termGrace for its processes to end; what is left gets TERM, and a moment more.
+    /// The helper calls it before it exits: nothing of ours may outlive it.
+    public func shutdown() {
+        stop()
+        let end = Date(timeIntervalSinceNow: timing.termGrace)
+        cond.lock()
+        while !live.isEmpty && Date() < end { _ = cond.wait(until: end) }
+        let left = live
+        cond.unlock()
+        for p in left { kill(-p, SIGTERM) }
+        cond.lock()
+        let more = Date(timeIntervalSinceNow: 1)
+        while !live.isEmpty && Date() < more { _ = cond.wait(until: more) }
+        cond.unlock()
+    }
+
     public func query(_ p: WinePoint) -> HitReply? {
         cond.lock()
         guard case .ready = state, input >= 0, outstanding == nil else { cond.unlock(); return nil }
@@ -140,6 +156,7 @@ public final class HittestClient: HitQuerying, @unchecked Sendable {
                 kill(-p, SIGTERM)                       // what it left behind in its group
                 cond.lock()
                 live.remove(p)
+                cond.broadcast()
                 if generation == gen { pid = 0; if input >= 0 { close(input); input = -1 } }
                 cond.unlock()
             }
