@@ -146,13 +146,17 @@ lock_owner_write() { # $1 = command text. Through a temporary file and mv: a rea
 lock_cancelled() { # ./revit noted a Ctrl-C (or TERM/HUP) while taking the lock: end as that signal, not as "busy"
   [ -n "${SIG_GOT:-}" ] && declare -F supervise >/dev/null && supervise true; return 0
 }
-lock_take() { # [--no-trap] $* = what this script does (shown to whoever finds the lock busy). --no-trap: ./revit
-  # supervising a child sets its own handlers
-  local traps=1; [ "${1:-}" = --no-trap ] && { traps=0; shift; }
+lock_take() { # [--no-trap] [--busy-exit <code>] $* = what this script does (shown to whoever finds the lock busy).
+  # --no-trap: ./revit supervising a child sets its own handlers. --busy-exit: a busy lock ends the script with <code>
+  # (the app's service commands: "try again later"), not 1
+  local traps=1 busy=""
+  while :; do case "${1:-}" in --no-trap) traps=0; shift ;; --busy-exit) busy="$2"; shift 2 ;; *) break ;; esac; done
   mkdir -p "$LOCK_DIR" || { lock_cancelled; die "Cannot write to $(tilde "$LOCK_DIR")."; }
   if ! { lock_fd_ours && lock_flock9; }; then   # not inherited: take it
     exec 9>>"$LOCK_FILE" || die "Cannot open $(tilde "$LOCK_FILE")."
-    lock_flock9 || { lock_cancelled; result_set result busy; die "Another task is running: $(lock_owner). Wait until it finishes, then try again."; }
+    lock_flock9 || { lock_cancelled; result_set result busy
+      [ -z "$busy" ] || { echo "Another task is running: $(lock_owner). Try again later." >&2; exit "$busy"; }
+      die "Another task is running: $(lock_owner). Wait until it finishes, then try again."; }
     lock_owner_write "$*"
   fi
   # TERM/HUP/INT (Ctrl-C): let the running Wine program finish (bash runs the trap after the foreground command), pass
@@ -234,6 +238,15 @@ revit_pids() { # $1 = bottle path, $2 = year: the Mac PIDs of the Revit.exe of t
   return 0
 }
 revit_running() { [ -n "$(revit_pids "$1" "$2")" ]; }   # $1 = bottle path, $2 = year: revit_pids finds one
+hittest_running() { # $1 = bottle path: the app's hittest.exe (scripts/hittest-launch.sh) with files open in that
+  # bottle; it ends with Revit, so this is Revit still closing. Output through variables, as above
+  local p rb out; rb="$(cd "$1" 2>/dev/null && pwd -P)" || return 1
+  for p in $(pgrep -f 'hittest\.exe' 2>/dev/null); do
+    out="$(lsof -p "$p" -Fn 2>/dev/null)"
+    grep -qF "n$rb/" <<<"$out" && return 0
+  done
+  return 1
+}
 mcp_running() { # $1 = bottle path: our MCP launcher (mcphost.exe, scripts/mcp-launch.sh) with files open in that
   # bottle; the CrossOver loader that has mcphost.exe in its arguments counts too. Output through variables, as above
   local p rb out; rb="$(cd "$1" 2>/dev/null && pwd -P)" || return 1
@@ -261,6 +274,8 @@ bottle_guard() { # $1 = must_exist | running_ok (like must_exist, Revit may run:
     || die "Revit $year is running in $name. Save your work and quit Revit, then try again. If it hangs: ./revit stop $year$sfx"
   [ "$mode" = running_ok ] || ! mcp_running "$b" \
     || die "An AI assistant is using Revit $year in $name through MCP. Close it, or run ./revit stop $year$sfx, then try again."
+  [ "$mode" = running_ok ] || ! hittest_running "$b" \
+    || die "Revit $year in $name is still closing. Try again in a few seconds."
 }
 
 # ---- the temporary copies of ./revit test (scripts/smoke.sh) and what runs in a bottle ----

@@ -65,6 +65,7 @@ Usage: ./revit <command> <year> [bottle]
   logs      list the newest logs
   debug     start Revit and record a log
   mcp       connect an AI assistant to a running Revit (--server pyrevit; docs/mcp.md)
+  hittest   for the app: the Windows window under a point (stdin/stdout)
   rebuild   delete the bottle and install Revit again
   remove    delete Revit, its bottle and its apps
   status    list the Revit bottles on this Mac (no year)
@@ -84,7 +85,7 @@ cx_launchers() { # apps CrossOver makes for the bottle's Start Menu entries; del
 size() { du -sh "$1" 2>/dev/null | cut -f1; }
 bytes_of() { local k; k="$(du -sk "$1" 2>/dev/null | cut -f1)"; [[ "$k" =~ ^[0-9]+$ ]] && echo $((k * 1024)) || echo null; }
 
-POS=()
+ARGC=$#; POS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --yes) YES=1 ;;
@@ -124,6 +125,10 @@ if [ "$CMD" = mcp ]; then   # stdout belongs to the MCP client: no events, no mo
     *) FLAG_ERR="Unknown MCP server: $SERVER. Known: autodesk, pyrevit" ;;
   esac
 fi
+if [ "$CMD" = hittest ]; then   # the app's: stdout is the protocol; a year and a bottle, no options
+  [ "$ARGC" = "${#POS[@]}" ] && [ ${#POS[@]} -le 3 ] && [[ "${POS[1]:-}" =~ ^[0-9]{4}$ ]] \
+    || usage_die "Usage: ./revit hittest <year> [bottle] (for the app)"
+fi
 SUPERVISED=0; case "$CMD" in install|check|addins|rebuild|test) SUPERVISED=1 ;; esac
 sup_traps() { # signals noted, not ignored (an ignored signal would be inherited by the child), from here to the child
   trap 'SIG_GOT=INT' INT; trap 'SIG_GOT=TERM' TERM; trap 'SIG_GOT=HUP' HUP
@@ -149,7 +154,7 @@ if [ -n "$EVENTS_DIR" ]; then
 fi
 [ -z "$FLAG_ERR" ] || die "$FLAG_ERR"
 case "$CMD" in
-  install|check|doctor|report|addins|import|cache|stop|logs|debug|rebuild|remove|status|find-installer|link-installer|test|mcp) ;;
+  install|check|doctor|report|addins|import|cache|stop|logs|debug|rebuild|remove|status|find-installer|link-installer|test|mcp|hittest) ;;
   ""|help|-h|--help) usage; exit 0 ;;
   *) echo "Unknown command: $CMD" >&2; echo >&2; usage >&2; exit 1 ;;
 esac
@@ -473,6 +478,7 @@ case "$CMD" in
     echo "Open the folder: open \"$DATA/logs/$NAME\""
     echo "To report a problem, see \"Report a problem\" in docs/troubleshooting.md." ;;
   mcp) need_crossover; exec "$ROOT/scripts/mcp-launch.sh" "$YEAR" "$NAME" "$WRITE" "$SERVER" ;;
+  hittest) need_crossover; exec "$ROOT/scripts/hittest-launch.sh" "$YEAR" "$NAME" ;;
   debug)
     need_crossover; bottle_guard must_exist "$YEAR" "$NAME"; not_busy
     "$ROOT/scripts/launch.sh" "$YEAR" "$NAME" || exit 1
