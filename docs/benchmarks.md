@@ -11,7 +11,8 @@ model, switch views, export and render, and log the time of every step.
 - **Anti-aliasing off** for 2023 and newer. `./revit install` sets this default for 2024 and newer: Revit runs
   better under Wine without it. The benchmark's own `Revit.ini` template turns it on; we turn it off. Revit 2020 is
   measured with anti-aliasing on, as in the benchmark template: it works well there.
-- **Same bottle as a normal install.** No extra tuning for the benchmark.
+- **Same bottle as a normal install.** No extra tuning for the benchmark, except one: 2027 is measured with Retina
+  off (96 DPI), because the benchmark's modeling journal replays mouse clicks in 96-DPI pixels.
 
 Lower is better. Each Revit year has its own benchmark set, so rows for different years are not comparable with each
 other. These are our numbers on one machine, not a promise for yours.
@@ -51,4 +52,7 @@ Windows laptop, done over remote desktop, which lowers its graphics score.
 - **2027:** measured on 2027.3 (build 27.3.0.28), 4 runs on the normal bottle and a copy of it. Runs were steady:
   modeling 87.2 / 86.8 / 87.5 / 87.8 s, graphics 28.7 / 29.4 / 28.7 / 28.9 s. Earlier it was 99.0 s: since shims
   0.4.0, `tools/shims/tlbpin` caches the cursor position. Windows reference: Revit 2027.0 on a laptop with an Intel Core
-  Ultra 9 275HX and 128 GB. The Mac takes about 1.3× as long for modeling.
+  Ultra 9 275HX and 128 GB. The Mac takes about 1.3× as long for modeling. With Retina on (192 DPI), which
+  `./revit install` sets by default, the graphics set Init+Graphics_simplified took 36.4 s against 29.2 s at 96 DPI
+  (+24%), and 34.9 s with `retina=compact` (+19%): 2 runs each, up to 11% apart. Modeling and large models were not
+  measured with Retina.
