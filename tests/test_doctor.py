@@ -460,6 +460,16 @@ class Bottle(Sandbox):
         self.assertEqual((c.status, c.doc), ("warn", dr.DOC["signin"]))
         self.assertNotIn("bottle.app.signin", self.by_id(self.checks(profile=dict(PROFILE, SIGNIN="adsso"))))
 
+    def test_an_app_that_starts_crossover_from_a_path_with_a_quote(self):
+        wine = os.path.join(self.d, "Cross 'Over", "bin", "wine")   # osadecompile shows 'Cross '\\''Over/bin/wine'
+        os.makedirs(os.path.dirname(wine))
+        open(wine, "w").close()
+        script = os.path.join(self.app("Revit %d" % self.year), "Contents", "Resources", "Scripts", "main.scpt")
+        quoted = "'" + wine.replace("'", "'\\\\''") + "'"
+        self.scripts[script] = (0, "do shell script \"(cd ~ && %s --bottle '%s' 'C:\\\\x.exe') >/dev/null 2>&1 &\"\n"
+                                % (quoted, self.name))
+        self.assertEqual(self.by_id(self.checks())["bottle.app.revit"].status, "ok")
+
     def test_other_bottles_that_take_the_sign_in_link(self):
         self.assertNotIn("bottle.app.signin-others", self.by_id(self.checks()))
         os.makedirs(os.path.join(self.home, "Applications", "Autodesk Sign-In (rvt2027-a).app"))

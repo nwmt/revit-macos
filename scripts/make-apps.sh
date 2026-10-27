@@ -62,8 +62,9 @@ make_app_in() { # $1 = bundle to build, $2 = app title, $3 = the shell line it r
   id="local.revit-macos.$(printf '%s-%s' "$2" "$NAME" | tr -cs 'A-Za-z0-9' '-' | tr '[:upper:]' '[:lower:]' | sed 's/-$//')"
   /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string $id" -c "Add :CFBundleDisplayName string $2 ($NAME)" \
     -c "Add :LSApplicationCategoryType string public.app-category.graphics-design" "$1/Contents/Info.plist" || return 1
-  # changing the bundle invalidates the osacompile signature; re-sign ad hoc so Gatekeeper lets it start
-  codesign --force --sign - "$1" >/dev/null 2>&1 || true
+  # changing the bundle invalidates the osacompile signature; re-sign ad hoc so Gatekeeper lets it start (an app left
+  # unsigned would not: the old one stays then)
+  codesign --force --sign - "$1" >/dev/null 2>&1
 }
 
 make_signin() { # Autodesk Sign-In (<bottle>).app: receives the link and passes it to AdskIdentityManager.exe

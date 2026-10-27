@@ -1265,6 +1265,10 @@ check "make-apps 2027: the theme part, then Revit" grep -q "revit-macos/theme.*t
 mkdir -p "$H/Applications/Revit Viewer 2027 (rvt2027-t).app"; echo old > "$APP27/old"; : > "$T/osa-fail"
 run_make_apps 2027 rvt2027-t; expect "make-apps: osacompile fails → 1" 1 ""
 check "make-apps: a failed build keeps the old app, no .new.app left" eval '[ -f "$APP27/old" ] && [ ! -e "$H/Applications/.Revit 2027 (rvt2027-t).new.app" ]'
+rm -f "$T/osa-fail"; printf '#!/bin/bash\nexit 1\n' > "$T/stubs/codesign"; run_make_apps 2027 rvt2027-t
+expect "make-apps: codesign fails → 1" 1 ""
+check "make-apps: an app that could not be signed does not replace the old one" eval '[ -f "$APP27/old" ] && [ ! -e "$H/Applications/.Revit 2027 (rvt2027-t).new.app" ]'
+printf '#!/bin/bash\nexit 0\n' > "$T/stubs/codesign"
 rm -f "$T/osa-fail"; rm -rf "$H/Applications/Autodesk Sign-In (rvt2027-t).app"; : > "$CALLS"; run_make_apps 2027 rvt2027-t --revit-only
 expect "make-apps --revit-only" 0 "done: ~/Applications/Revit 2027 (rvt2027-t).app"
 check "make-apps --revit-only: the new Revit app, the Viewer app kept, no Sign-In app" eval '[ ! -f "$APP27/old" ] &&

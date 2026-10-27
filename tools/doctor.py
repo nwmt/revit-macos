@@ -75,7 +75,9 @@ WEBVIEW2_MIN = 124        # Revit's WebView2 SDK needs a runtime about this new;
 FREE_MIN_GB = 10
 MACOS_TESTED = 26
 VERIFIED_BUILD_YEARS = (2025, 2027)   # 2026-10-17: 2025.5 and 2027.3 matched; years whose real Revit.exe matched the installer's build: then a mismatch is a ✗
-APP_SCRIPT = re.compile(r"'([^']*/bin/wine)' --bottle '([^']*)'")   # what scripts/make-apps.sh writes
+# what scripts/make-apps.sh writes: single-quoted shell words, a quote inside one as '\'' (its backslash doubled in the
+# AppleScript string osadecompile shows)
+APP_SCRIPT = re.compile(r"'((?:[^']|'\\\\'')*/bin/wine)' --bottle '([^']*)'")
 APP_THEME = "revit-macos/theme"   # in the Revit app's script when it sets the theme before Revit starts (make-apps.sh)
 THEME_DIR = "drive_c/Program Files/revit-macos"   # the step theme: themeset.exe and the mode file "theme"
 WINEISH = re.compile(r"wine|crossover|\.exe\b", re.I)   # processes that may hold a bottle's files
@@ -598,7 +600,8 @@ def apps(ctx):
             a["script"] = rc == 0 and bool(src.strip())
             m = APP_SCRIPT.search(src) if a["script"] else None
             if m:
-                a["wine"], a["bottle"], a["wine_exists"] = m.group(1), m.group(2), os.path.isfile(m.group(1))
+                wine = m.group(1).replace("'\\\\''", "'")
+                a["wine"], a["bottle"], a["wine_exists"] = wine, m.group(2), os.path.isfile(wine)
             a["theme"] = bool(a["script"]) and APP_THEME in src
         out[key] = a
     others = []   # the Sign-In apps of other bottles: every one of them takes the same adskidmgr:// link
