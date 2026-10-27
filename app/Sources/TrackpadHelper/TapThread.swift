@@ -169,7 +169,8 @@ final class TapThread: @unchecked Sendable {
         return list.compactMap { w in
             guard let pid = w[kCGWindowOwnerPID as String] as? Int32, let b = w[kCGWindowBounds as String] as? NSDictionary,
                   let r = CGRect(dictionaryRepresentation: b as CFDictionary) else { return nil }
-            return WinInfo(pid: pid, bounds: r, alpha: w[kCGWindowAlpha as String] as? Double ?? 1)
+            return WinInfo(pid: pid, bounds: r, alpha: w[kCGWindowAlpha as String] as? Double ?? 1,
+                           layer: w[kCGWindowLayer as String] as? Int ?? 0)
         }
     }
 

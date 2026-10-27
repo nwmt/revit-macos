@@ -20,5 +20,9 @@ let p = CGPoint(x: 100, y: 100)
     let far = WinInfo(pid: 77, bounds: CGRect(x: 2000, y: 0, width: 100, height: 100), alpha: 1)
     #expect(WindowPick.target(at: p, frontToBack: [far, revit], revitPids: [500]) == 500)
 }
+@Test func theCursorDoesNotCount() {   // a custom cursor (Revit's orbit cursor) is a window of its own at the point
+    let cursor = WinInfo(pid: 608, bounds: CGRect(x: 95, y: 95, width: 32, height: 32), alpha: 1, layer: WindowPick.cursorLayer)
+    #expect(WindowPick.target(at: p, frontToBack: [cursor, revit], revitPids: [500]) == 500)
+}
 @Test func anUnknownRevit() { #expect(WindowPick.target(at: p, frontToBack: [revit], revitPids: [501]) == nil) }
 @Test func nothingThere() { #expect(WindowPick.target(at: CGPoint(x: 5000, y: 5000), frontToBack: [revit], revitPids: [500]) == nil) }
