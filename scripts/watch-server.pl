@@ -117,29 +117,35 @@ close $err_w;
 $SIG{PIPE} = 'IGNORE';   # the caller may be gone when the word comes late
 print $log stamp(), " start $run server $srv\n";
 
-sub probe { # $1 = seconds, rest = a command: its output; undef when it fails to start or takes longer (then it is
-  # killed), so a stuck lsof never keeps the supervisor from reading the server's messages and writing its end
-  my $secs = shift;
+sub probe { # $1 = seconds, $2 = exit codes that mean it worked ([0] or [0, 1]), rest = a command: its output; undef
+  # when it fails, cannot start or takes longer (then it is killed), so a stuck lsof never keeps the supervisor from
+  # reading the server's messages and writing its end
+  my ($secs, $codes) = (shift, shift);
   my $pid = open(my $h, '-|');
   return undef unless defined $pid;
   if (!$pid) { $SIG{PIPE} = 'DEFAULT'; open STDERR, '>', '/dev/null'; { exec @_ } POSIX::_exit(127) }
-  my ($out, $done, $until) = ('', 0, time + $secs);
+  my ($out, $eof, $st, $until) = ('', 0, undef, time + $secs);
   while ((my $left = $until - time) > 0) {
+    if ($eof) {   # its output is complete: wait for it to exit
+      if (waitpid($pid, WNOHANG) == $pid) { $st = $?; last }
+      nap($left < 0.02 ? $left : 0.02);
+      next;
+    }
     my $rin = '';
     vec($rin, fileno($h), 1) = 1;
-    last unless select(my $rout = $rin, undef, undef, $left) > 0;
-    my $n = sysread($h, $out, 65536, length $out);
-    if (!$n) { $done = 1; last }
+    next unless select(my $rout = $rin, undef, undef, $left) > 0;
+    $eof = 1 unless sysread($h, $out, 65536, length $out);
   }
-  kill 'KILL', $pid unless $done;
-  close $h;   # reaps it
-  return $done ? $out : undef;
+  unless (defined $st) { kill 'KILL', $pid; waitpid($pid, 0) }
+  close $h;   # reaped already: closes only
+  return undef unless defined $st && !($st & 127) && grep { $_ == $st >> 8 } @$codes;
+  return $out;
 }
 
 # 4. Ready: the server accepts a connection on its socket, in the folder lsof shows its lock file in. A socket file
 # alone says nothing: a killed server leaves its own, and a new one has it before it listens
 sub server_dir { # $1 = pid, $2 = seconds at most
-  my $out = probe($_[1], $lsof, '-w', '-n', '-P', '-Fn', '-p', $_[0]) // return undef;
+  my $out = probe($_[1], [0], $lsof, '-w', '-n', '-P', '-Fn', '-p', $_[0]) // return undef;
   return $out =~ m{^n(.*/server-[^/\n]+)/lock$}m ? $1 : undef;
 }
 my ($status, $sdir, $ok);
@@ -156,10 +162,10 @@ print $log stamp(), " $run ", $ok ? "ready" : "not ready", "\n";
 
 # 5. The server's messages, until it ends; once, after REVIT_WATCH_IDLE seconds, whether any Windows program came
 sub others { # whether a Wine process besides the server has the bottle or a file in it open; yes when unsure
-  my $ps = probe(2, '/usr/bin/pgrep', '-U', $<, '-i', '-f', 'wine|\.exe') // return 1;
+  my $ps = probe(2, [0, 1], '/usr/bin/pgrep', '-U', $<, '-i', '-f', 'wine|\.exe') // return 1;
   my @pids = grep { $_ != $srv && $_ != $$ } $ps =~ /^(\d+)/mg;
   return 0 unless @pids;
-  my $out = probe(2, $lsof, '-w', '-n', '-P', '-Fn', '-p', join(',', @pids)) // return 1;
+  my $out = probe(2, [0, 1], $lsof, '-w', '-n', '-P', '-Fn', '-p', join(',', @pids)) // return 1;
   for (split /\n/, $out) { return 1 if $_ eq "n$real" || index($_, "n$real/") == 0 }
   return 0;
 }

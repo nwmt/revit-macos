@@ -1049,6 +1049,12 @@ check "watch-server: a hung lsof: not ready within 6 s, exit 0" eval '[ "$RC" = 
 ws_stop 0
 check "watch-server: a hung lsof never keeps the supervisor from writing the end" eval 'grep -q "class normal exit 0$" "$WL" &&
   ! grep -q "no Windows program" "$WL" && ! pgrep -f "$W/lsof" >/dev/null'
+ws_setup; printf '#!/bin/bash\nexec >&-\nsleep 30\n' > "$W/lsof"; chmod +x "$W/lsof"; WS_LSOF="$W/lsof" ws_run
+check "watch-server: an lsof that closes its output and keeps running is not waited for" eval '[ "$RC" = 0 ] && secs_ge 7 "$SECS" &&
+  wait_for 2 grep -q " not ready$" "$WL"'
+ws_stop 0; check "watch-server: ... and the end is written" grep -q "class normal exit 0$" "$WL"
+ws_setup; printf '#!/bin/bash\nexit 3\n' > "$W/lsof"; chmod +x "$W/lsof"; WS_LSOF="$W/lsof" WS_IDLE=1 ws_run; sleep 2
+check "watch-server: an lsof that fails is not an answer: no note" eval 'grep -q " not ready$" "$WL" && ! grep -q "no Windows program" "$WL"'
 ws_setup; WS_IDLE=1 ws_run
 check "watch-server: no Windows program within the time → a note, the server stays" eval 'wait_for 4 grep -q " no Windows program yet$" "$WL" && srv_alive'
 ws_setup; mkdir -p "$WB/drive_c"; touch "$WB/drive_c/held"
