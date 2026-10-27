@@ -82,7 +82,7 @@ Run them in Terminal, in the project folder. In a new Terminal window, first typ
 | `./revit addins 2025` | Add RevitLookup and pyRevit, with the fixes add-ins need (2020, 2023–2027) |
 | `./revit addins 2025 --only pdfprinter` | Add only the add-ins named (comma-separated), here the **Revit PDF** printer. It needs Ghostscript: `brew install ghostscript` |
 | `./revit addins list 2025` | List the add-ins for Revit 2025 |
-| `./revit set 2027 retina=off` | Turn Retina off for faster views (`retina=compact`: smaller text, more room; `retina=on`), or `keys=windows`: Cmd works as Alt again (2027) |
+| `./revit set 2027 retina=off` | Turn Retina off for faster views (`retina=compact`: smaller text, more room; `retina=on`), `keys=windows`: Cmd works as Alt again, or `theme=dark`/`light`: one theme instead of the Mac's (`theme=mac`) (2027) |
 | `./revit mcp 2027` | Connect an AI assistant to a running Revit, through Autodesk's Revit MCP Server or, with `--server pyrevit`, pyRevit's agent ([how](docs/mcp.md)) |
 | `./revit stop 2025` | Quit a Revit that hangs |
 | `./revit logs 2025` | List the newest logs |
@@ -111,9 +111,10 @@ Run them in Terminal, in the project folder. In a new Terminal window, first typ
 
 - **Your files:** the Documents folder in Revit is your Mac's Documents folder. Files saved anywhere else on the
   bottle's C: drive are deleted by `rebuild` and `remove`.
-- **Look:** Revit 2024 and newer start with anti-aliasing off (Revit runs better without it) and a dark or light
-  theme to match your Mac at install time. Change both in Revit's Options, or pick the theme at install:
-  `REVIT_THEME=dark ./revit install 2025` (or `light`).
+- **Look:** Revit 2024 and newer start with anti-aliasing off (Revit runs better without it). Revit 2027 follows your
+  Mac's light or dark look when it starts, and while it runs if the menu bar app is open; `./revit set 2027
+  theme=dark` (or `light`) keeps one theme, `theme=mac` follows the Mac again. Revit 2024–2026 get the Mac's look once,
+  at install: change it in Revit's Options, or pick it at install: `REVIT_THEME=dark ./revit install 2025` (or `light`).
 - **Something broke?** See [Troubleshooting](docs/troubleshooting.md). Curious what the fixes do?
   See [How it works](docs/how-it-works.md).
 - **Tried it on your Mac?** Please [open a test report](../../issues/new?template=test-report.yml), whether it
