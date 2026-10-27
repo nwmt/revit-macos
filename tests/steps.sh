@@ -992,6 +992,10 @@ srv_alive() { [ -f "$W/pid" ] && kill -0 "$(cat "$W/pid")" 2>/dev/null; }
 secs_ge() { /usr/bin/perl -e 'exit !($ARGV[0] >= $ARGV[1])' "$1" "$2"; }   # $1 >= $2, fractions too
 cxlock_free() { /usr/bin/perl -MFcntl=:flock -e 'for (@ARGV) { open(my $f, ">>", $_) or exit 1; flock($f, LOCK_EX | LOCK_NB) or exit 1 }' \
   "$T"/cxtmp/.wine-*/bottle-*.lock; }
+elsewhere() { # a Windows program outside the bottle: watch-server's pgrep finds one, so it asks lsof (on a Mac
+  # where nothing else runs, it would not)
+  /usr/bin/perl -e 'sleep 30' 'C:\windows\elsewhere.exe' & PIDS="$PIDS $!"
+}
 hold_cxlock() { # $1 = seconds: CrossOver's lock of the bottle held that long, as cx_bottle_lock holds it
   ( cd / && "${SANDBOX_ENV[@]}" REVIT_CX_TMP="$T/cxtmp" ROOT="$R" /bin/bash -c '. "$ROOT/scripts/lib/common.sh"
     cx_bottle_lock "$1" && sleep "$2"' _ "$WB" "$1" ) & PIDS="$PIDS $!"; sleep 0.5
@@ -1044,7 +1048,7 @@ check "watch-server: a deleted bottle: no folder made again" eval 'wait_for 5 ev
 ws_setup; head -c 300000 /dev/zero | tr '\0' x > "$WL"; echo '{"gen":7}' > "$WJ"; ws_run
 check "watch-server: a log over 256 KB moves to .log.1; .last stays" eval '[ "$(wc -c < "$WL.1" | tr -d " ")" = 300000 ] &&
   grep -q " start " "$WL" && [ "$(wc -c < "$WL" | tr -d " ")" -lt 1000 ] && [ "$(cat "$WJ")" = "{\"gen\":7}" ]'
-ws_setup; printf '#!/bin/bash\nsleep 30\n' > "$W/lsof"; chmod +x "$W/lsof"; WS_LSOF="$W/lsof" WS_IDLE=1 ws_run
+ws_setup; elsewhere; printf '#!/bin/bash\nsleep 30\n' > "$W/lsof"; chmod +x "$W/lsof"; WS_LSOF="$W/lsof" WS_IDLE=1 ws_run
 check "watch-server: a hung lsof: not ready within 6 s, exit 0" eval '[ "$RC" = 0 ] && secs_ge 7 "$SECS" && grep -q " not ready$" "$WL"'
 ws_stop 0
 check "watch-server: a hung lsof never keeps the supervisor from writing the end" eval 'grep -q "class normal exit 0$" "$WL" &&
@@ -1053,9 +1057,9 @@ ws_setup; printf '#!/bin/bash\nexec >&-\nsleep 30\n' > "$W/lsof"; chmod +x "$W/l
 check "watch-server: an lsof that closes its output and keeps running is not waited for" eval '[ "$RC" = 0 ] && secs_ge 7 "$SECS" &&
   wait_for 2 grep -q " not ready$" "$WL"'
 ws_stop 0; check "watch-server: ... and the end is written" grep -q "class normal exit 0$" "$WL"
-ws_setup; printf '#!/bin/bash\nexit 3\n' > "$W/lsof"; chmod +x "$W/lsof"; WS_LSOF="$W/lsof" WS_IDLE=1 ws_run; sleep 2
+ws_setup; elsewhere; printf '#!/bin/bash\nexit 3\n' > "$W/lsof"; chmod +x "$W/lsof"; WS_LSOF="$W/lsof" WS_IDLE=1 ws_run; sleep 2
 check "watch-server: an lsof that fails is not an answer: no note" eval 'grep -q " not ready$" "$WL" && ! grep -q "no Windows program" "$WL"'
-ws_setup; WS_IDLE=1 ws_run
+ws_setup; elsewhere; WS_IDLE=1 ws_run
 check "watch-server: no Windows program within the time → a note, the server stays" eval 'wait_for 4 grep -q " no Windows program yet$" "$WL" && srv_alive'
 ws_setup; mkdir -p "$WB/drive_c"; touch "$WB/drive_c/held"
 /usr/bin/perl -e 'open(my $f, "<", $ARGV[0]) or die; sleep 30' "$WB/drive_c/held" 'C:\windows\notepad.exe' & PIDS="$PIDS $!"
