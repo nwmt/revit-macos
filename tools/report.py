@@ -1877,6 +1877,15 @@ def _collect(root, data, bdir, year, bottle, run, doctor_json, now):
                 if isinstance(r, dict) and r.get("kind") == "install":
                     c.facts["last"] = r
                     break
+        wl = os.path.join(bdir, "revit-macos", "wineserver.log")   # scripts/watch-server.pl
+        if _regular(wl):
+            lines, cut = _tail(wl, 300)
+            c.add("bottle/wineserver.log", "the bottle's wineserver: its messages, starts and ends",
+                  "\n".join(_whole(lines)), src="bottle: wineserver.log", cut="to its last 300 lines" if cut else None)
+        wj = os.path.join(bdir, "revit-macos", "wineserver.last")
+        if _regular(wj):
+            c.add("bottle/wineserver-last.json", "how the bottle's last wineserver ended", _text(wj),
+                  src="bottle: wineserver.last", keep="head")
         if year:
             p = revit_ini_paths(bdir, year)[0]
             if _regular(p):

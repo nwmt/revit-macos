@@ -890,6 +890,37 @@ class Build(Tmp):
                       "      fix: softwareupdate --install-rosetta", rt)
         self.assertIn("doctor.json", self.zip_members(r["report_zip"]))
 
+    def wineserver_files(self):
+        lines = ["2026-10-27T10:00:%02d+0100 1-2 line %d" % (i % 60, i) for i in range(400)]
+        lines[-2] = "2026-10-27T10:00:00+0100 1-2 err: %s/Library/x.dll for design on Anas-Studio" % self.home
+        lines[-3] = "2026-10-27T10:00:00+0100 1-2 " + "x" * (rp.LINE_MAX + 100)
+        self.write("Bottles/client-x/revit-macos/wineserver.log", "\n".join(lines) + "\n")
+        self.write("Bottles/client-x/revit-macos/wineserver.last",
+                   '{"gen":3,"id":"1-2","start":1,"end":2,"class":"signal","exit":null,"signal":9}\n')
+
+    def test_the_wineserver_log(self):
+        self.wineserver_files()
+        r = self.build()
+        members = self.zip_members(r["report_zip"])
+        log = members["bottle/wineserver.log"].decode().split("\n")
+        self.assertEqual(len(log), 300)   # its last 300 lines
+        self.assertEqual(log[0], "2026-10-27T10:00:40+0100 1-2 line 100")
+        self.assertEqual(log[-1], "2026-10-27T10:00:39+0100 1-2 line 399")
+        self.assertLessEqual(max(len(x) for x in log), rp.LINE_MAX)   # a long line is cut, as in every member
+        self.assertIn("err: ~/Library/x.dll for <USER> on <HOST>", log[-2])
+        self.assertEqual(members["bottle/wineserver-last.json"].decode(),
+                         '{"gen":3,"id":"1-2","start":1,"end":2,"class":"signal","exit":null,"signal":9}')
+        self.assertIn("to its last 300 lines", members["manifest.txt"].decode())
+        for n, b in members.items():
+            self.assertEqual(rp.gate(b, self.ident, n), [], n)
+
+    def test_the_wineserver_log_left_out(self):
+        self.wineserver_files()
+        r = self.build(exclude=["wineserver.log", "wineserver-last.json"])
+        members = self.zip_members(r["report_zip"])
+        self.assertNotIn("bottle/wineserver.log", members)
+        self.assertNotIn("bottle/wineserver-last.json", members)
+
     def test_exclude(self):
         r = self.build(exclude=["licensing.log"])
         self.assertNotIn("install/licensing-errors.txt", self.zip_members(r["report_zip"]))
