@@ -7,7 +7,7 @@ set -uo pipefail
 CLEAN_ENV=(-u REVIT_DATA -u REVIT_LOCK_DIR -u SHIMS_DIR -u REVIT_BUNDLED -u REVIT_EVENTS_FD -u REVIT_RUN_ID -u REVIT_RUN_CTX
   -u REVIT_ACCEPT_EULA -u REVIT_SOURCE_LIST -u REVIT_REUSE_EXTRACTED -u REVIT_REEXTRACT -u REVIT_UNPACK_AGAIN
   -u REVIT_FOR_BOTTLE -u INSTALL_PARENT -u W_CACHE -u SHIMS_FROM_SOURCE -u RUN_DIR -u RUN_KIND -u CX_RECREATE
-  -u INSTALL_DRYRUN -u REVIT_LANG -u ODIS_PKGS -u REVIT_THEME -u REVIT_YEAR -u APP_NAME -u APP_RES
+  -u INSTALL_DRYRUN -u REVIT_LANG -u ODIS_PKGS -u REVIT_THEME -u REVIT_DEFAULTS -u REVIT_YEAR -u APP_NAME -u APP_RES
   -u REVIT_RETINA -u REVIT_KEYS -u SETTINGS_SAVE_WAIT)
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)" && [ -d "$TMP" ] || { echo "mktemp failed" >&2; exit 1; }
@@ -65,6 +65,7 @@ fake_bundle() { # $1 = app path: the engine of $R, fake shims, fixture tools, th
   chmod -R u+w "$app" 2>/dev/null; rm -rf "$app"; mkdir -p "$e" || exit 1
   (cd "$R" && engine_files | cpio -p0dm --quiet "$e")
   for s in "${SHIMS[@]}"; do mkdir -p "$e/build/$s"; echo "fake $s" > "$e/build/$s/$s.dll"; done
+  rm "$e/build/themeset/themeset.dll"; echo "fake themeset" > "$e/build/themeset/themeset.exe"   # the step copies it by name
   echo "$SHIMS_VERSION" > "$e/build/.prebuilt"
   wrap_tool "$res/bin/7zz" "$HOST_7ZZ"; wrap_tool "$res/python/bin/python3" "$HOST_PY"
   fake_tool "$res/bin" cabextract "cabextract version 1.11"; fake_tool "$res/bin" winetricks "20260125 - sha256sum: 0"
@@ -239,6 +240,17 @@ check "read-only bundle: revit check equals the clone" eval '[ "$r1" = "$r2" ] &
 [ "$o1" = "$o2" ] || diff <(echo "$o1") <(echo "$o2") | head -10 | sed 's/^/     /'
 in_sandbox "$AE/revit" check 2025
 check "read-only bundle: data goes to Application Support" [ -n "$(find "$H/Library/Application Support/Test App/logs/runs" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)" ]
+# ./revit theme from the read-only bundle: the bottle's themeset.exe through the fake CrossOver's wine
+TB="$H/Library/Application Support/CrossOver/Bottles/rvt2027-a"
+mkdir -p "$TB/drive_c/Program Files/Autodesk/Revit 2027" "$TB/drive_c/Program Files/revit-macos"
+printf '[Bottle]\n"Description" = "Revit 2027"\n' > "$TB/cxbottle.conf"
+: > "$TB/drive_c/Program Files/revit-macos/themeset.exe"; echo mac > "$TB/drive_c/Program Files/revit-macos/theme"
+printf '#!/bin/bash\nprintf "%%s\\n" "$@" > "%s"\n' "$T/theme-argv" > "$T/cx/bin/wine"; chmod +x "$T/cx/bin/wine"
+printf '#!/bin/bash\necho Dark\n' > "$T/dark-defaults"; chmod +x "$T/dark-defaults"
+in_sandbox REVIT_DEFAULTS="$T/dark-defaults" "$AE/revit" theme 2027
+check "read-only bundle: ./revit theme runs the bottle's themeset.exe" eval '[ "$RC" = 0 ] && [ "$OUT" = "Revit 2027 (rvt2027-a): dark." ] &&
+  grep -qx "C:.Program Files.revit-macos.themeset.exe" "$T/theme-argv" && grep -qx dark "$T/theme-argv"'
+rm -rf "$TB" "$T/cx/bin/wine"
 mkdir -p "$T/rec"; for x in git curl clang; do fake_tool "$T/rec" "$x" "" 1; done
 : > "$CALLS"; SB_PATH="$T/rec:$BASEPATH" in_sandbox "$AE/scripts/get-shims.sh"
 expect "read-only bundle: get-shims takes the bundled shims" 0 "prebuilt shims v$SHIMS_VERSION"

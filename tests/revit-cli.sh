@@ -8,7 +8,7 @@ set -uo pipefail
 CLEAN_ENV=(-u REVIT_DATA -u REVIT_LOCK_DIR -u SHIMS_DIR -u REVIT_BUNDLED -u REVIT_EVENTS_FD -u REVIT_RUN_ID -u REVIT_RUN_CTX
   -u REVIT_ACCEPT_EULA -u REVIT_SOURCE_LIST -u REVIT_REUSE_EXTRACTED -u REVIT_REEXTRACT -u REVIT_UNPACK_AGAIN
   -u REVIT_FOR_BOTTLE -u INSTALL_PARENT -u W_CACHE -u SHIMS_FROM_SOURCE -u RUN_DIR -u RUN_KIND -u CX_RECREATE
-  -u INSTALL_DRYRUN -u REVIT_LANG -u ODIS_PKGS -u REVIT_THEME -u REVIT_YEAR -u SMOKE_TIMEOUT -u SMOKE_START_WAIT
+  -u INSTALL_DRYRUN -u REVIT_LANG -u ODIS_PKGS -u REVIT_THEME -u REVIT_DEFAULTS -u REVIT_YEAR -u SMOKE_TIMEOUT -u SMOKE_START_WAIT
   -u SMOKE_STALL -u SMOKE_WORKER_WAIT -u SMOKE_POLL -u SMOKE_PREP_TIMEOUT -u REVIT_CX_TMP -u MCP_TEST_HOLD -u MCP_HANDOFF_S
   -u REVIT_RETINA -u REVIT_KEYS -u SETTINGS_SAVE_WAIT)
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -30,7 +30,7 @@ stub() { # a script that only records how it was called
   mkdir -p "$(dirname "$1")"
   cat > "$1" <<EOF
 #!/bin/bash
-echo "\$(basename "\$0") \$* | REVIT_YEAR=\${REVIT_YEAR:-} INSTALL_DRYRUN=\${INSTALL_DRYRUN:-} CX_RECREATE=\${CX_RECREATE:-} WINEPREFIX=\${WINEPREFIX:-} RUN_KIND=\${RUN_KIND:-} EULA=\${REVIT_ACCEPT_EULA:-} REUSE=\${REVIT_REUSE_EXTRACTED:-} REEXTRACT=\${REVIT_REEXTRACT:-} RETINA=\${REVIT_RETINA:-} KEYS=\${REVIT_KEYS:-}" >> "$CALLS"
+echo "\$(basename "\$0") \$* | REVIT_YEAR=\${REVIT_YEAR:-} INSTALL_DRYRUN=\${INSTALL_DRYRUN:-} CX_RECREATE=\${CX_RECREATE:-} WINEPREFIX=\${WINEPREFIX:-} RUN_KIND=\${RUN_KIND:-} EULA=\${REVIT_ACCEPT_EULA:-} REUSE=\${REVIT_REUSE_EXTRACTED:-} REEXTRACT=\${REVIT_REEXTRACT:-} RETINA=\${REVIT_RETINA:-} KEYS=\${REVIT_KEYS:-} THEME=\${REVIT_THEME:-}" >> "$CALLS"
 EOF
   chmod +x "$1"
 }
@@ -64,7 +64,7 @@ reset() { # a fresh sandbox for each test
   cp "$REPO/revit" "$R/"; cp -R "$REPO/tools" "$R/"; cp "$REPO/scripts/lib/common.sh" "$REPO/scripts/lib/versions.sh" "$R/scripts/lib/"
   mkdir -p "$R/scripts/profiles"; cp "$REPO"/scripts/profiles/*.sh "$R/scripts/profiles/"
   cp "$REPO/scripts/lib/addins.sh" "$REPO/scripts/lib/mcp.sh" "$REPO/scripts/lib/shims.sh" "$REPO/scripts/lib/handoff.sh" "$R/scripts/lib/" 2>/dev/null
-  [ ! -f "$REPO/scripts/mcp-launch.sh" ] || cp "$REPO/scripts/mcp-launch.sh" "$R/scripts/"; cp "$REPO/scripts/hittest-launch.sh" "$R/scripts/"; cp -R "$REPO/scripts/addins" "$REPO/scripts/steps" "$R/scripts/" 2>/dev/null
+  [ ! -f "$REPO/scripts/mcp-launch.sh" ] || cp "$REPO/scripts/mcp-launch.sh" "$R/scripts/"; cp "$REPO/scripts/hittest-launch.sh" "$REPO/scripts/theme-launch.sh" "$R/scripts/"; cp "$REPO/scripts/lib/wine.sh" "$R/scripts/lib/"; cp -R "$REPO/scripts/addins" "$REPO/scripts/steps" "$R/scripts/" 2>/dev/null
   stub "$R/install.sh"; stub "$R/scripts/run-steps.sh"; stub "$R/scripts/launch.sh"; stub "$R/scripts/smoke.sh"
   # ensure_shim's builder: done when build/<shim>/ holds a file, else it fails
   printf '#!/bin/bash\nfor f in "$(dirname "$0")/../build/$1"/*; do [ -f "$f" ] && exit 0; done\necho "no $1 to build"; exit 1\n' \
@@ -393,7 +393,7 @@ revit_exe() { touch "$BOTTLES/$1/drive_c/Program Files/Autodesk/Revit $2/Revit.e
 reset; bottle rvt2024-a 2024 2024; revit_exe rvt2024-a 2024; bottle rvt2025-b 2025 ""; bottle exp "" ""; run "" status --json
 expect "status --json" 0 '"bottles":['
 check "status: valid JSON" eval 'printf "%s" "$OUT" | /usr/bin/perl -MJSON::PP -e "local \$/; JSON::PP->new->decode(<STDIN>)"'
-check "status: a Revit bottle" grep -qF '{"name":"rvt2024-a","year":"2024","revit":true,"running":false,"revit_pids":[],"addins":[]}' <<<"$OUT"
+check "status: a Revit bottle" grep -qF '{"name":"rvt2024-a","year":"2024","revit":true,"running":false,"revit_pids":[],"addins":[],"theme_mode":""}' <<<"$OUT"
 check "status: a half-installed bottle" grep -qF '{"name":"rvt2025-b","year":"2025","revit":false,' <<<"$OUT"
 check "status: a non-Revit bottle is left out" eval '! grep -q "\"exp\"" <<<"$OUT"'
 reset; bottle rvt2024-a 2024 2024; revit_exe rvt2024-a 2024; fake_revit rvt2024-a 2024; run "" status --json
@@ -572,7 +572,7 @@ reset; run "" link-installer 2024 "$T"; expect "link-installer refuses a folder 
 
 # ---- set: Retina and Mac keys (2027) ----
 reset; bottle rvt2027-a 2027 2027; run "" set 2027
-expect "set without settings: the usage and where to see the current ones" 1 "Usage: ./revit set 2027 retina=on|compact|off keys=mac|windows. ./revit doctor 2027 shows"
+expect "set without settings: the usage and where to see the current ones" 1 "Usage: ./revit set 2027 retina=on|compact|off keys=mac|windows theme=mac|light|dark. ./revit doctor 2027 shows"
 check "set without settings: nothing runs" not_called "run-steps.sh"
 reset; bottle rvt2027-a 2027 2027; run "" set 2027 retina=off
 expect "set retina=off" 0 "Revit 2027 (rvt2027-a): retina=off. Applies the next time Revit starts."
@@ -597,6 +597,15 @@ reset; bottle rvt2027-a 2027 2027; run "" set 2027 keys=pc; expect "set: an unkn
 reset; bottle rvt2027-a 2027 2027; run "" set 2027 retina=on retina=off; expect "set: a setting twice" 1 "retina is given twice."
 check "set: nothing runs after a bad setting" not_called "run-steps.sh"
 reset; bottle rvt2026-a 2026 2026; run "" set 2026 retina=off; expect "set: only where the profile has the steps" 1 "Retina and Mac keys are tested on Revit 2027 only."
+reset; bottle rvt2027-a 2027 2027; run "" set 2027 theme=dark; expect "set theme=dark" 0 "Revit 2027 (rvt2027-a): theme=dark. Applies the next time Revit starts."
+check "set theme=dark: the theme step with its value, one steps run" eval 'called "run-steps.sh 2027 rvt2027-a theme | " && called "THEME=dark" &&
+  [ "$(grep -c run-steps.sh "$CALLS")" = 1 ]'
+check "set theme: no note on the window size" eval '! grep -q "another size" <<<"$OUT"'
+reset; bottle rvt2027-a 2027 2027; run "" set 2027 retina=on theme=mac; expect "set retina and theme" 0 ""
+check "set retina and theme: both steps in one run" called "run-steps.sh 2027 rvt2027-a retina theme |"
+reset; bottle rvt2027-a 2027 2027; run "" set 2027 theme=blue; expect "set: an unknown theme" 1 "theme is mac (follow the Mac), light or dark"
+reset; bottle rvt2026-a 2026 2026; run "" set 2026 theme=mac; expect "set theme: 2027 only" 1 "The theme setting is for Revit 2027 only."
+check "set theme 2026: nothing runs" not_called "run-steps.sh"
 reset; run "" set 2027 retina=off; expect "set: no bottle" 1 "There is no bottle rvt2027-a"
 reset; bottle rvt2027-a 2027 2027; fake_revit rvt2027-a 2027; run "" set 2027 retina=off
 expect "set refuses while Revit runs" 1 "Revit 2027 is running in rvt2027-a"; check "set: nothing runs while Revit runs" not_called "run-steps.sh"
@@ -1173,5 +1182,59 @@ for c in "2027|remove 2027|cxbottle" "2027|rebuild 2027|install.sh"; do
   check "hittest running, Revit closed: $(cut -d'|' -f2 <<<"$c") refused (still closing)" eval '[ "$RC" != 0 ] && grep -q "is still closing" <<<"$OUT" && ! called "${c##*|}" && [ -d "$BOTTLES/rvt2027-a" ]'
   exec 5>&-; wait "$LPID_a"
 done
+# ---- ./revit theme (scripts/theme-launch.sh): the app's "the Mac's look changed" ----
+theme_cx() { # the fake CrossOver's wine plays themeset.exe: records its arguments (and FD9/FD8 if they reached it); exit
+  # from $T/theme-rc (default 0)
+  cat > "$CXF/bin/wine" <<EOF
+#!/bin/bash
+{ printf '%s\n' "\$@"; [ -e /dev/fd/9 ] && echo FD9; [ -e /dev/fd/8 ] && echo FD8; } > "$T/theme-argv"
+exit "\$(cat "$T/theme-rc" 2>/dev/null || echo 0)"
+EOF
+  chmod +x "$CXF/bin/wine"
+  printf '#!/bin/bash\n[ "$(cat "%s" 2>/dev/null)" = dark ] && echo Dark\nexit 0\n' "$T/look" > "$T/defaults"; chmod +x "$T/defaults"
+}
+theme_world() { # $1 = bottle, $2 = mode ("" = no mode file), $3 = the Mac's look (dark | light)
+  reset; bottle "$1" 2027 2027; theme_cx; echo "$3" > "$T/look"
+  local d="$BOTTLES/$1/drive_c/Program Files/revit-macos"; mkdir -p "$d"; : > "$d/themeset.exe"
+  [ -z "$2" ] || echo "$2" > "$d/theme"
+}
+MCP_ENV=(REVIT_DEFAULTS="$T/defaults")
+theme_world rvt2027-a mac dark; run_mcp theme 2027
+check "theme: mac on a dark Mac → 0, themeset.exe dark in the bottle" eval '[ "$RC" = 0 ] && [ "$OUT" = "Revit 2027 (rvt2027-a): dark." ] &&
+  [ "$(sed -n 1,4p "$T/theme-argv" | tr "\n" "|")" = "--bottle|rvt2027-a|--wait-children|C:\\Program Files\\revit-macos\\themeset.exe|" ] &&
+  [ "$(sed -n 5p "$T/theme-argv")" = dark ]'
+check "theme: neither the lock (fd 9) nor fd 8 reaches wine" eval '! grep -qx -e FD9 -e FD8 "$T/theme-argv"'
+check "theme: wineserver is not stopped" not_called "wineserver"
+theme_world rvt2027-a mac light; run_mcp theme 2027; check "theme: a light Mac → light" eval '[ "$RC" = 0 ] && [ "$(sed -n 5p "$T/theme-argv")" = light ]'
+theme_world rvt2027-a light dark; run_mcp theme 2027
+check "theme: a fixed theme → 0, nothing run" eval '[ "$RC" = 0 ] && grep -q "the theme is fixed (light)" <<<"$OUT" && [ ! -e "$T/theme-argv" ]'
+theme_world dark mac dark; run_mcp theme 2027 dark
+check "theme: a bottle named dark is a bottle" eval '[ "$RC" = 0 ] && [ "$(sed -n 2p "$T/theme-argv")" = dark ]'
+theme_world rvt2027-a mac dark; echo 3 > "$T/theme-rc"; run_mcp theme 2027
+check "theme: Revit did not answer → 1" eval '[ "$RC" = 1 ] && grep -q "Revit did not get the change" <<<"$OUT"'
+theme_world rvt2027-a mac dark; echo 1 > "$T/theme-rc"; run_mcp theme 2027
+check "theme: themeset.exe failing → 1" eval '[ "$RC" = 1 ] && grep -q "themeset.exe ended (exit 1)" <<<"$OUT"'
+theme_world rvt2027-b mac dark; rm "$BOTTLES/rvt2027-b/drive_c/Program Files/revit-macos/themeset.exe"; run_mcp theme 2027 rvt2027-b
+check "theme: no themeset.exe → 1 with ./revit set for that bottle" eval '[ "$RC" = 1 ] &&
+  grep -qF "Run: ./revit set 2027 rvt2027-b theme=mac" <<<"$ERR" && [ ! -e "$T/theme-argv" ]'
+reset; bottle rvt2026-a 2026 2026; theme_cx; run_mcp theme 2026; check "theme: 2026 → 1" eval '[ "$RC" = 1 ] && grep -q "for Revit 2027 only" <<<"$ERR"'
+theme_world rvt2027-a mac dark; fake_lock "install.sh 2025 rvt2025-a"; run_mcp theme 2027
+check "theme: lock busy → 75, wine never started" eval '[ "$RC" = 75 ] && grep -q "Another task is running" <<<"$ERR" && [ ! -e "$T/theme-argv" ]'
+theme_world rvt2027-a mac dark; fake_revit rvt2027-a 2027; run_mcp theme 2027
+check "theme: while Revit runs (that is the point) → 0" eval '[ "$RC" = 0 ] && [ -e "$T/theme-argv" ]'
+for a in "2027 x=y" "2027 rvt2027-a extra" "2027 --json" "2027 --yes" "2027 --bogus" "" "rvt2027-a"; do
+  theme_world rvt2027-a mac dark; run_mcp theme $a
+  check "theme $a: usage → 2, wine never started" eval '[ "$RC" = 2 ] && grep -q "Usage: ./revit theme <year> \[bottle\]" <<<"$ERR" && [ ! -e "$T/theme-argv" ]'
+done
+theme_world rvt2027-a mac dark; run_mcp theme 2027 --events "$T/ev"
+check "theme --events: usage → 2, no events folder" eval '[ "$RC" = 2 ] && [ ! -e "$T/ev" ]'
+reset; run "" --help; check "theme is in the help" grep -qx "  theme     for the app: Revit's theme follows the Mac's light or dark look now" <<<"$OUT"
+MCP_ENV=()
+for m in mac light dark junk; do
+  theme_world rvt2027-a "$m" dark; run "" status --json
+  want="$m"; [ "$m" = junk ] && want=""
+  check "status: theme_mode $m" grep -qF "\"theme_mode\":\"$want\"}" <<<"$OUT"
+done
+
 # ---- end ----
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]
