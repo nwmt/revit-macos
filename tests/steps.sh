@@ -9,7 +9,7 @@ CLEAN_ENV=(-u REVIT_DATA -u REVIT_LOCK_DIR -u SHIMS_DIR -u REVIT_BUNDLED -u REVI
   -u REVIT_ACCEPT_EULA -u REVIT_SOURCE_LIST -u REVIT_REUSE_EXTRACTED -u REVIT_REEXTRACT -u REVIT_UNPACK_AGAIN
   -u REVIT_FOR_BOTTLE -u INSTALL_PARENT -u W_CACHE -u SHIMS_FROM_SOURCE -u RUN_DIR -u RUN_KIND -u CX_RECREATE
   -u INSTALL_DRYRUN -u REVIT_LANG -u ODIS_PKGS -u REVIT_THEME -u REVIT_DEFAULTS -u REVIT_YEAR -u SMOKE_TIMEOUT -u SMOKE_START_WAIT
-  -u SMOKE_STALL -u SMOKE_WORKER_WAIT -u SMOKE_POLL -u SMOKE_PREP_TIMEOUT -u REVIT_CX_TMP
+  -u SMOKE_STALL -u SMOKE_WORKER_WAIT -u SMOKE_POLL -u SMOKE_PREP_TIMEOUT -u REVIT_CX_TMP -u REVIT_WATCH_IDLE -u REVIT_WATCH_LOCK_WAIT
   -u REVIT_RETINA -u REVIT_KEYS -u SETTINGS_SAVE_WAIT)
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)" && [ -d "$TMP" ] || { echo "mktemp failed" >&2; exit 1; }
@@ -933,6 +933,121 @@ OUT="$(cd / && "${SANDBOX_ENV[@]}" REVIT_LAUNCH_WAIT=3 /bin/bash "$R/scripts/lau
 expect "launch.sh starts Revit and returns once it runs" 0 "Revit 2024 started (backend default)"
 in_repo 'lock_free && echo free'; expect "launch.sh: the Revit it started does not hold the lock" 0 "free"
 sleep 4
+
+# ---- watch-server: the bottle's wineserver with its log and how it ended ----
+CRASH='wineserver crashed, please enable coredumps (ulimit -c unlimited) and restart.'
+W="$TOP/ws"   # outside the sandbox's long path: a UNIX socket path has a limit
+ws_end() { # the supervisors and fake servers of the last test
+  pkill -f "watch-server.pl $CXF" 2>/dev/null; [ ! -f "$W/pid" ] || kill -9 "$(cat "$W/pid")" 2>/dev/null; return 0
+}
+ws_setup() { # $@ = mode lines (key=value): a bottle and a fake wineserver that follows them. -k0: 0 while one runs;
+  # -f: records how it was called, says the lines of say= (| between them) on stderr, ends at once with now=, else
+  # holds server-x/lock, leaves a dead server's socket (stale=1), waits before=, ends with die= before it listens,
+  # binds, waits gap= seconds, listens (not with nolisten=1), and ends with the code ws_stop writes
+  ws_end; reset; rm -rf "$W"; mkdir -p "$W" "$T/cxtmp"
+  WB="$BOTTLES/rvt2027-w"; WL="$WB/revit-macos/wineserver.log"; WJ="$WB/revit-macos/wineserver.last"
+  mkdir -p "$WB/revit-macos"; printf '%s\n' "$@" > "$W/mode"
+  cat > "$CXF/bin/wineserver" <<EOF
+#!/usr/bin/perl
+use strict; use warnings; use IO::Socket::UNIX; use Socket;
+my \$W = "$W";
+open(my \$c, '>>', "$CALLS") or die;
+print \$c "wineserver @ARGV WINEPREFIX=\$ENV{WINEPREFIX}", (-e "/dev/fd/9" ? " FD9" : ""), (-e "/dev/fd/7" ? " FD7" : ""), "\n";
+close \$c;
+if (\$ARGV[0] eq '-k0') { open(my \$f, '<', "\$W/pid") or exit 1; my \$p = <\$f>; exit(kill(0, \$p) ? 0 : 1) }
+exit 0 unless \$ARGV[0] eq '-f';
+my %m; open(my \$f, '<', "\$W/mode") or die; while (<\$f>) { chomp; my (\$k, \$v) = split /=/, \$_, 2; \$m{\$k} = \$v if defined \$v }
+open(my \$p, '>', "\$W/pid") or die; print \$p "\$\$\n"; close \$p;
+\$| = 1; print STDERR "\$_\n" for grep { length } split /\|/, \$m{say} // '';
+exit \$m{now} if defined \$m{now};
+mkdir "\$W/srv"; mkdir "\$W/srv/server-x"; my \$sp = "\$W/srv/server-x/socket";
+open(my \$lock, '>>', "\$W/srv/server-x/lock") or die;
+if (\$m{stale}) { unlink \$sp; my \$s = IO::Socket::UNIX->new(Type => SOCK_STREAM, Local => \$sp, Listen => 1) or die "stale: \$!"; close \$s }
+select(undef, undef, undef, \$m{before}) if \$m{before};
+exit \$m{die} if defined \$m{die};
+unlink \$sp; socket(my \$s, PF_UNIX, SOCK_STREAM, 0) or die; bind(\$s, pack_sockaddr_un(\$sp)) or die "bind: \$!";
+select(undef, undef, undef, \$m{gap}) if \$m{gap};
+unless (\$m{nolisten}) { listen(\$s, 5) or die; open(my \$l, '>', "\$W/listening"); close \$l }
+while (1) {
+  if (open(my \$f, '<', "\$W/stop")) { my \$c = <\$f>; close \$f; unlink "\$W/stop"; exit \$c + 0 }
+  select(undef, undef, undef, 0.1);
+}
+EOF
+  chmod +x "$CXF/bin/wineserver"; : > "$CALLS"
+}
+ws_run() { # watch-server as the Revit app runs it, with fds 7 and 9 open as in a script of ours. RC; SECS it took
+  local t0; t0="$(/usr/bin/perl -MTime::HiRes=time -e 'print time')"
+  ( cd / && "${SANDBOX_ENV[@]}" REVIT_CX_TMP="$T/cxtmp" REVIT_WATCH_IDLE="${WS_IDLE:-60}" \
+    REVIT_WATCH_LOCK_WAIT="${WS_LOCK_WAIT:-30}" /usr/bin/perl "$R/scripts/watch-server.pl" "$CXF" "$WB" \
+    </dev/null >/dev/null 2>&1 7>"$T/fd7" 9>"$T/fd9" ); RC=$?
+  SECS="$(/usr/bin/perl -MTime::HiRes=time -e 'printf "%.1f", time - $ARGV[0]' "$t0")"
+  SUP="$(sed -n 's/.* start [0-9]*-\([0-9]*\) server .*/\1/p' "$WL" 2>/dev/null | tail -1)"
+}
+wait_for() { local i; for i in $(seq 1 $(($1 * 10))); do "${@:2}" && return 0; sleep 0.1; done; return 1; }
+ws_stop() { echo "$1" > "$W/stop"; wait_for 5 grep -qs " ended " "$WL"; }   # the fake server ends with code $1
+srv_alive() { [ -f "$W/pid" ] && kill -0 "$(cat "$W/pid")" 2>/dev/null; }
+secs_ge() { /usr/bin/perl -e 'exit !($ARGV[0] >= $ARGV[1])' "$1" "$2"; }   # $1 >= $2, fractions too
+cxlock_free() { /usr/bin/perl -MFcntl=:flock -e 'for (@ARGV) { open(my $f, ">>", $_) or exit 1; flock($f, LOCK_EX | LOCK_NB) or exit 1 }' \
+  "$T"/cxtmp/.wine-*/bottle-*.lock; }
+hold_cxlock() { # $1 = seconds: CrossOver's lock of the bottle held that long, as cx_bottle_lock holds it
+  ( cd / && "${SANDBOX_ENV[@]}" REVIT_CX_TMP="$T/cxtmp" ROOT="$R" /bin/bash -c '. "$ROOT/scripts/lib/common.sh"
+    cx_bottle_lock "$1" && sleep "$2"' _ "$WB" "$1" ) & PIDS="$PIDS $!"; sleep 0.5
+}
+
+ws_setup; echo $$ > "$W/pid"; ws_run
+check "watch-server: the bottle's server runs already → nothing started" eval '[ "$RC" = 0 ] && not_called "wineserver -f" && [ ! -e "$WL" ]'
+rm -f "$W/pid"
+ws_setup; ws_run
+check "watch-server: exits 0 as soon as the server answers, while it runs" eval '[ "$RC" = 0 ] && srv_alive'
+check "watch-server: the server is the bottle's, in the foreground" called "wineserver -f WINEPREFIX=$WB"
+check "watch-server: start and ready in the log" eval 'grep -q " start [0-9]*-$SUP server [0-9]*$" "$WL" && grep -q " ready$" "$WL"'
+check "watch-server: fds 7 and 9 reach no server" not_called " FD"
+check "watch-server: the supervisor holds no fd 7 or 9" eval 'lsof -w -p "$SUP" -Ff | grep -qx f1 && [ -z "$(lsof -w -p "$SUP" -a -d 7,9 2>/dev/null)" ]'
+check "watch-server: the supervisor has its own session" eval '[ "$(ps -o pgid= -p "$SUP" | tr -d " ")" = "$SUP" ]'
+check "watch-server: CrossOver's lock is free while the server runs" cxlock_free
+ws_stop 0
+check "watch-server: an exit 0 is normal, in the log and in .last" eval 'grep -q " ended [0-9]*-$SUP class normal exit 0$" "$WL" &&
+  wait_for 3 grep -q "^{\"gen\":1,\"id\":\"[0-9]*-$SUP\",\"start\":[0-9]*,\"end\":[0-9]*,\"class\":\"normal\",\"exit\":0,\"signal\":null}$" "$WJ"'
+check "watch-server: the supervisor ends with its server" wait_for 3 eval '! kill -0 "$SUP" 2>/dev/null'
+ws_setup "say=$CRASH"; ws_run; ws_stop 1
+check "watch-server: Wine's crash line and exit 1 → crashed" eval 'grep -qF "$SUP $CRASH" "$WL" && grep -q "class crashed exit 1$" "$WL" && wait_for 3 grep -q "\"class\":\"crashed\",\"exit\":1," "$WJ"'
+ws_setup "say=wineserver: something|another line"; ws_run; ws_stop 1
+check "watch-server: exit 1 without the crash line → other" eval 'grep -q "class other exit 1$" "$WL" && grep -q " another line$" "$WL"'
+ws_setup "say=the last wineserver crashed"; ws_run; kill -9 "$(cat "$W/pid")"; wait_for 5 grep -q " ended " "$WL"
+check "watch-server: a message about an earlier crash, then SIGKILL → signal 9" eval 'grep -q "class signal signal 9$" "$WL" &&
+  wait_for 3 grep -q "\"class\":\"signal\",\"exit\":null,\"signal\":9}" "$WJ"'
+ws_setup "now=2"; ws_run; wait_for 5 grep -q " ended " "$WL"
+check "watch-server: exit 2 at once → lost, logged, no .last" eval '[ "$RC" = 0 ] && grep -q "class lost exit 2$" "$WL" && grep -q " not ready$" "$WL" && [ ! -e "$WJ" ]'
+ws_setup "stale=1" "gap=2"; ws_run
+check "watch-server: a dead server's socket and a bound socket are not ready; listening is" eval 'secs_ge "$SECS" 2 && [ -e "$W/listening" ] && grep -q " ready$" "$WL"'
+ws_setup "nolisten=1"; ws_run
+check "watch-server: a server that never listens: the caller gives up within 6 s, exit 0" eval '[ "$RC" = 0 ] && secs_ge "$SECS" 4.5 && secs_ge 7 "$SECS" && grep -q " not ready$" "$WL"'
+ws_setup "stale=1" "before=1" "die=3"; ws_run; wait_for 5 grep -q " ended " "$WL"
+check "watch-server: a server that ends before it listens: not ready, other exit 3" eval '[ "$RC" = 0 ] && secs_ge 4 "$SECS" && grep -q " not ready$" "$WL" && grep -q "class other exit 3$" "$WL"'
+ws_setup; ws_run; echo '{"gen":2,"id":"1-1","start":1,"end":1,"class":"normal","exit":0,"signal":null}' > "$WJ"; ws_stop 1
+check "watch-server: an older start never replaces a newer end" eval 'grep -q "class other exit 1$" "$WL" && sleep 1 && grep -q "^{\"gen\":2," "$WJ" && [ "$(cat "$WB/revit-macos/wineserver.gen")" = 1 ]'
+ws_setup; ws_run; ws_stop 0; ws_run; ws_stop 0
+check "watch-server: each start a new generation" eval 'wait_for 3 grep -q "^{\"gen\":2," "$WJ"'
+ws_setup; hold_cxlock 2; ws_run
+check "watch-server: waits for CrossOver's lock of the bottle" eval 'secs_ge "$SECS" 1 && called "wineserver -f"'
+ws_setup; hold_cxlock 3; WS_LOCK_WAIT=1 ws_run
+check "watch-server: CrossOver's lock busy too long → no server" eval '[ "$RC" = 0 ] && not_called "wineserver -f" && [ ! -e "$WL" ]'
+ws_setup; hold_cxlock 2; ( sleep 0.5; mv "$WB" "$WB.old"; mkdir -p "$WB/revit-macos" ) & ws_run
+check "watch-server: the bottle made again while it waited → no server" eval 'not_called "wineserver -f" && [ ! -e "$WL" ] && [ ! -e "$WB.old/revit-macos/wineserver.log" ]'
+ws_setup; ws_run; mv "$WB" "$WB.old"; mkdir -p "$WB"; ws_stop 0 >/dev/null; wait_for 5 grep -q " ended " "$WB.old/revit-macos/wineserver.log"
+check "watch-server: a bottle made again before the end gets nothing" eval 'wait_for 3 eval "! kill -0 $SUP 2>/dev/null" && [ -z "$(ls -A "$WB")" ]'
+ws_setup; ws_run; rm -rf "$WB"; echo 0 > "$W/stop"
+check "watch-server: a deleted bottle: no folder made again" eval 'wait_for 5 eval "! kill -0 $SUP 2>/dev/null" && [ ! -e "$WB" ]'
+ws_setup; head -c 300000 /dev/zero | tr '\0' x > "$WL"; echo '{"gen":7}' > "$WJ"; ws_run
+check "watch-server: a log over 256 KB moves to .log.1; .last stays" eval '[ "$(wc -c < "$WL.1" | tr -d " ")" = 300000 ] &&
+  grep -q " start " "$WL" && [ "$(wc -c < "$WL" | tr -d " ")" -lt 1000 ] && [ "$(cat "$WJ")" = "{\"gen\":7}" ]'
+ws_setup; WS_IDLE=1 ws_run
+check "watch-server: no Windows program within the time → a note, the server stays" eval 'wait_for 4 grep -q " no Windows program yet$" "$WL" && srv_alive'
+ws_setup; mkdir -p "$WB/drive_c"; touch "$WB/drive_c/held"
+/usr/bin/perl -e 'open(my $f, "<", $ARGV[0]) or die; sleep 30' "$WB/drive_c/held" 'C:\windows\notepad.exe' & PIDS="$PIDS $!"
+WS_IDLE=1 ws_run; sleep 2.5
+check "watch-server: a Windows program in the bottle → no note" eval 'grep -q " ready$" "$WL" && ! grep -q "no Windows program" "$WL"'
+ws_end
 
 # ---- events ----
 reset; in_repo 'json_str "a\"b\\c	t
