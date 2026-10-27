@@ -79,6 +79,9 @@ VERIFIED_BUILD_YEARS = (2025, 2027)   # 2026-10-17: 2025.5 and 2027.3 matched; y
 # AppleScript string osadecompile shows)
 APP_SCRIPT = re.compile(r"'((?:[^']|'\\\\'')*/bin/wine)' --bottle '([^']*)'")
 APP_THEME = "revit-macos/theme"   # in the Revit app's script when it sets the theme before Revit starts (make-apps.sh)
+APP_WATCH = "revit-macos/watch-server"   # in the Revit app's script when it starts the server under watch-server
+WATCH = "scripts/watch-server.pl"   # in the repo; its first line names its version, as the copy in the bottle does
+WINESERVER_CLASSES = ("normal", "crashed", "signal", "other")   # wineserver.last (watch-server.pl)
 THEME_DIR = "drive_c/Program Files/revit-macos"   # the step theme: themeset.exe and the mode file "theme"
 WINEISH = re.compile(r"wine|crossover|\.exe\b", re.I)   # processes that may hold a bottle's files
 HOSTS_FIX = "H=\"$(hostname)\"; sudo sh -c \"printf '127.0.0.1\\t$H\\n::1\\t$H\\n' >> /etc/hosts\""
@@ -610,6 +613,7 @@ def apps(ctx):
                 wine = m.group(1).replace("'\\\\''", "'")
                 a["wine"], a["bottle"], a["wine_exists"] = wine, m.group(2), os.path.isfile(wine)
             a["theme"] = bool(a["script"]) and APP_THEME in src
+            a["watch"] = bool(a["script"]) and APP_WATCH in src
         out[key] = a
     others = []   # the Sign-In apps of other bottles: every one of them takes the same adskidmgr:// link
     for app in sorted(glob.glob(os.path.join(ctx.home, "Applications", "Autodesk Sign-In (*).app"))):
@@ -865,6 +869,30 @@ def theme_mode(p):
     return m if m in ("mac", "light", "dark") else None
 
 
+def first_line(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return f.readline().rstrip("\n")
+    except OSError:
+        return None
+
+
+def wineserver_last(p):
+    """How the bottle's last wineserver under watch-server ended (<bottle>/revit-macos/wineserver.last); None without
+    the file or with one that is not what watch-server writes."""
+    try:
+        with open(os.path.join(p, "revit-macos", "wineserver.last"), encoding="utf-8") as f:
+            w = json.loads(f.readline())
+    except (OSError, ValueError):
+        return None
+    def num(k, none=False):
+        return (none and w.get(k) is None) or (type(w.get(k)) is int and w[k] >= 0)
+    if not isinstance(w, dict) or w.get("class") not in WINESERVER_CLASSES or not all(num(k) for k in ("gen", "end")) \
+            or not num("exit", True) or not num("signal", True):
+        return None
+    return w
+
+
 def collect_bottle(ctx):
     y, p = ctx.year, os.path.join(ctx.bottles, ctx.bottle)
     b = {"link": os.path.islink(p)}
@@ -883,6 +911,9 @@ def collect_bottle(ctx):
     b["documents"] = documents(p, ctx)
     b["apps"] = apps(ctx)
     b["theme_mode"] = theme_mode(p)
+    b["wineserver"] = wineserver_last(p)
+    b["watch"] = {"copy": first_line(os.path.join(p, "revit-macos", "watch-server.pl")),
+                  "want": first_line(os.path.join(ctx.root, WATCH))}
     b["activity"] = activity(p, ctx.run)
     b["records"] = runlog.records(p)
     b["summary"] = install_summary(ctx.data, ctx.bottle)
@@ -1122,6 +1153,12 @@ def app_checks(f, b):
         elif not a.get("wine_exists"):
             out.append(Check(cid, "warn", f"{title} starts CrossOver from where it is no longer{why}", fix=fix,
                              doc=doc))
+        elif key == "revit" and not a.get("watch"):
+            out.append(Check(cid, "info", f"{title} does not record how Wine ends", fix=fix))
+        elif key == "revit" and (b.get("watch") or {}).get("copy") != (b.get("watch") or {}).get("want"):
+            out.append(Check(cid, "warn", f"{title} is missing its part that records how Wine ends", fix=fix,
+                             detail=f"the copy of {WATCH} in the bottle's revit-macos folder is missing or of "
+                             "another version"))
         else:
             out.append(Check(cid, "ok", f"{title} starts this bottle"))
     others = b["apps"].get("signin_others") or []
@@ -1410,6 +1447,22 @@ def theme_checks(f, b):
     return [Check("bottle.theme", "info", "Revit's theme follows the Mac")]
 
 
+def wineserver_checks(f, b):
+    """bottle.wineserver: how the bottle's last wineserver ended, as watch-server wrote it down. A warning stays until
+    a later one ends another way."""
+    w = b.get("wineserver")
+    if w is None:
+        return [Check("bottle.wineserver", "ok", "no unexpected end of Wine recorded")]
+    if w["class"] == "normal":
+        return [Check("bottle.wineserver", "ok", "Wine ended normally last time")]
+    when = time.strftime("%Y-%m-%d %H:%M", time.localtime(w["end"]))
+    how = {"crashed": "it crashed", "signal": f"something ended it (signal {w['signal']})",
+           "other": f"it ended with code {w['exit']}"}[w["class"]]
+    return [Check("bottle.wineserver", "warn", f"Wine stopped unexpectedly on {when}: {how}",
+                  detail="its messages are in the bottle's revit-macos/wineserver.log; a report includes them",
+                  fix=f"./revit report {f['year']}{f['sfx']}", doc=DOC["report"])]
+
+
 def settings_checks(f, b):
     """What the retina and mackeys steps set, for a year whose profile has them: one note, or a warning for a state no
     ./revit set gives."""
@@ -1666,7 +1719,7 @@ def bottle_checks(f):
     out += app_checks(f, b)
     out += install_checks(f, b) + since_install(f, b)
     if b.get("revit_exe"):
-        out += fixes_checks(f, b) + settings_checks(f, b) + theme_checks(f, b) + addin_checks(f) + mcp_checks(f, b) + pyrevit_agent_checks(f, b)
+        out += fixes_checks(f, b) + settings_checks(f, b) + theme_checks(f, b) + wineserver_checks(f, b) + addin_checks(f) + mcp_checks(f, b) + pyrevit_agent_checks(f, b)
     return out + logs_checks(f, b)
 
 

@@ -8,6 +8,8 @@ sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 TOOLS = os.path.join(REPO, "tools")
+with open(os.path.join(REPO, "scripts", "watch-server.pl")) as _f:
+    WATCH_V1 = _f.readline()   # the version line the Revit app's copy of watch-server must have
 
 
 def load(name):
@@ -99,6 +101,7 @@ class Sandbox(unittest.TestCase):
             ext = ".exe" if s in ("svcshim", "pdfprinter") else ".dll"
             self.write(j(self.root, "build", s, s + ext), "fake " + s)
         self.write(j(self.root, "build", ".prebuilt"), "0.6.0\n")
+        self.write(j(self.root, "scripts", "watch-server.pl"), WATCH_V1 + "# the rest\n")
         os.makedirs(j(self.home, "Documents"))
         self.make_bottle()
 
@@ -141,14 +144,18 @@ class Sandbox(unittest.TestCase):
         self.write(j(b, dr.WV2, "141.0.3537.71", "msedgewebview2.exe"), "x")
         os.makedirs(j(b, dr.DESKTOP, "8.0.1"))
         self.record(result="ok")
+        self.write(j(b, "revit-macos", "watch-server.pl"), WATCH_V1 + "# the copy\n")
         for title in ("Revit %d" % y, "Autodesk Sign-In"):
             self.app(title)
 
-    def app(self, title, bottle=None, wine=None):
+    def app(self, title, bottle=None, wine=None, watch=True):
+        """An app as make-apps makes it; the Revit app starts watch-server first (unless watch=False)."""
         a = os.path.join(self.home, "Applications", "%s (%s).app" % (title, self.name))
         os.makedirs(os.path.join(a, "Contents", "Resources", "Scripts"), exist_ok=True)
         script = os.path.join(a, "Contents", "Resources", "Scripts", "main.scpt")
-        line = "do shell script \"(cd ~ && '%s' --bottle '%s' 'C:\\\\x.exe' ) >/dev/null 2>&1 &\"\n"
+        w = ": revit-macos/watch-server; [ -f 'x' ] && /usr/bin/perl 'x' 'c' 'b' 7>&- 8>&- 9>&-; " \
+            if watch and title.startswith("Revit 2") else ""
+        line = "do shell script \"(cd ~ && " + w + "'%s' --bottle '%s' 'C:\\\\x.exe' ) >/dev/null 2>&1 &\"\n"
         self.scripts[script] = (0, line % (wine or os.path.join(self.cx, "bin", "wine"), bottle or self.name))
         return a
 
@@ -483,9 +490,45 @@ class Bottle(Sandbox):
         open(wine, "w").close()
         script = os.path.join(self.app("Revit %d" % self.year), "Contents", "Resources", "Scripts", "main.scpt")
         quoted = "'" + wine.replace("'", "'\\\\''") + "'"
-        self.scripts[script] = (0, "do shell script \"(cd ~ && %s --bottle '%s' 'C:\\\\x.exe') >/dev/null 2>&1 &\"\n"
+        self.scripts[script] = (0, "do shell script \"(cd ~ && : revit-macos/watch-server; %s --bottle '%s' 'C:\\\\x.exe') >/dev/null 2>&1 &\"\n"
                                 % (quoted, self.name))
         self.assertEqual(self.by_id(self.checks())["bottle.app.revit"].status, "ok")
+
+    def test_the_revit_app_and_watch_server(self):
+        self.app("Revit %d" % self.year, watch=False)   # made before watch-server
+        c = self.by_id(self.checks())["bottle.app.revit"]
+        self.assertEqual((c.status, c.title), ("info", "the Revit %d app does not record how Wine ends" % self.year))
+        self.assertEqual(c.fix, "scripts/make-apps.sh %d %s makes it again" % (self.year, self.name))
+        self.app("Revit %d" % self.year)
+        copy = os.path.join(self.b, "revit-macos", "watch-server.pl")
+        self.write(copy, "# revit-macos watch-server v0\n")   # a copy of another version
+        c = self.by_id(self.checks())["bottle.app.revit"]
+        self.assertEqual((c.status, c.fix), ("warn", "scripts/make-apps.sh %d %s makes it again" % (self.year, self.name)))
+        os.remove(copy)
+        self.assertEqual(self.by_id(self.checks())["bottle.app.revit"].status, "warn")
+        self.write(copy, WATCH_V1)
+        self.assertEqual(self.by_id(self.checks())["bottle.app.revit"].status, "ok")
+        self.assertEqual(self.by_id(self.checks())["bottle.app.signin"].status, "ok")   # only the Revit app has it
+
+    def wineserver(self, text):
+        self.write(os.path.join(self.b, "revit-macos", "wineserver.last"), text)
+        return self.by_id(self.checks())["bottle.wineserver"]
+
+    def test_how_the_last_wineserver_ended(self):
+        self.assertEqual(self.by_id(self.checks())["bottle.wineserver"].status, "ok")   # nothing recorded yet
+        end = 1792000000
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(end))
+        last = '{"gen":3,"id":"1-2","start":1,"end":%d,"class":"%s","exit":%s,"signal":%s}\n'
+        self.assertEqual(self.wineserver(last % (end, "normal", 0, "null")).status, "ok")
+        for cls, code, sig, how in (("crashed", 1, "null", "it crashed"),
+                                    ("signal", "null", 9, "something ended it (signal 9)"),
+                                    ("other", 1, "null", "it ended with code 1")):
+            c = self.wineserver(last % (end, cls, code, sig))
+            self.assertEqual((c.status, c.title), ("warn", "Wine stopped unexpectedly on %s: %s" % (when, how)))
+            self.assertEqual((c.fix, c.doc), ("./revit report %d" % self.year, dr.DOC["report"]))
+        for bad in ("not json\n", '{"gen":1,"end":5,"class":"lost","exit":2,"signal":null}\n',
+                    '{"gen":1,"end":"5","class":"crashed","exit":1,"signal":null}\n', "[1]\n", ""):
+            self.assertEqual(self.wineserver(bad).status, "ok", bad)   # not what watch-server writes: as none
 
     def test_other_bottles_that_take_the_sign_in_link(self):
         self.assertNotIn("bottle.app.signin-others", self.by_id(self.checks()))
