@@ -181,8 +181,9 @@ import TrackpadState
     cl.reply = HitReply(seq: 1, chain: [HitWindow(cls: "AfxFrameOrView140u", title: "ProjectSecret-XYZ"),
                                         HitWindow(cls: "F", title: "ProjectSecret-XYZ Floor Plan")], complete: true, bad: false)
     let ctx = w.tap.contexts.last!
+    w.log.flush()   // the start's lines first: the two logs share the file and write on queues of their own
     let small = TrackpadLog(url: w.dir.appending(path: "logs/trackpad.log"), limit: 300)
-    for _ in 0..<5 {
+    for _ in 0..<10 {   // ~470 bytes of decisions alone: past the limit whatever else is in the file
         _ = Decider.decide(at: CGPoint(x: 1234, y: 567), windows: [WinInfo(pid: 500, bounds: CGRect(x: 0, y: 0, width: 5000, height: 5000), alpha: 1)],
                            buttonsDown: false, context: ctx, log: small)
     }
