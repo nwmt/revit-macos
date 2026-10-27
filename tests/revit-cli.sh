@@ -1228,6 +1228,11 @@ for a in "2027 x=y" "2027 rvt2027-a extra" "2027 --json" "2027 --yes" "2027 --bo
 done
 theme_world rvt2027-a mac dark; run_mcp theme 2027 --events "$T/ev"
 check "theme --events: usage → 2, no events folder" eval '[ "$RC" = 2 ] && [ ! -e "$T/ev" ]'
+theme_world rvt2027-b light dark; touch "$BOTTLES/rvt2027-b/drive_c/Program Files/Autodesk/Revit 2027/Revit.exe"
+run "" doctor 2027 rvt2027-b --json --all
+check "doctor: bottle.theme says the theme is fixed, with ./revit set for that bottle" eval 'printf "%s" "$OUT" | /usr/bin/perl -MJSON::PP -e '"'"'
+  local $/; my ($c) = grep { $_->{id} eq "bottle.theme" } @{JSON::PP->new->decode(<STDIN>)->{checks}};
+  exit !($c && $c->{title} eq "Revit'"'"'"'"'"'"'"'"'s theme is fixed: light" && $c->{fix} eq "./revit set 2027 rvt2027-b theme=mac to follow the Mac")'"'"''
 reset; run "" --help; check "theme is in the help" grep -qx "  theme     for the app: Revit's theme follows the Mac's light or dark look now" <<<"$OUT"
 MCP_ENV=()
 for m in mac light dark junk; do

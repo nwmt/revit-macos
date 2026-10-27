@@ -430,7 +430,8 @@ class Bottle(Sandbox):
         cs = self.checks(engine="git:bbbbbbb+dirty")
         c = self.by_id(cs)["install.engine"]
         self.assertEqual((c.status, c.show), ("info", True))
-        self.assertEqual(c.title, "installed by an older version of this project; new fixes reach it after a rebuild")
+        self.assertEqual(c.title, "installed by an older version of this project; fixes newer than it reach it after a "
+                                  "rebuild (settings you change with ./revit set apply without one)")
         self.assertNotIn("install.engine", self.by_id(self.checks(engine="unknown")))
         self.assertNotIn("install.engine", self.by_id(self.checks(engine="git:aaaaaaa+dirty")))
         self.records_clear()
@@ -671,6 +672,50 @@ class PyrevitAgent(Sandbox):
         cs = dr.run_checks(self.facts) if self.checks() else []
         self.assertNotIn("doctor.internal", [c.id for c in cs])
         self.assertEqual(sorted(self.mcp(cs)), ["mcp.pyrevit.ready", "mcp.ready"])
+
+class Theme(Sandbox):
+    """bottle.theme: the step theme's mode file and the Revit app's script, where the profile has the step."""
+    profile = dict(PROFILE, STEPS=STEPS + ["theme"])
+
+    def mode(self, m):
+        d = os.path.join(self.b, dr.THEME_DIR)
+        os.makedirs(d, exist_ok=True)
+        self.write(os.path.join(d, "theme"), m + "\n")
+
+    def themed_app(self):
+        script = os.path.join(self.app("Revit %d" % self.year), "Contents", "Resources", "Scripts", "main.scpt")
+        rc, src = self.scripts[script]
+        self.scripts[script] = (rc, src.replace("(cd ~ && ", "(cd ~ && : revit-macos/theme; "))
+
+    def theme(self, **kw):
+        return [(c.title, c.fix) for c in self.checks(**kw) if c.id == "bottle.theme"]
+
+    def test_follows_the_mac(self):
+        self.mode("mac")
+        self.themed_app()
+        self.assertEqual(self.theme(), [("Revit's theme follows the Mac", "")])
+
+    def test_an_app_older_than_the_setting(self):
+        self.mode("mac")
+        self.assertEqual(self.theme(), [("the Revit app is older than the theme setting: Revit starts in the theme it "
+                                         "had last", "./revit set 2025 theme=mac")])
+
+    def test_fixed(self):
+        self.mode("dark")
+        self.themed_app()
+        self.assertEqual(self.theme(), [("Revit's theme is fixed: dark", "./revit set 2025 theme=mac to follow the Mac")])
+
+    def test_set_once_at_install(self):
+        self.assertEqual(self.theme(), [("Revit's theme was set once at install: it stays when the Mac turns light or "
+                                         "dark", "./revit set 2025 theme=mac to follow the Mac")])
+        self.mode("blue")   # not a mode: as without the file
+        self.assertEqual(len(self.theme()), 1)
+        self.assertIn("set once at install", self.theme()[0][0])
+
+    def test_none_without_the_step(self):
+        self.mode("mac")
+        self.assertEqual(self.theme(profile=PROFILE), [])
+
 
 class Settings(Sandbox):
     """The settings group: what the retina and mackeys steps wrote, read from user.reg and system.reg."""

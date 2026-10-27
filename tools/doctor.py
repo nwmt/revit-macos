@@ -76,6 +76,8 @@ FREE_MIN_GB = 10
 MACOS_TESTED = 26
 VERIFIED_BUILD_YEARS = (2025, 2027)   # 2026-10-17: 2025.5 and 2027.3 matched; years whose real Revit.exe matched the installer's build: then a mismatch is a ✗
 APP_SCRIPT = re.compile(r"'([^']*/bin/wine)' --bottle '([^']*)'")   # what scripts/make-apps.sh writes
+APP_THEME = "revit-macos/theme"   # in the Revit app's script when it sets the theme before Revit starts (make-apps.sh)
+THEME_DIR = "drive_c/Program Files/revit-macos"   # the step theme: themeset.exe and the mode file "theme"
 WINEISH = re.compile(r"wine|crossover|\.exe\b", re.I)   # processes that may hold a bottle's files
 HOSTS_FIX = "H=\"$(hostname)\"; sudo sh -c \"printf '127.0.0.1\\t$H\\n::1\\t$H\\n' >> /etc/hosts\""
 TS = "docs/troubleshooting.md#"
@@ -597,6 +599,7 @@ def apps(ctx):
             m = APP_SCRIPT.search(src) if a["script"] else None
             if m:
                 a["wine"], a["bottle"], a["wine_exists"] = m.group(1), m.group(2), os.path.isfile(m.group(1))
+            a["theme"] = bool(a["script"]) and APP_THEME in src
         out[key] = a
     others = []   # the Sign-In apps of other bottles: every one of them takes the same adskidmgr:// link
     for app in sorted(glob.glob(os.path.join(ctx.home, "Applications", "Autodesk Sign-In (*).app"))):
@@ -842,6 +845,16 @@ def collect_mcp(ctx, p):
     return m
 
 
+def theme_mode(p):
+    """The step theme's mode in the bottle: mac, light or dark; None without the file (or with another word)."""
+    try:
+        with open(os.path.join(p, THEME_DIR, "theme"), encoding="utf-8", errors="replace") as f:
+            m = f.readline().strip()
+    except OSError:
+        return None
+    return m if m in ("mac", "light", "dark") else None
+
+
 def collect_bottle(ctx):
     y, p = ctx.year, os.path.join(ctx.bottles, ctx.bottle)
     b = {"link": os.path.islink(p)}
@@ -859,6 +872,7 @@ def collect_bottle(ctx):
     b["revit_version"] = bottleread.pe_file_version(exe) if b["revit_exe"] else None
     b["documents"] = documents(p, ctx)
     b["apps"] = apps(ctx)
+    b["theme_mode"] = theme_mode(p)
     b["activity"] = activity(p, ctx.run)
     b["records"] = runlog.records(p)
     b["summary"] = install_summary(ctx.data, ctx.bottle)
@@ -1185,7 +1199,8 @@ def install_checks(f, b):
         now = (engine_key(f.get("engine")), engine_key(f.get("shims_release")))
         if any(o and n and o != n for o, n in zip(old, now)):
             out.append(Check("install.engine", "info",
-                             "installed by an older version of this project; new fixes reach it after a rebuild",
+                             "installed by an older version of this project; fixes newer than it reach it after a "
+                             "rebuild (settings you change with ./revit set apply without one)",
                              detail=f"then {last.get('engine')}, shims {last.get('shims')}; now {f.get('engine')}, "
                                     f"shims {f.get('shims_release')}",
                              fix="when you want them: " + rebuild(f)))
@@ -1366,6 +1381,23 @@ def effective_dpi(hkcu, hklm):
         if v[1]:
             return v[1]
     return 96
+
+
+def theme_checks(f, b):
+    """bottle.theme, where the profile has the step theme: whether Revit's theme follows the Mac's look."""
+    if "theme" not in (f["profile"].get("STEPS") or []):
+        return []
+    mode, app = b.get("theme_mode"), (b.get("apps") or {}).get("revit") or {}
+    fix = f"./revit set {f['year']}{f['sfx']} theme=mac"
+    if mode is None:
+        return [Check("bottle.theme", "info", "Revit's theme was set once at install: it stays when the Mac turns light "
+                      "or dark", fix=f"{fix} to follow the Mac")]
+    if mode != "mac":
+        return [Check("bottle.theme", "info", f"Revit's theme is fixed: {mode}", fix=f"{fix} to follow the Mac")]
+    if app.get("script") and not app.get("theme"):
+        return [Check("bottle.theme", "info", "the Revit app is older than the theme setting: Revit starts in the "
+                      "theme it had last", fix=fix)]
+    return [Check("bottle.theme", "info", "Revit's theme follows the Mac")]
 
 
 def settings_checks(f, b):
@@ -1624,7 +1656,7 @@ def bottle_checks(f):
     out += app_checks(f, b)
     out += install_checks(f, b) + since_install(f, b)
     if b.get("revit_exe"):
-        out += fixes_checks(f, b) + settings_checks(f, b) + addin_checks(f) + mcp_checks(f, b) + pyrevit_agent_checks(f, b)
+        out += fixes_checks(f, b) + settings_checks(f, b) + theme_checks(f, b) + addin_checks(f) + mcp_checks(f, b) + pyrevit_agent_checks(f, b)
     return out + logs_checks(f, b)
 
 
