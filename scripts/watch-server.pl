@@ -5,7 +5,8 @@
 # Nothing when the bottle's wineserver already runs. Three processes: the caller exits as soon as the server answers
 # (or within 6 s), the supervisor (its own session) waits for the server and writes its end, the server is wine's own
 # wineserver -f. It never stops the server and starts no Windows program. Always exits 0; says nothing outside the log.
-# Only the Perl that ships with macOS. REVIT_WATCH_IDLE, REVIT_WATCH_LOCK_WAIT and REVIT_CX_TMP are for tests.
+# Only the Perl that ships with macOS. REVIT_WATCH_IDLE, REVIT_WATCH_LOCK_WAIT, REVIT_WATCH_LSOF and REVIT_CX_TMP are
+# for tests.
 use strict;
 use warnings;
 use Cwd qw(realpath);
@@ -27,6 +28,7 @@ open STDERR, '>', '/dev/null';
 my $server = "$cx/bin/wineserver";
 my $idle = $ENV{REVIT_WATCH_IDLE} // 60;
 my $lock_wait = $ENV{REVIT_WATCH_LOCK_WAIT} // 30;
+my $lsof = $ENV{REVIT_WATCH_LSOF} // '/usr/sbin/lsof';
 
 sub nap { select(undef, undef, undef, $_[0]) }
 sub stamp { strftime('%Y-%m-%dT%H:%M:%S%z', localtime) }
@@ -115,20 +117,36 @@ close $err_w;
 $SIG{PIPE} = 'IGNORE';   # the caller may be gone when the word comes late
 print $log stamp(), " start $run server $srv\n";
 
+sub probe { # $1 = seconds, rest = a command: its output; undef when it fails to start or takes longer (then it is
+  # killed), so a stuck lsof never keeps the supervisor from reading the server's messages and writing its end
+  my $secs = shift;
+  my $pid = open(my $h, '-|');
+  return undef unless defined $pid;
+  if (!$pid) { $SIG{PIPE} = 'DEFAULT'; open STDERR, '>', '/dev/null'; { exec @_ } POSIX::_exit(127) }
+  my ($out, $done, $until) = ('', 0, time + $secs);
+  while ((my $left = $until - time) > 0) {
+    my $rin = '';
+    vec($rin, fileno($h), 1) = 1;
+    last unless select(my $rout = $rin, undef, undef, $left) > 0;
+    my $n = sysread($h, $out, 65536, length $out);
+    if (!$n) { $done = 1; last }
+  }
+  kill 'KILL', $pid unless $done;
+  close $h;   # reaps it
+  return $done ? $out : undef;
+}
+
 # 4. Ready: the server accepts a connection on its socket, in the folder lsof shows its lock file in. A socket file
 # alone says nothing: a killed server leaves its own, and a new one has it before it listens
-sub server_dir {
-  open(my $l, '-|', '/usr/sbin/lsof', '-w', '-n', '-P', '-Fn', '-p', $_[0]) or return undef;
-  my $found;
-  while (<$l>) { $found = $1 if !defined $found && m{^n(.*/server-[^/]+)/lock$} }
-  close $l;
-  return $found;
+sub server_dir { # $1 = pid, $2 = seconds at most
+  my $out = probe($_[1], $lsof, '-w', '-n', '-P', '-Fn', '-p', $_[0]) // return undef;
+  return $out =~ m{^n(.*/server-[^/\n]+)/lock$}m ? $1 : undef;
 }
 my ($status, $sdir, $ok);
 my $until = time + 5;
 while (time < $until) {
   if (waitpid($srv, WNOHANG) == $srv) { $status = $?; last }
-  $sdir //= server_dir($srv);
+  $sdir //= server_dir($srv, $until - time);
   if (defined $sdir && IO::Socket::UNIX->new(Type => SOCK_STREAM, Peer => "$sdir/socket")) { $ok = 1; last }
   nap(0.05);
 }
@@ -137,16 +155,13 @@ close $ready_w;
 print $log stamp(), " $run ", $ok ? "ready" : "not ready", "\n";
 
 # 5. The server's messages, until it ends; once, after REVIT_WATCH_IDLE seconds, whether any Windows program came
-sub others { # whether a Wine process besides the server has the bottle or a file in it open
-  open(my $p, '-|', '/usr/bin/pgrep', '-U', $<, '-i', '-f', 'wine|\.exe') or return 1;
-  my @pids = grep { $_ != $srv && $_ != $$ } map { /^(\d+)/ ? $1 : () } <$p>;
-  close $p;
+sub others { # whether a Wine process besides the server has the bottle or a file in it open; yes when unsure
+  my $ps = probe(2, '/usr/bin/pgrep', '-U', $<, '-i', '-f', 'wine|\.exe') // return 1;
+  my @pids = grep { $_ != $srv && $_ != $$ } $ps =~ /^(\d+)/mg;
   return 0 unless @pids;
-  open(my $l, '-|', '/usr/sbin/lsof', '-w', '-n', '-P', '-Fn', '-p', join(',', @pids)) or return 1;
-  my $held = 0;
-  while (<$l>) { chomp; $held = 1 if $_ eq "n$real" || index($_, "n$real/") == 0 }
-  close $l;
-  return $held;
+  my $out = probe(2, $lsof, '-w', '-n', '-P', '-Fn', '-p', join(',', @pids)) // return 1;
+  for (split /\n/, $out) { return 1 if $_ eq "n$real" || index($_, "n$real/") == 0 }
+  return 0;
 }
 my ($buf, $crashed, $asked) = ('', 0, 0);
 my $line = sub {

@@ -9,7 +9,7 @@ CLEAN_ENV=(-u REVIT_DATA -u REVIT_LOCK_DIR -u SHIMS_DIR -u REVIT_BUNDLED -u REVI
   -u REVIT_ACCEPT_EULA -u REVIT_SOURCE_LIST -u REVIT_REUSE_EXTRACTED -u REVIT_REEXTRACT -u REVIT_UNPACK_AGAIN
   -u REVIT_FOR_BOTTLE -u INSTALL_PARENT -u W_CACHE -u SHIMS_FROM_SOURCE -u RUN_DIR -u RUN_KIND -u CX_RECREATE
   -u INSTALL_DRYRUN -u REVIT_LANG -u ODIS_PKGS -u REVIT_THEME -u REVIT_DEFAULTS -u REVIT_YEAR -u SMOKE_TIMEOUT -u SMOKE_START_WAIT
-  -u SMOKE_STALL -u SMOKE_WORKER_WAIT -u SMOKE_POLL -u SMOKE_PREP_TIMEOUT -u REVIT_CX_TMP -u REVIT_WATCH_IDLE -u REVIT_WATCH_LOCK_WAIT
+  -u SMOKE_STALL -u SMOKE_WORKER_WAIT -u SMOKE_POLL -u SMOKE_PREP_TIMEOUT -u REVIT_CX_TMP -u REVIT_WATCH_IDLE -u REVIT_WATCH_LOCK_WAIT -u REVIT_WATCH_LSOF
   -u REVIT_RETINA -u REVIT_KEYS -u SETTINGS_SAVE_WAIT)
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)" && [ -d "$TMP" ] || { echo "mktemp failed" >&2; exit 1; }
@@ -982,7 +982,7 @@ EOF
 ws_run() { # watch-server as the Revit app runs it, with fds 7 and 9 open as in a script of ours. RC; SECS it took
   local t0; t0="$(/usr/bin/perl -MTime::HiRes=time -e 'print time')"
   ( cd / && "${SANDBOX_ENV[@]}" REVIT_CX_TMP="$T/cxtmp" REVIT_WATCH_IDLE="${WS_IDLE:-60}" \
-    REVIT_WATCH_LOCK_WAIT="${WS_LOCK_WAIT:-30}" /usr/bin/perl "$R/scripts/watch-server.pl" "$CXF" "$WB" \
+    REVIT_WATCH_LOCK_WAIT="${WS_LOCK_WAIT:-30}" REVIT_WATCH_LSOF="${WS_LSOF:-/usr/sbin/lsof}" /usr/bin/perl "$R/scripts/watch-server.pl" "$CXF" "$WB" \
     </dev/null >/dev/null 2>&1 7>"$T/fd7" 9>"$T/fd9" ); RC=$?
   SECS="$(/usr/bin/perl -MTime::HiRes=time -e 'printf "%.1f", time - $ARGV[0]' "$t0")"
   SUP="$(sed -n 's/.* start [0-9]*-\([0-9]*\) server .*/\1/p' "$WL" 2>/dev/null | tail -1)"
@@ -1044,6 +1044,11 @@ check "watch-server: a deleted bottle: no folder made again" eval 'wait_for 5 ev
 ws_setup; head -c 300000 /dev/zero | tr '\0' x > "$WL"; echo '{"gen":7}' > "$WJ"; ws_run
 check "watch-server: a log over 256 KB moves to .log.1; .last stays" eval '[ "$(wc -c < "$WL.1" | tr -d " ")" = 300000 ] &&
   grep -q " start " "$WL" && [ "$(wc -c < "$WL" | tr -d " ")" -lt 1000 ] && [ "$(cat "$WJ")" = "{\"gen\":7}" ]'
+ws_setup; printf '#!/bin/bash\nsleep 30\n' > "$W/lsof"; chmod +x "$W/lsof"; WS_LSOF="$W/lsof" WS_IDLE=1 ws_run
+check "watch-server: a hung lsof: not ready within 6 s, exit 0" eval '[ "$RC" = 0 ] && secs_ge 7 "$SECS" && grep -q " not ready$" "$WL"'
+ws_stop 0
+check "watch-server: a hung lsof never keeps the supervisor from writing the end" eval 'grep -q "class normal exit 0$" "$WL" &&
+  ! grep -q "no Windows program" "$WL" && ! pgrep -f "$W/lsof" >/dev/null'
 ws_setup; WS_IDLE=1 ws_run
 check "watch-server: no Windows program within the time → a note, the server stays" eval 'wait_for 4 grep -q " no Windows program yet$" "$WL" && srv_alive'
 ws_setup; mkdir -p "$WB/drive_c"; touch "$WB/drive_c/held"
