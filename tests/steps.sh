@@ -31,10 +31,12 @@ $OUT"; fi
 check() { local name="$1"; shift; if "$@"; then ok "$name"; else fail "$name" "failed: $*"; fi; }
 called()     { grep -qF -- "$1" "$CALLS"; }
 not_called() { ! grep -qF -- "$1" "$CALLS"; }
+wait_for() { # $1 = seconds, rest = a command: until it succeeds
+  local i; for i in $(seq 1 $(($1 * 10))); do "${@:2}" && return 0; sleep 0.1; done; return 1; }
 
 reset() { # a fresh sandbox: the repo's scripts and tools, fake prebuilt shims, a fake CrossOver
   stop_bg; chmod -R u+w "$T" 2>/dev/null; rm -rf "$T"
-  mkdir -p "$R" "$H/Applications" "$BOTTLES" "$CXF/bin" "$CXF/lib/dxvk/x86_64-windows" "$CXF/lib/wine/x86_64-windows" \
+  mkdir -p "$R" "$H/Applications" "$BOTTLES" "$CXF/bin" "$T/cxtmp" "$CXF/lib/dxvk/x86_64-windows" "$CXF/lib/wine/x86_64-windows" \
     || { echo "sandbox setup failed"; exit 1; }
   cp -R "$REPO/scripts" "$REPO/tools" "$R/"
   local f; for f in d3dwp/d3dwp.dll hittest/hittest.exe mcphost/mcphost.exe mcppipes/mcppipes.dll ncryptshim/ncrypt.dll pdfprinter/add_printer.exe rvtfix/rvtfix.dll \
@@ -929,8 +931,10 @@ expect "new-bottle: CX_RECREATE checks the year first" 1 "is for Revit 2024, not
 # the fake "Revit" is the fake wine itself: Revit.exe in its arguments and the bottle's drive_c as its folder, so
 # revit_running sees it, as it sees the real one
 reset; mkbottle rvt2024-t 2024 2024; rule "Revit.exe" 0 "sleep 4"
-OUT="$(cd / && "${SANDBOX_ENV[@]}" REVIT_LAUNCH_WAIT=3 /bin/bash "$R/scripts/launch.sh" 2024 rvt2024-t 2>&1)"; RC=$?
+OUT="$(cd / && "${SANDBOX_ENV[@]}" REVIT_CX_TMP="$T/cxtmp" REVIT_LAUNCH_WAIT=3 /bin/bash "$R/scripts/launch.sh" 2024 rvt2024-t 2>&1)"; RC=$?
 expect "launch.sh starts Revit and returns once it runs" 0 "Revit 2024 started (backend default)"
+check "launch.sh: the bottle's wineserver under watch-server first, then Revit" eval '[ "$(sed -n 1p "$CALLS")" = "wineserver -k0" ] &&
+  wait_for 3 grep -q "Revit.exe" "$CALLS"'
 in_repo 'lock_free && echo free'; expect "launch.sh: the Revit it started does not hold the lock" 0 "free"
 sleep 4
 
@@ -944,7 +948,7 @@ ws_setup() { # $@ = mode lines (key=value): a bottle and a fake wineserver that 
   # -f: records how it was called, says the lines of say= (| between them) on stderr, ends at once with now=, else
   # holds server-x/lock, leaves a dead server's socket (stale=1), waits before=, ends with die= before it listens,
   # binds, waits gap= seconds, listens (not with nolisten=1), and ends with the code ws_stop writes
-  ws_end; reset; rm -rf "$W"; mkdir -p "$W" "$T/cxtmp"
+  ws_end; reset; rm -rf "$W"; mkdir -p "$W"
   WB="$BOTTLES/rvt2027-w"; WL="$WB/revit-macos/wineserver.log"; WJ="$WB/revit-macos/wineserver.last"
   mkdir -p "$WB/revit-macos"; printf '%s\n' "$@" > "$W/mode"
   cat > "$CXF/bin/wineserver" <<EOF
@@ -983,7 +987,6 @@ ws_run() { # watch-server as the Revit app runs it, with fds 7 and 9 open as in 
   SECS="$(/usr/bin/perl -MTime::HiRes=time -e 'printf "%.1f", time - $ARGV[0]' "$t0")"
   SUP="$(sed -n 's/.* start [0-9]*-\([0-9]*\) server .*/\1/p' "$WL" 2>/dev/null | tail -1)"
 }
-wait_for() { local i; for i in $(seq 1 $(($1 * 10))); do "${@:2}" && return 0; sleep 0.1; done; return 1; }
 ws_stop() { echo "$1" > "$W/stop"; wait_for 5 grep -qs " ended " "$WL"; }   # the fake server ends with code $1
 srv_alive() { [ -f "$W/pid" ] && kill -0 "$(cat "$W/pid")" 2>/dev/null; }
 secs_ge() { /usr/bin/perl -e 'exit !($ARGV[0] >= $ARGV[1])' "$1" "$2"; }   # $1 >= $2, fractions too
@@ -1370,13 +1373,21 @@ check "make-apps 2027: no Revit Viewer app, the old one removed" test ! -e "$H/A
 reset; make_apps_sandbox 2026 rvt2026-t "Revit 2026" "Revit Viewer 2026"
 run_make_apps 2026 rvt2026-t; expect "make-apps 2026: the Revit Viewer app from its shortcut" 0 "done: ~/Applications/Revit Viewer 2026 (rvt2026-t).app"
 check "make-apps 2026: no theme part (no step theme)" eval '! grep -q "revit-macos/theme" "$H/Applications/Revit 2026 (rvt2026-t).app/Contents/Resources/script.txt"'
+check "make-apps 2026: watch-server first, from its copy in the bottle" eval 'grep -q "^do shell script \"(cd ~ && : revit-macos/watch-server; \[ -f .*/rvt2026-t/revit-macos/watch-server.pl. \] && /usr/bin/perl .* 7>&- 8>&- 9>&-; .*Revit.exe" "$H/Applications/Revit 2026 (rvt2026-t).app/Contents/Resources/script.txt" &&
+  cmp -s "$R/scripts/watch-server.pl" "$BOTTLES/rvt2026-t/revit-macos/watch-server.pl"'
+check "make-apps 2026: watch-server only in the Revit app" eval '! grep -q watch-server "$H/Applications/Revit Viewer 2026 (rvt2026-t).app/Contents/Resources/script.txt"'
 # each app is built in a hidden <title> (<bottle>).new.app and replaces the old one only when complete
 APP27="$H/Applications/Revit 2027 (rvt2027-t).app"
 reset; make_apps_sandbox 2027 rvt2027-t "Revit 2027"; run_make_apps 2027 rvt2027-t
 expect "make-apps 2027 with the step theme" 0 "done: ~/Applications/Revit 2027 (rvt2027-t).app"
 check "make-apps: built in the hidden .new.app, none left" eval 'called "osacompile [$H/Applications/.Revit 2027 (rvt2027-t).new.app]" &&
   [ ! -e "$H/Applications/.Revit 2027 (rvt2027-t).new.app" ] && [ -f "$APP27/Contents/Resources/script.txt" ]'
-check "make-apps 2027: the theme part, then Revit" grep -q "revit-macos/theme.*themeset.exe.*Revit.exe" "$APP27/Contents/Resources/script.txt"
+check "make-apps 2027: watch-server, the theme part, then Revit" grep -q "^do shell script \"(cd ~ && : revit-macos/watch-server;.*revit-macos/theme.*themeset.exe.*Revit.exe" "$APP27/Contents/Resources/script.txt"
+check "make-apps 2027: the copy of watch-server in the bottle" cmp -s "$R/scripts/watch-server.pl" "$BOTTLES/rvt2027-t/revit-macos/watch-server.pl"
+echo old > "$APP27/old"; mv "$BOTTLES/rvt2027-t/revit-macos" "$T/rm-saved"; : > "$BOTTLES/rvt2027-t/revit-macos"; run_make_apps 2027 rvt2027-t
+expect "make-apps: watch-server cannot be copied → 1" 1 ""
+check "make-apps: no copy, the old app kept" eval '[ -f "$APP27/old" ] && [ ! -e "$H/Applications/.Revit 2027 (rvt2027-t).new.app" ]'
+rm "$BOTTLES/rvt2027-t/revit-macos"; mv "$T/rm-saved" "$BOTTLES/rvt2027-t/revit-macos"
 mkdir -p "$H/Applications/Revit Viewer 2027 (rvt2027-t).app"; echo old > "$APP27/old"; : > "$T/osa-fail"
 run_make_apps 2027 rvt2027-t; expect "make-apps: osacompile fails → 1" 1 ""
 check "make-apps: a failed build keeps the old app, no .new.app left" eval '[ -f "$APP27/old" ] && [ ! -e "$H/Applications/.Revit 2027 (rvt2027-t).new.app" ]'
@@ -1395,18 +1406,22 @@ if [ -x /usr/bin/osacompile ] && [ -x /usr/bin/osascript ]; then
   Q="$T/cx 'q"; cp -R "$CXF" "$Q"   # a CrossOver path with a quote and a space
   printf '#!/bin/bash\necho Dark\n' > "$T/dark-defaults"; chmod +x "$T/dark-defaults"
   TD="$BOTTLES/rvt2027-t/drive_c/Program Files/revit-macos"
-  osa_run() { : > "$CALLS"; (cd / && env -i HOME="$H" PATH=/usr/bin:/bin /usr/bin/osascript "$APP27/Contents/Resources/Scripts/main.scpt" >/dev/null 2>&1)
+  osa_run() { : > "$CALLS"; (cd / && env -i HOME="$H" PATH=/usr/bin:/bin REVIT_CX_TMP="$T/cxtmp" /usr/bin/osascript "$APP27/Contents/Resources/Scripts/main.scpt" >/dev/null 2>&1)
     local i; for i in $(seq 1 50); do grep -q 'Revit.exe' "$CALLS" && break; sleep 0.1; done; }
   OUT="$(cd / && "${SANDBOX_ENV[@]}" REVIT_CX="$Q" REVIT_DEFAULTS="$T/dark-defaults" STUBS="$T/stubs" PATH="$T/stubs:$PATH" \
     /bin/bash "$R/scripts/make-apps.sh" 2027 rvt2027-t 2>&1)"; RC=$?
   expect "make-apps with the real osacompile" 0 "done: ~/Applications/Revit 2027 (rvt2027-t).app"
   check "the app's script carries the theme marker (osadecompile)" eval '/usr/bin/osadecompile "$APP27/Contents/Resources/Scripts/main.scpt" | grep -q "revit-macos/theme"'
   mkdir -p "$TD"; echo mac > "$TD/theme"; : > "$TD/themeset.exe"; osa_run
-  check "app, mode mac on a dark Mac: themeset dark, then Revit" eval '[ "$(grep -c . "$CALLS")" = 2 ] &&
-    sed -n 1p "$CALLS" | grep -qF "[--bottle] [rvt2027-t] [C:\Program Files\revit-macos\themeset.exe] [dark]" &&
-    sed -n 2p "$CALLS" | grep -qF "[C:\Program Files\Autodesk\Revit 2027\Revit.exe] [/language] [ENU]"'
+  check "app, mode mac on a dark Mac: watch-server, themeset dark, then Revit" eval '[ "$(grep -c . "$CALLS")" = 3 ] &&
+    [ "$(sed -n 1p "$CALLS")" = "wineserver -k0" ] &&
+    sed -n 2p "$CALLS" | grep -qF "[--bottle] [rvt2027-t] [C:\Program Files\revit-macos\themeset.exe] [dark]" &&
+    sed -n 3p "$CALLS" | grep -qF "[C:\Program Files\Autodesk\Revit 2027\Revit.exe] [/language] [ENU]"'
+  check "app: watch-server takes CrossOver's lock where it is told (no file in the real one)" eval 'ls "$T"/cxtmp/.wine-*/bottle-*.lock >/dev/null 2>&1'
   echo light > "$TD/theme"; osa_run
-  check "app, mode light: no themeset, Revit starts" eval '[ "$(grep -c . "$CALLS")" = 1 ] && grep -q "Revit.exe" "$CALLS"'
+  check "app, mode light: watch-server, no themeset, Revit starts" eval '[ "$(grep -c . "$CALLS")" = 2 ] && [ "$(sed -n 1p "$CALLS")" = "wineserver -k0" ] && grep -q "Revit.exe" "$CALLS"'
+  rm "$BOTTLES/rvt2027-t/revit-macos/watch-server.pl"; osa_run
+  check "app, no copy of watch-server: Revit still starts" eval '! grep -q wineserver "$CALLS" && grep -q "Revit.exe" "$CALLS"'
   echo mac > "$TD/theme"; rule "themeset.exe" 1; osa_run
   check "app, themeset fails: Revit still starts" eval 'grep -q "themeset.exe" "$CALLS" && grep -q "Revit.exe" "$CALLS"'
   rm "$TD/themeset.exe"; osa_run

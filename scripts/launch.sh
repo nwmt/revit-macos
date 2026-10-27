@@ -16,6 +16,8 @@ wine_init "$2"
 RUN_DIR="$(run_dir_new "$NAME" debug)" || die "Cannot create a log folder in $(tilde "$DATA/logs")."
 cd "$B/drive_c" || die "Cannot enter $(tilde "$B/drive_c")."
 [ "$BE" = default ] || export CX_GRAPHICS_BACKEND="$BE"
+# the bottle's wineserver under watch-server, as the Revit app starts it: its log and how it ends
+/usr/bin/perl "$ROOT/scripts/watch-server.pl" "$CX" "$B" </dev/null >/dev/null 2>&1 7>&- 8>&- 9>&-
 # fd 9 closed on the backgrounded call itself: the subshell that runs the function would keep the lock until Revit quits
 CX_LOG="$RUN_DIR/wine.cxlog" CX_DEBUGMSG="${CX_DEBUGMSG:-err,+seh}" \
   w_nowait "C:\\Program Files\\Autodesk\\Revit $YEAR\\Revit.exe" ${FILE:+"$FILE"} >"$RUN_DIR/stdout.log" 2>&1 </dev/null 7>&- 9>&- &

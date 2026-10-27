@@ -8,9 +8,10 @@
 # Why: CrossOver 26 cxmenu makes no app for "Revit <year>.lnk", and macOS does not know the sign-in link scheme (only
 # the bottle's registry has it: "Opening product" and nothing). The command line (/viewer, /language …) and the icon
 # come from the installer's Start Menu shortcuts (tools/win_shortcut.py), so nothing is hardcoded per year. The sign-in
-# link carries a one-time code: it is never logged. Where the profile has the step theme (2027), the Revit app first
-# sets the bottle's Windows theme from the Mac's look (themeset.exe in the bottle, when its mode file says mac), so
-# Revit starts in it. Each app is built beside the old one and replaces it only when it is complete.
+# link carries a one-time code: it is never logged. The Revit app first starts the bottle's wineserver under
+# scripts/watch-server.pl (a copy in <bottle>/revit-macos), which writes down how it ends. Where the profile has the
+# step theme (2027), it then sets the bottle's Windows theme from the Mac's look (themeset.exe in the bottle, when its
+# mode file says mac), so Revit starts in it. Each app is built beside the old one and replaces it only when complete.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; . "$ROOT/scripts/lib/common.sh"
 REVIT_ONLY=0; [ $# -eq 3 ] && [ "$3" = --revit-only ] && REVIT_ONLY=1
@@ -31,12 +32,21 @@ theme_prefix() { # the Revit app's first part where the profile has the step the
   in_list theme ${STEPS[@]+"${STEPS[@]}"} || return 0
   printf '%s' ": revit-macos/theme; d=$(sq "$d"); if [ \"\$(cat \"\$d/theme\" 2>/dev/null)\" = mac ] && [ -f \"\$d/themeset.exe\" ]; then t=light; $(sq "$DEFAULTS") read -g AppleInterfaceStyle 2>/dev/null | /usr/bin/grep -qi dark && t=dark; $(sq "$CXW") --bottle $(sq "$NAME") 'C:\\Program Files\\revit-macos\\themeset.exe' \"\$t\"; fi; "
 }
+watch_copy() { # the Revit app's copy of scripts/watch-server.pl in the bottle: the app runs it wherever the repo is
+  local d="$B/revit-macos"
+  mkdir -p "$d" && cp "$ROOT/scripts/watch-server.pl" "$d/watch-server.pl.new" && mv "$d/watch-server.pl.new" "$d/watch-server.pl"
+}
+watch_prefix() { # the Revit app's first part, every year: the bottle's wineserver under watch-server (its log and how it
+  # ends, for ./revit doctor and report), when the copy is there; whatever happens, Revit starts after it
+  local w="$B/revit-macos/watch-server.pl"
+  printf '%s' ": revit-macos/watch-server; [ -f $(sq "$w") ] && /usr/bin/perl $(sq "$w") $(sq "$CX") $(sq "$B") 7>&- 8>&- 9>&-; "
+}
 unix_path() { local p="${1#[Cc]:}"; echo "$B/drive_c${p//\\//}"; }   # C:\a\b → <bottle>/drive_c/a/b
 
 make_app() { # $1 = app title, $2 = Windows exe path, $3 = arguments, $4 = icon (Windows path, may be empty). Built in a
   # hidden .new.app (osacompile makes an app only for a path ending in .app), which replaces the old app when complete
   local app="$HOME/Applications/$1 ($NAME).app" tmp="$HOME/Applications/.$1 ($NAME).new.app" line pre=""
-  [ "$1" != "Revit $YEAR" ] || pre="$(theme_prefix)"
+  if [ "$1" = "Revit $YEAR" ]; then watch_copy || return 1; pre="$(watch_prefix)$(theme_prefix)"; fi
   rm -rf "$tmp"
   # The redirect covers the whole ( ) group: with `cd ~ && wine … >/dev/null &` the backgrounded shell keeps
   # do shell script's output pipe open, so the applet waits (and sits in the Dock) until Revit quits.
