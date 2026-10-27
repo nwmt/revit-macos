@@ -65,6 +65,16 @@ Often after a macOS upgrade: Rosetta 2 is gone, and the Revit app fails without 
 **Solution:** `./revit doctor <year>` names the cause. If it says Rosetta 2 is missing:
 `softwareupdate --install-rosetta --agree-to-license`.
 
+### Revit's icon shows in the Dock for a moment, then Revit closes
+
+All versions
+
+The Revit app starts Revit and quits. When macOS does not allow the app in the background, it stops everything the
+app started as soon as the app quits. Starting Revit from Terminal still works.
+
+**Solution:** System Settings → General → Login Items & Extensions → Allow in the Background: turn on
+**Revit <year> (<bottle>)**. The **Autodesk Sign-In (<bottle>)** app works the same way: turn it on too.
+
 ## Sign-in
 
 ### Revit hangs on the splash screen after the first sign-in
