@@ -34,6 +34,11 @@ folder the steps read. `./revit doctor` reads it. `./revit remove`, `./revit cac
 folder while another bottle of its year may install from it: its record names that folder, or does not say (no install
 record, or one from before that field).
 
+The Revit app and `./revit debug` start the bottle's Wine server (wineserver) first, through `scripts/watch-server.pl`
+(the app runs a copy in the bottle's `revit-macos` folder). It writes the server's messages to
+`revit-macos/wineserver.log` and how the server ended to `wineserver.last`. `./revit doctor` says when it ended
+unexpectedly, and `./revit report` includes both files.
+
 ## Steps
 
 In install order. Normal install steps have "—" in What breaks.

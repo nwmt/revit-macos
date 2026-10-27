@@ -25,6 +25,16 @@ All versions
 
 **Solution:** `./revit stop <year>`. It quits Revit and everything else in its bottle. Unsaved changes are lost.
 
+### Revit froze or quit, and doctor says Wine stopped unexpectedly
+
+All versions
+
+Wine's server for the bottle (wineserver) ended while Revit ran: it crashed or something stopped it. Revit then freezes
+or quits, and Windows programs of the bottle may keep running.
+
+**Solution:** `./revit stop <year>` ends what is left. Then [report the problem](#report-a-problem): the report
+includes the server's log. The warning stays until Wine next ends normally.
+
 ### Report a problem
 
 All versions
