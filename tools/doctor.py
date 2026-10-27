@@ -570,8 +570,10 @@ def activity(bottle, runner):
     # the server by its executable (comm, the last field: the whole path), not by its arguments: watch-server (perl)
     # names the bottle, and a bottle may be called wineserver
     rc, out = runner(["ps", "-o", "pid=,comm=", "-p", ",".join(pids)])
+    if rc != 0 and not out.strip():   # which one is the server is not known: never call a running bottle leftover
+        return "unknown"
     server = set()
-    for line in out.splitlines() if rc == 0 else ():
+    for line in out.splitlines():
         f = line.strip().split(None, 1)
         if len(f) == 2 and (f[1] == "wineserver" or f[1].endswith("/wineserver")):
             server.add(f[0])
@@ -885,10 +887,13 @@ def wineserver_last(p):
             w = json.loads(f.readline())
     except (OSError, ValueError):
         return None
-    def num(k, none=False):
-        return (none and w.get(k) is None) or (type(w.get(k)) is int and w[k] >= 0)
-    if not isinstance(w, dict) or w.get("class") not in WINESERVER_CLASSES or not all(num(k) for k in ("gen", "end")) \
-            or not num("exit", True) or not num("signal", True):
+    def num(k, top=1 << 31):
+        return k in w and type(w[k]) is int and 0 <= w[k] < top
+    if not isinstance(w, dict) or w.get("class") not in WINESERVER_CLASSES or not num("gen", 1 << 62) \
+            or not num("end", 253402300800):   # a time.localtime can show
+        return None
+    sig = w["class"] == "signal"   # a signal and no exit code, or the other way round
+    if not (num("signal") and w.get("exit", 0) is None if sig else num("exit") and w.get("signal", 0) is None):
         return None
     return w
 

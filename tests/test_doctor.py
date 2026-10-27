@@ -60,14 +60,26 @@ class Runner:
 
     def __call__(self, cmd, timeout=20):
         self.calls.append(list(cmd))
-        if cmd[0] == "ps" and "pid=,comm=" in cmd:   # the executables; by default the first word of each args
-            if self.comm is not None:
-                return 0, self.comm
-            return 0, "".join("%s %s\n" % tuple(l.split()[:2]) for l in (self.ps or "").splitlines() if l.strip())
+        if cmd[0] == "ps" and "pid=,comm=" in cmd:   # the executables of the PIDs asked for (-p); by default the
+            # first word of each args
+            want = cmd[cmd.index("-p") + 1].split(",")
+            comm = self.comm if self.comm is not None else \
+                "".join("%s %s\n" % tuple(l.split()[:2]) for l in (self.ps or "").splitlines() if l.strip())
+            if comm is False:
+                return 1, ""
+            return 0, "".join(l + "\n" for l in comm.splitlines() if l.split() and l.split()[0] in want)
         if cmd[0] == "ps":
             return (0, self.ps) if self.ps is not None else (1, "")
-        if cmd[0] == "lsof":
-            return (0, self.lsof) if self.lsof is not None else (None, "")
+        if cmd[0] == "lsof":   # the files of the PIDs asked for (-p)
+            if self.lsof is None:
+                return None, ""
+            want, out, keep = cmd[cmd.index("-p") + 1].split(","), [], False
+            for l in self.lsof.splitlines():
+                if l.startswith("p"):
+                    keep = l[1:] in want
+                if keep:
+                    out.append(l + "\n")
+            return 0, "".join(out)
         if cmd[0] == "osadecompile":
             return self.sb.scripts.get(cmd[1], (1, ""))
         for k, v in self.table.items():
@@ -312,15 +324,20 @@ class Bottle(Sandbox):
         # the server by its executable: a long standard path, a path with spaces; not watch-server (perl), whatever
         # its bottle is called
         cx = "/Applications/CrossOver Preview.app/Contents/SharedSupport/CrossOver"
-        self.runner.lsof = "p101\nn%s\np103\nn%s/drive_c/x.dll\n" % (real, real)
-        for comm, want in (("  101 /Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wineserver\n",
-                            "active"), ("  101 %s/bin/wineserver\n" % cx, "active"),
-                           ("  101 /usr/bin/perl\n", "leftover")):   # watch-server is not a leftover either
-            self.runner.ps = ("  101 /usr/bin/perl %s/revit-macos/watch-server.pl %s /x/Bottles/wineserver\n"
-                              "  103 /x/wine-preloader C:\\a\\Revit.exe\n" % (real, cx))
-            self.runner.comm = comm + "  103 /x/wine-preloader\n"
-            self.assertEqual(dr.activity(self.b, self.runner), want, comm)
-        self.assertEqual(self.runner.calls[-1][-1], "103")   # lsof is never asked about watch-server
+        self.runner.lsof = "p100\nfcwd\nn%s/revit-macos\np101\nn%s\np103\nn%s/drive_c/x.dll\n" % (real, real, real)
+        watch = "  100 /usr/bin/perl %s/revit-macos/watch-server.pl %s /x/Bottles/wineserver\n" % (real, cx)
+        for exe, args in (("/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wineserver",
+                           "/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/lib/wine/../../bin/wineserver"),
+                          (cx + "/bin/wineserver", cx + "/bin/wineserver -f")):
+            self.runner.ps = watch + "  101 %s\n  103 /x/wine-preloader C:\\a\\Revit.exe\n" % args
+            self.runner.comm = "  100 /usr/bin/perl\n  101 %s\n  103 /x/wine-preloader\n" % exe
+            self.assertEqual(dr.activity(self.b, self.runner), "active", exe)
+            self.assertEqual(self.runner.calls[-1][-1], "101,103")   # lsof is never asked about watch-server
+        self.runner.ps = watch + "  103 /x/wine-preloader C:\\a\\Revit.exe\n"   # watch-server and a leftover
+        self.assertEqual(dr.activity(self.b, self.runner), "leftover")
+        self.runner.comm = False   # which one is the server cannot be read: never leftover
+        self.runner.ps = "  101 /x/wineserver wineserver\n  103 /x/wine-preloader C:\\a\\Revit.exe\n"
+        self.assertEqual(dr.activity(self.b, self.runner), "unknown")
         self.runner.comm = None
         self.runner.ps = "  102 /bin/zsh -zsh\n"
         n = len(self.runner.calls)
@@ -527,7 +544,12 @@ class Bottle(Sandbox):
             self.assertEqual((c.status, c.title), ("warn", "Wine stopped unexpectedly on %s: %s" % (when, how)))
             self.assertEqual((c.fix, c.doc), ("./revit report %d" % self.year, dr.DOC["report"]))
         for bad in ("not json\n", '{"gen":1,"end":5,"class":"lost","exit":2,"signal":null}\n',
-                    '{"gen":1,"end":"5","class":"crashed","exit":1,"signal":null}\n', "[1]\n", ""):
+                    '{"gen":1,"end":"5","class":"crashed","exit":1,"signal":null}\n', "[1]\n", "",
+                    '{"gen":1,"end":1,"class":"crashed"}\n', '{"gen":1,"end":1,"class":"signal","exit":null}\n',
+                    '{"gen":1,"end":1,"class":"signal","exit":1,"signal":9}\n',
+                    '{"gen":1,"end":1,"class":"other","exit":null,"signal":null}\n',
+                    '{"gen":1,"end":99999999999999999,"class":"crashed","exit":1,"signal":null}\n',
+                    '{"gen":true,"end":1,"class":"crashed","exit":1,"signal":null}\n'):
             self.assertEqual(self.wineserver(bad).status, "ok", bad)   # not what watch-server writes: as none
 
     def test_other_bottles_that_take_the_sign_in_link(self):
