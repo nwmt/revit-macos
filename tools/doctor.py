@@ -552,19 +552,26 @@ def activity(bottle, runner):
     wineserver among them: what a wineserver that crashed or was killed left behind (they ignore SIGTERM;
     ./revit stop ends them). Never asks Wine."""
     real = os.path.realpath(bottle)
-    rc, out = runner(["ps", "-axww", "-o", "pid=,comm=,args="])
+    rc, out = runner(["ps", "-axww", "-o", "pid=,args="])
     if rc != 0:
         return "unknown"
     mine = {os.getpid(), os.getppid()}
-    pids, server = [], set()
+    pids = []
     for line in out.splitlines():
         f = line.strip().split(None, 1)
-        if len(f) == 2 and f[0].isdigit() and int(f[0]) not in mine and WINEISH.search(f[1]):
+        if len(f) == 2 and f[0].isdigit() and int(f[0]) not in mine and WINEISH.search(f[1]) \
+                and "/watch-server.pl " not in f[1]:   # it keeps its folder in the bottle only until its server ends
             pids.append(f[0])
-            if "wineserver" in f[1]:
-                server.add(f[0])
     if not pids:
         return "stopped"
+    # the server by its executable (comm, the last field: the whole path), not by its arguments: watch-server (perl)
+    # names the bottle, and a bottle may be called wineserver
+    rc, out = runner(["ps", "-o", "pid=,comm=", "-p", ",".join(pids)])
+    server = set()
+    for line in out.splitlines() if rc == 0 else ():
+        f = line.strip().split(None, 1)
+        if len(f) == 2 and (f[1] == "wineserver" or f[1].endswith("/wineserver")):
+            server.add(f[0])
     rc, out = runner(["lsof", "-w", "-n", "-P", "-Fn", "-p", ",".join(pids)])
     if rc is None:
         return "unknown"

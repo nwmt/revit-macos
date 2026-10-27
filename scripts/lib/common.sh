@@ -315,16 +315,21 @@ bottle_leftovers() { # $1 = bottle path → the PIDs, one per line, of Windows p
   # REVIT_LEFTOVER_AGE seconds (default 10: a Revit that is starting has no wineserver yet). Output through variables
   local rb pids out age="${REVIT_LEFTOVER_AGE:-10}"
   rb="$(cd "$1" 2>/dev/null && pwd -P)" || return 0   # lsof prints real paths
-  pids="$(pgrep -U "$(id -u)" -i -f 'wine|\.exe' 2>/dev/null | grep -vx "$$" | tr '\n' ',')"; pids="${pids%,}"
+  # not watch-server: it keeps its folder in the bottle only until its server's end is written down
+  pids="$(pgrep -U "$(id -u)" -i -f 'wine|\.exe' 2>/dev/null | grep -vx "$$" \
+    | grep -vxF -f <(pgrep -U "$(id -u)" -f '/watch-server\.pl ' 2>/dev/null) | tr '\n' ',')"; pids="${pids%,}"
   [ -n "$pids" ] || return 0
   out="$(lsof -w -n -P -p "$pids" -Fn 2>/dev/null)"   # a process that ended meanwhile only drops out
   out="$(P="n$rb" awk '/^p/ { p = substr($0, 2) } index($0, ENVIRON["P"] "/") == 1 || $0 == ENVIRON["P"] { print p }' \
     <<<"$out" | sort -u)"
   [ -n "$out" ] || return 0
-  ps -o pid=,etime=,command= -p "$(tr '\n' ',' <<<"$out" | sed 's/,$//')" 2>/dev/null | AGE="$age" awk '
+  # the server by its executable (comm, the last field: a whole path, spaces too), not by its arguments: watch-server
+  # (perl) names the bottle, and a bottle may be called wineserver
+  ps -o pid=,etime=,comm= -p "$(tr '\n' ',' <<<"$out" | sed 's/,$//')" 2>/dev/null | AGE="$age" awk '
     function secs(t,  n, a, d) { d = 0; if (index(t, "-")) { split(t, a, "-"); d = a[1]; t = a[2] }
       n = split(t, a, ":"); return d * 86400 + (n == 3 ? a[1] * 3600 + a[2] * 60 + a[3] : a[1] * 60 + a[2]) }
-    { line[NR] = $1; if ($0 ~ /wineserver/) server = 1; if (secs($2) >= ENVIRON["AGE"] + 0) old[NR] = 1 }
+    { line[NR] = $1; c = $0; sub(/^ *[^ ]+ +[^ ]+ +/, "", c); if (c ~ /(^|\/)wineserver$/) server = 1
+      if (secs($2) >= ENVIRON["AGE"] + 0) old[NR] = 1 }
     END { if (server) exit; for (i = 1; i <= NR; i++) if (old[i]) print line[i] }'
 }
 cx_lock_dir() { # where CrossOver keeps its locks (CXUtils::cxlock: $TMPDIR/.wine-<uid>), with the TMPDIR that the apps

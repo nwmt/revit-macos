@@ -51,13 +51,17 @@ class Runner:
     """The Mac's commands, answered from a table; records every call. Anything not in the table cannot run."""
 
     def __init__(self, sb):
-        self.sb, self.calls, self.ps, self.lsof = sb, [], "", ""
+        self.sb, self.calls, self.ps, self.lsof, self.comm = sb, [], "", "", None
         self.table = {("sysctl", "-n", "hw.optional.arm64"): (0, "1\n"),
                       ("sysctl", "-n", "sysctl.proc_translated"): (0, "0\n"),
                       ("/usr/bin/arch",): (0, ""), ("sw_vers",): (0, "26.1\n"), ("osascript",): (0, "200\n")}
 
     def __call__(self, cmd, timeout=20):
         self.calls.append(list(cmd))
+        if cmd[0] == "ps" and "pid=,comm=" in cmd:   # the executables; by default the first word of each args
+            if self.comm is not None:
+                return 0, self.comm
+            return 0, "".join("%s %s\n" % tuple(l.split()[:2]) for l in (self.ps or "").splitlines() if l.strip())
         if cmd[0] == "ps":
             return (0, self.ps) if self.ps is not None else (1, "")
         if cmd[0] == "lsof":
@@ -298,6 +302,19 @@ class Bottle(Sandbox):
             self.runner.lsof = lsof
             self.assertEqual(dr.activity(self.b, self.runner), want, lsof)
         self.assertIn("101,103", self.runner.calls[-1][-1])
+        # the server by its executable: a long standard path, a path with spaces; not watch-server (perl), whatever
+        # its bottle is called
+        cx = "/Applications/CrossOver Preview.app/Contents/SharedSupport/CrossOver"
+        self.runner.lsof = "p101\nn%s\np103\nn%s/drive_c/x.dll\n" % (real, real)
+        for comm, want in (("  101 /Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wineserver\n",
+                            "active"), ("  101 %s/bin/wineserver\n" % cx, "active"),
+                           ("  101 /usr/bin/perl\n", "leftover")):   # watch-server is not a leftover either
+            self.runner.ps = ("  101 /usr/bin/perl %s/revit-macos/watch-server.pl %s /x/Bottles/wineserver\n"
+                              "  103 /x/wine-preloader C:\\a\\Revit.exe\n" % (real, cx))
+            self.runner.comm = comm + "  103 /x/wine-preloader\n"
+            self.assertEqual(dr.activity(self.b, self.runner), want, comm)
+        self.assertEqual(self.runner.calls[-1][-1], "103")   # lsof is never asked about watch-server
+        self.runner.comm = None
         self.runner.ps = "  102 /bin/zsh -zsh\n"
         n = len(self.runner.calls)
         self.assertEqual(dr.activity(self.b, self.runner), "stopped")

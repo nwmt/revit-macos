@@ -18,6 +18,8 @@ T="$TOP/sand box"                      # a space in every path: quoting bugs sho
 R="$T/repo"; H="$T/home"; CXF="$T/cx"; CALLS="$T/calls"
 BOTTLES="$H/Library/Application Support/CrossOver/Bottles"
 PIDS=""
+SRV="$TOP/srv bin/wineserver"   # a fake wineserver: a copy of perl, so that its executable (ps comm) is a wineserver
+mkdir -p "${SRV%/*}" && cp /usr/bin/perl "$SRV" || { echo "fake wineserver setup failed" >&2; exit 1; }
 stop_fakes() { # the fake processes and their children (sleep), and wait so none is left for the next test's pgrep
   local p; for p in $PIDS; do pkill -P "$p" 2>/dev/null; kill "$p" 2>/dev/null; wait "$p" 2>/dev/null; done; PIDS=""
 }
@@ -105,7 +107,7 @@ fake_revit() { # $1 = bottle, $2 = year: a process that looks like Revit.exe and
   # the bottle's wineserver beside it (a Revit always has one: without it, Revit would be a leftover). Revit starts
   # last: callers take its PID from $!
   touch "$BOTTLES/$1/drive_c/open.tmp"
-  perl -e 'open(my $f, "<", $ARGV[0]) or die; sleep 60' "$BOTTLES/$1/drive_c/open.tmp" "$CXF/bin/wineserver" &
+  "$SRV" -e 'open(my $f, "<", $ARGV[0]) or die; sleep 60' "$BOTTLES/$1/drive_c/open.tmp" &
   PIDS="$PIDS $!"
   perl -e 'open(my $f, "<", $ARGV[0]) or die; sleep 60' "$BOTTLES/$1/drive_c/open.tmp" \
     "C:\\Program Files\\Autodesk\\Revit $2\\Revit.exe" &
@@ -123,6 +125,12 @@ fake_leftover() { # $1 = bottle: a Windows program left behind by a wineserver t
   perl -e '$SIG{TERM} = "IGNORE"; open(my $f, "<", $ARGV[0]) or die; sleep 60' "$BOTTLES/$1/drive_c/windows/held" \
     'C:\windows\system32\winedevice.exe' &
   LEFT=$!; PIDS="$PIDS $LEFT"; sleep 1
+}
+fake_watch() { # $1 = bottle, $2 = the bottle path it names: watch-server as the Revit app starts it (perl, its folder in
+  # the bottle), naming a bottle called wineserver
+  mkdir -p "$BOTTLES/$1/revit-macos"; touch "$BOTTLES/$1/revit-macos/watch-server.pl"
+  (cd "$BOTTLES/$1/revit-macos" && exec perl -e 'sleep 60' "$BOTTLES/$1/revit-macos/watch-server.pl" "$CXF" "$2") &
+  PIDS="$PIDS $!"; sleep 1
 }
 fake_lock() { # $1 = owner text: a process that holds the repo's lock as a running script would
   mkdir -p "$H/Library/Application Support/revit-macos"
@@ -217,6 +225,12 @@ REVIT_LEFTOVER_AGE=0 run "" stop 2024
 expect "stop without a wineserver ends what it left behind" 0 "Ended 1 Windows program(s) left running in rvt2024-a after Wine stopped unexpectedly."
 check "leftover: the program is gone (SIGTERM would not do)" eval '! kill -0 "$LEFT" 2>/dev/null'
 check "leftover: no wineserver -k" not_called "wineserver -k |"
+reset; bottle rvt2024-a 2024 2024; touch "$T/wineserver-idle"; fake_watch rvt2024-a "$BOTTLES/wineserver"
+fake_leftover rvt2024-a; REVIT_LEFTOVER_AGE=0 run "" stop 2024
+expect "watch-server naming a bottle wineserver does not hide a leftover" 0 "Ended 1 Windows program(s) left running in rvt2024-a"
+check "watch-server: the leftover is gone" eval '! kill -0 "$LEFT" 2>/dev/null'
+reset; bottle rvt2024-a 2024 2024; touch "$T/wineserver-idle"; fake_revit rvt2024-a 2024; REVIT_LEFTOVER_AGE=0 run "" stop 2024
+expect "a wineserver under a path with a space holds the bottle: nothing is a leftover" 0 "Nothing is running in rvt2024-a."
 reset; bottle rvt2024-a 2024 2024; touch "$T/wineserver-idle"; fake_leftover rvt2024-a; run "" stop 2024
 expect "a program younger than 10 s is not a leftover (Revit may be starting)" 0 "Nothing is running in rvt2024-a."
 check "young: the program still runs" kill -0 "$LEFT"
