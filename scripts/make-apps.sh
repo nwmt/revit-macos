@@ -4,14 +4,17 @@
 #   started with /viewer), with their icons;
 #   Autodesk Sign-In (<bottle>).app when Revit signs in through the browser (profile SIGNIN=idmgr): the handler for
 #   adskidmgr:// and adsk.idmgr:// links, which passes them to AdskIdentityManager.exe in the bottle.
-# Usage: ./scripts/make-apps.sh <year> <bottle>
+# Usage: ./scripts/make-apps.sh <year> <bottle> [--revit-only]   (--revit-only: the Revit app alone, for ./revit set)
 # Why: CrossOver 26 cxmenu makes no app for "Revit <year>.lnk", and macOS does not know the sign-in link scheme (only
 # the bottle's registry has it: "Opening product" and nothing). The command line (/viewer, /language …) and the icon
 # come from the installer's Start Menu shortcuts (tools/win_shortcut.py), so nothing is hardcoded per year. The sign-in
-# link carries a one-time code: it is never logged.
+# link carries a one-time code: it is never logged. Where the profile has the step theme (2027), the Revit app first
+# sets the bottle's Windows theme from the Mac's look (themeset.exe in the bottle, when its mode file says mac), so
+# Revit starts in it. Each app is built beside the old one and replaces it only when it is complete.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; . "$ROOT/scripts/lib/common.sh"
-[ $# -eq 2 ] || usage_die "Usage: scripts/make-apps.sh <year> <bottle>"
+REVIT_ONLY=0; [ $# -eq 3 ] && [ "$3" = --revit-only ] && REVIT_ONLY=1
+[ $# -eq 2 ] || [ $REVIT_ONLY = 1 ] || usage_die "Usage: scripts/make-apps.sh <year> <bottle> [--revit-only]"
 load_profile "$1" || usage_die "Revit $1 is not supported yet. Supported: ${REVIT_SUPPORTED[*]}."
 NAME="$2"; revit_bottle_name_ok "$NAME" || usage_die "Bottle name may contain only letters, digits, - and _: \"$NAME\""
 lock_take "make-apps.sh $YEAR $NAME"
@@ -19,31 +22,48 @@ bottle_guard running_ok "$YEAR" "$NAME"
 B="$(bottle_path "$NAME")"; CXW="$CX/bin/wine"
 MENU="$B/drive_c/users/crossover/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Autodesk/Revit $YEAR"
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+DEFAULTS="${REVIT_DEFAULTS:-/usr/bin/defaults}"   # tests: a fake one
+sq()   { local q="'\\''"; printf "'%s'" "${1//\'/$q}"; }   # one shell word, single-quoted
+as_q() { local s="${1//\\/\\\\}"; printf '%s' "${s//\"/\\\"}"; }   # a shell line inside an AppleScript "…" string
+theme_prefix() { # the Revit app's first part where the profile has the step theme: the Windows theme from the Mac's
+  # look, only when the bottle's mode is mac and themeset.exe is there; whatever happens, Revit starts after it
+  local d="$B/drive_c/Program Files/revit-macos"
+  in_list theme ${STEPS[@]+"${STEPS[@]}"} || return 0
+  printf '%s' ": revit-macos/theme; d=$(sq "$d"); if [ \"\$(cat \"\$d/theme\" 2>/dev/null)\" = mac ] && [ -f \"\$d/themeset.exe\" ]; then t=light; $(sq "$DEFAULTS") read -g AppleInterfaceStyle 2>/dev/null | /usr/bin/grep -qi dark && t=dark; $(sq "$CXW") --bottle $(sq "$NAME") 'C:\\Program Files\\revit-macos\\themeset.exe' \"\$t\"; fi; "
+}
 unix_path() { local p="${1#[Cc]:}"; echo "$B/drive_c${p//\\//}"; }   # C:\a\b → <bottle>/drive_c/a/b
 
-make_app() { # $1 = app title, $2 = Windows exe path, $3 = arguments, $4 = icon (Windows path, may be empty)
-  local app="$HOME/Applications/$1 ($NAME).app" exe="${2//\\/\\\\}" ico id
-  rm -rf "$app"
+make_app() { # $1 = app title, $2 = Windows exe path, $3 = arguments, $4 = icon (Windows path, may be empty). Built in a
+  # hidden .new.app (osacompile makes an app only for a path ending in .app), which replaces the old app when complete
+  local app="$HOME/Applications/$1 ($NAME).app" tmp="$HOME/Applications/.$1 ($NAME).new.app" line pre=""
+  [ "$1" != "Revit $YEAR" ] || pre="$(theme_prefix)"
+  rm -rf "$tmp"
   # The redirect covers the whole ( ) group: with `cd ~ && wine … >/dev/null &` the backgrounded shell keeps
   # do shell script's output pipe open, so the applet waits (and sits in the Dock) until Revit quits.
-  osacompile -o "$app" -e "do shell script \"(cd ~ && '$CXW' --bottle '$NAME' '$exe' $3) >/dev/null 2>&1 &\"" || return 1
-  ico="$(unix_path "$4")"
-  if [ -n "$4" ] && [ -f "$ico" ]; then
-    if python3 -I "$ROOT/tools/win_shortcut.py" icns "$ico" "$app/Contents/Resources/applet.icns"; then
-      # osacompile also ships the script icon in Assets.car, which macOS prefers over applet.icns
-      rm -f "$app/Contents/Resources/Assets.car"
-      /usr/libexec/PlistBuddy -c "Delete :CFBundleIconName" "$app/Contents/Info.plist" 2>/dev/null || true
-    else echo "   (no icon: conversion failed)"; fi
-  fi
-  # osacompile writes no bundle id; Launchpad/Apps skip bundles without one (Spotlight still finds them)
-  id="local.revit-macos.$(printf '%s-%s' "$1" "$NAME" | tr -cs 'A-Za-z0-9' '-' | tr '[:upper:]' '[:lower:]' | sed 's/-$//')"
-  /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string $id" -c "Add :CFBundleDisplayName string $1 ($NAME)" \
-    -c "Add :LSApplicationCategoryType string public.app-category.graphics-design" "$app/Contents/Info.plist" || return 1
-  # changing the bundle invalidates the osacompile signature; re-sign ad hoc so Gatekeeper lets it start
-  codesign --force --sign - "$app" >/dev/null 2>&1 || true
+  line="(cd ~ && $pre$(sq "$CXW") --bottle $(sq "$NAME") $(sq "$2") $3) >/dev/null 2>&1 &"
+  if ! make_app_in "$tmp" "$1" "$line" "$4"; then rm -rf "$tmp"; return 1; fi
+  rm -rf "$app" && mv "$tmp" "$app" || { rm -rf "$tmp"; return 1; }
   touch "$app"
   "$LSREGISTER" -f "$app" 2>/dev/null || true
   echo "done: $(tilde "$app")"
+}
+make_app_in() { # $1 = bundle to build, $2 = app title, $3 = the shell line it runs, $4 = icon (Windows path, may be empty)
+  local ico id
+  osacompile -o "$1" -e "do shell script \"$(as_q "$3")\"" || return 1
+  ico="$(unix_path "$4")"
+  if [ -n "$4" ] && [ -f "$ico" ]; then
+    if python3 -I "$ROOT/tools/win_shortcut.py" icns "$ico" "$1/Contents/Resources/applet.icns"; then
+      # osacompile also ships the script icon in Assets.car, which macOS prefers over applet.icns
+      rm -f "$1/Contents/Resources/Assets.car"
+      /usr/libexec/PlistBuddy -c "Delete :CFBundleIconName" "$1/Contents/Info.plist" 2>/dev/null || true
+    else echo "   (no icon: conversion failed)"; fi
+  fi
+  # osacompile writes no bundle id; Launchpad/Apps skip bundles without one (Spotlight still finds them)
+  id="local.revit-macos.$(printf '%s-%s' "$2" "$NAME" | tr -cs 'A-Za-z0-9' '-' | tr '[:upper:]' '[:lower:]' | sed 's/-$//')"
+  /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string $id" -c "Add :CFBundleDisplayName string $2 ($NAME)" \
+    -c "Add :LSApplicationCategoryType string public.app-category.graphics-design" "$1/Contents/Info.plist" || return 1
+  # changing the bundle invalidates the osacompile signature; re-sign ad hoc so Gatekeeper lets it start
+  codesign --force --sign - "$1" >/dev/null 2>&1 || true
 }
 
 make_signin() { # Autodesk Sign-In (<bottle>).app: receives the link and passes it to AdskIdentityManager.exe
@@ -69,7 +89,8 @@ end open location" || return 1
 }
 
 made=0; viewer=0
-for title in "Revit $YEAR" "Revit Viewer $YEAR"; do
+titles=("Revit $YEAR"); [ $REVIT_ONLY = 1 ] || titles+=("Revit Viewer $YEAR")
+for title in "${titles[@]}"; do
   lnk="$MENU/$title.lnk"
   [ -f "$lnk" ] || continue
   info="$(python3 -I "$ROOT/tools/win_shortcut.py" info "$lnk")" || die "Cannot read the shortcut $(tilde "$lnk")."
@@ -83,5 +104,6 @@ done
 if [ $made -eq 0 ]; then make_app "Revit $YEAR" "C:\\Program Files\\Autodesk\\Revit $YEAR\\Revit.exe" "" "" || exit 1; fi
 # Revit Viewer only where the installer made its shortcut: 2027 has no Viewer mode (its /viewer starts full Revit).
 # An app left from an earlier run goes.
+[ $REVIT_ONLY = 1 ] && exit 0
 [ $viewer = 1 ] || rm -rf "$HOME/Applications/Revit Viewer $YEAR ($NAME).app"
 [ "$SIGNIN" != idmgr ] || make_signin || exit 1

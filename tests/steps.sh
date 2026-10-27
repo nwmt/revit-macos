@@ -1185,7 +1185,14 @@ make_apps_sandbox() { # $1 = year, $2 = bottle, $3… = Start Menu shortcut titl
   mkbottle "$b" "$y" "$y"; mkdir -p "$BOTTLES/$b/drive_c/Program Files/Autodesk/AdskIdentityManager/1.0.0"
   menu="$BOTTLES/$b/drive_c/users/crossover/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Autodesk/Revit $y"
   mkdir -p "$menu" "$T/stubs"; for t in "$@"; do : > "$menu/$t.lnk"; done
-  printf '#!/bin/bash\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && mkdir -p "$2/Contents/Resources"; shift; done\n' > "$T/stubs/osacompile"
+  # osacompile as the real one: an app only for a path that ends in .app, a plain script file otherwise; it records the
+  # path, keeps the script (Contents/Resources/script.txt) and fails while $T/osa-fail exists
+  cat > "$T/stubs/osacompile" <<EOF
+#!/bin/bash
+o=""; e=""; while [ \$# -gt 0 ]; do case "\$1" in -o) o="\$2"; shift ;; -e) e="\$2"; shift ;; esac; shift; done
+echo "osacompile [\$o]" >> "$CALLS"; [ ! -e "$T/osa-fail" ] || exit 1
+case "\$o" in *.app) mkdir -p "\$o/Contents/Resources"; printf '%s' "\$e" > "\$o/Contents/Resources/script.txt" ;; *) printf '%s' "\$e" > "\$o" ;; esac
+EOF
   printf '#!/bin/bash\nexit 0\n' > "$T/stubs/codesign"; cp "$T/stubs/codesign" "$T/stubs/PlistBuddy"; cp "$T/stubs/codesign" "$T/stubs/lsregister"
   chmod +x "$T/stubs/"*
   printf 'import sys\nprint("C:\\\\Program Files\\\\Autodesk\\\\Revit %s\\\\Revit.exe\\t%s\\t", end="")\n' \
@@ -1199,5 +1206,45 @@ run_make_apps 2027 rvt2027-t; expect "make-apps 2027: the Revit app" 0 "done: ~/
 check "make-apps 2027: no Revit Viewer app, the old one removed" test ! -e "$H/Applications/Revit Viewer 2027 (rvt2027-t).app"
 reset; make_apps_sandbox 2026 rvt2026-t "Revit 2026" "Revit Viewer 2026"
 run_make_apps 2026 rvt2026-t; expect "make-apps 2026: the Revit Viewer app from its shortcut" 0 "done: ~/Applications/Revit Viewer 2026 (rvt2026-t).app"
+check "make-apps 2026: no theme part (no step theme)" eval '! grep -q "revit-macos/theme" "$H/Applications/Revit 2026 (rvt2026-t).app/Contents/Resources/script.txt"'
+# each app is built in a hidden <title> (<bottle>).new.app and replaces the old one only when complete
+APP27="$H/Applications/Revit 2027 (rvt2027-t).app"
+theme_profile() { grep -q '^STEPS+=(theme)' "$R/scripts/profiles/2027.sh" || echo 'STEPS+=(theme)' >> "$R/scripts/profiles/2027.sh"; }
+reset; make_apps_sandbox 2027 rvt2027-t "Revit 2027"; theme_profile; run_make_apps 2027 rvt2027-t
+expect "make-apps 2027 with the step theme" 0 "done: ~/Applications/Revit 2027 (rvt2027-t).app"
+check "make-apps: built in the hidden .new.app, none left" eval 'called "osacompile [$H/Applications/.Revit 2027 (rvt2027-t).new.app]" &&
+  [ ! -e "$H/Applications/.Revit 2027 (rvt2027-t).new.app" ] && [ -f "$APP27/Contents/Resources/script.txt" ]'
+check "make-apps 2027: the theme part, then Revit" grep -q "revit-macos/theme.*themeset.exe.*Revit.exe" "$APP27/Contents/Resources/script.txt"
+mkdir -p "$H/Applications/Revit Viewer 2027 (rvt2027-t).app"; echo old > "$APP27/old"; : > "$T/osa-fail"
+run_make_apps 2027 rvt2027-t; expect "make-apps: osacompile fails → 1" 1 ""
+check "make-apps: a failed build keeps the old app, no .new.app left" eval '[ -f "$APP27/old" ] && [ ! -e "$H/Applications/.Revit 2027 (rvt2027-t).new.app" ]'
+rm -f "$T/osa-fail"; rm -rf "$H/Applications/Autodesk Sign-In (rvt2027-t).app"; : > "$CALLS"; run_make_apps 2027 rvt2027-t --revit-only
+expect "make-apps --revit-only" 0 "done: ~/Applications/Revit 2027 (rvt2027-t).app"
+check "make-apps --revit-only: the new Revit app, the Viewer app kept, no Sign-In app" eval '[ ! -f "$APP27/old" ] &&
+  [ -d "$H/Applications/Revit Viewer 2027 (rvt2027-t).app" ] && [ ! -e "$H/Applications/Autodesk Sign-In (rvt2027-t).app" ]'
+run_make_apps 2027 rvt2027-t --bogus; expect "make-apps: an unknown third word → 2" 2 "Usage: scripts/make-apps.sh <year> <bottle> [--revit-only]"
+# the real osacompile and osascript (on a Mac): the app's script runs the theme part and Revit with every path quoted
+if [ -x /usr/bin/osacompile ] && [ -x /usr/bin/osascript ]; then
+  reset; make_apps_sandbox 2027 rvt2027-t "Revit 2027"; theme_profile; rm "$T/stubs/osacompile"
+  Q="$T/cx 'q"; cp -R "$CXF" "$Q"   # a CrossOver path with a quote and a space
+  printf '#!/bin/bash\necho Dark\n' > "$T/dark-defaults"; chmod +x "$T/dark-defaults"
+  TD="$BOTTLES/rvt2027-t/drive_c/Program Files/revit-macos"
+  osa_run() { : > "$CALLS"; (cd / && env -i HOME="$H" PATH=/usr/bin:/bin /usr/bin/osascript "$APP27/Contents/Resources/Scripts/main.scpt" >/dev/null 2>&1)
+    local i; for i in $(seq 1 50); do grep -q 'Revit.exe' "$CALLS" && break; sleep 0.1; done; }
+  OUT="$(cd / && "${SANDBOX_ENV[@]}" REVIT_CX="$Q" REVIT_DEFAULTS="$T/dark-defaults" STUBS="$T/stubs" PATH="$T/stubs:$PATH" \
+    /bin/bash "$R/scripts/make-apps.sh" 2027 rvt2027-t 2>&1)"; RC=$?
+  expect "make-apps with the real osacompile" 0 "done: ~/Applications/Revit 2027 (rvt2027-t).app"
+  check "the app's script carries the theme marker (osadecompile)" eval '/usr/bin/osadecompile "$APP27/Contents/Resources/Scripts/main.scpt" | grep -q "revit-macos/theme"'
+  mkdir -p "$TD"; echo mac > "$TD/theme"; : > "$TD/themeset.exe"; osa_run
+  check "app, mode mac on a dark Mac: themeset dark, then Revit" eval '[ "$(grep -c . "$CALLS")" = 2 ] &&
+    sed -n 1p "$CALLS" | grep -qF "[--bottle] [rvt2027-t] [C:\Program Files\revit-macos\themeset.exe] [dark]" &&
+    sed -n 2p "$CALLS" | grep -qF "[C:\Program Files\Autodesk\Revit 2027\Revit.exe] [/language] [ENU]"'
+  echo light > "$TD/theme"; osa_run
+  check "app, mode light: no themeset, Revit starts" eval '[ "$(grep -c . "$CALLS")" = 1 ] && grep -q "Revit.exe" "$CALLS"'
+  echo mac > "$TD/theme"; rule "themeset.exe" 1; osa_run
+  check "app, themeset fails: Revit still starts" eval 'grep -q "themeset.exe" "$CALLS" && grep -q "Revit.exe" "$CALLS"'
+  rm "$TD/themeset.exe"; osa_run
+  check "app, no themeset.exe: no themeset, Revit starts" eval '! grep -q "themeset.exe" "$CALLS" && grep -q "Revit.exe" "$CALLS"'
+fi
 
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]
