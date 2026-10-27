@@ -54,6 +54,7 @@ struct AppMain: App {
     let wizard: WizardModel?
     let settings: SettingsModel?
     let trackpad: TrackpadModel?
+    let theme: ThemeSync?
     /// What the menu shows. Rebuilding an open menu closes its submenus, so it is updated only while no menu is open
     /// (AppKit says when menu tracking begins and ends) and only when it differs.
     private(set) var menu: MenuContent?
@@ -107,11 +108,18 @@ struct AppMain: App {
                                   helperID: launcher.id)
             launcher.onExit = { [weak t] h in Task { await t?.helperExited(h) } }
             trackpad = t
+            theme = ThemeSync(engine: ProcessEngine(engine: engine, environment: EngineEnvironment.make(from: env)))
         } else {
             app = nil
             wizard = nil
             settings = nil
             trackpad = nil
+            theme = nil
+        }
+        // the Mac turned light or dark: Revit 2027 follows (ThemeSync)
+        DistributedNotificationCenter.default().addObserver(forName: .init("AppleInterfaceThemeChangedNotification"),
+                                                            object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.theme?.appearanceChanged(); self?.theme?.kick() }
         }
         for (name, open) in [(NSMenu.didBeginTrackingNotification, true), (NSMenu.didEndTrackingNotification, false)] {
             NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
@@ -155,7 +163,10 @@ struct MenuLabel: View {
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(1))
             await app.poll()
-            if tick % 2 == 0 { env.trackpad?.refresh() }
+            if tick % 2 == 0 {
+                env.trackpad?.refresh()
+                env.theme?.update(bottles: app.status?.bottles ?? []); env.theme?.kick()   // returns at once
+            }
             env.syncMenu()
             tick += 1
             if tick % 60 == 1, !env.repo.isEmpty { await env.settings?.checkUpdatesIfDue(now: Date()) }   // once a minute; it checks once a day

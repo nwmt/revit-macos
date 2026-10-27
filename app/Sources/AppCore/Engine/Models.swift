@@ -49,21 +49,24 @@ public struct Bottle: Decodable, Equatable, Sendable {
     public let running: Bool
     public let revitPids: [Int32]           // the Mac processes of its Revit.exe; [] from an engine without the key
     public let addins: [String]
+    public let themeMode: String            // the step theme's mode: mac, light, dark; "" without it or from an older engine
     public var yearNumber: Int? { Int(year) }
 
-    public init(name: String, year: String, revit: Bool, running: Bool, revitPids: [Int32] = [], addins: [String]) {
+    public init(name: String, year: String, revit: Bool, running: Bool, revitPids: [Int32] = [], addins: [String],
+                themeMode: String = "") {
         self.name = name; self.year = year; self.revit = revit; self.running = running; self.revitPids = revitPids
-        self.addins = addins
+        self.addins = addins; self.themeMode = themeMode
     }
 
-    enum CodingKeys: String, CodingKey { case name, year, revit, running, revitPids, addins }
+    enum CodingKeys: String, CodingKey { case name, year, revit, running, revitPids, addins, themeMode }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(name: try c.decode(String.self, forKey: .name), year: try c.decode(String.self, forKey: .year),
                   revit: try c.decode(Bool.self, forKey: .revit), running: try c.decode(Bool.self, forKey: .running),
                   revitPids: try c.decodeIfPresent([Int32].self, forKey: .revitPids) ?? [],
-                  addins: try c.decode([String].self, forKey: .addins))
+                  addins: try c.decode([String].self, forKey: .addins),
+                  themeMode: try c.decodeIfPresent(String.self, forKey: .themeMode) ?? "")
     }
 }
 
