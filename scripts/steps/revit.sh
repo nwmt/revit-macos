@@ -133,13 +133,17 @@ step_asc() { # Autodesk Shared Components (pkg ASC, type EXE): an ODIS bundle it
 step_revitini() { # Revit takes template and library paths from [Directories<Select>] in Revit.ini; 2027 wrote
   # [Language] Select=en-US, which has no such section → empty template lists: Select=ENU. More keys from the
   # profile (RealDWG path in 2024, 2025). THEME=1: anti-aliasing off (smoother under Wine; DXMT draws a black view with
-  # it) and Revit's light or dark theme from macOS at install time, or REVIT_THEME=dark|light. In the seed for new
-  # users (ProgramData) and in the user profile; Revit must be closed
+  # it) and Revit's light or dark theme from macOS at install time, or REVIT_THEME=dark|light; a profile with the step
+  # theme (2027) leaves the theme to that step. In the seed for new users (ProgramData) and in the user profile; Revit
+  # must be closed
   local keys=(${REVITINI[@]+"${REVITINI[@]}"}) theme="" t f n=0
   if [ "$THEME" = 1 ]; then
-    theme="${REVIT_THEME:-$(defaults read -g AppleInterfaceStyle 2>/dev/null | grep -qi dark && echo dark || echo light)}"
-    t=1; [ "$theme" = dark ] && t=0
-    keys+=(Graphics.Antialiasing=0 Graphics.AntialiasingOptions=1 AppFrame.Theme=$t AppFrame.FollowSystemColorTheme=0 Colors.CanvasTheme=$t)
+    keys+=(Graphics.Antialiasing=0 Graphics.AntialiasingOptions=1)
+    if ! in_list theme ${STEPS[@]+"${STEPS[@]}"}; then
+      theme="${REVIT_THEME:-$(mac_appearance)}"
+      t=1; [ "$theme" = dark ] && t=0
+      keys+=(AppFrame.Theme=$t AppFrame.FollowSystemColorTheme=0 Colors.CanvasTheme=$t)
+    fi
   fi
   [ ${#keys[@]} -gt 0 ] || { skip "no Revit.ini keys for Revit $YEAR"; return 0; }
   for f in "$B/drive_c/ProgramData/Autodesk/RVT $YEAR/UserDataCache/Revit.ini" \

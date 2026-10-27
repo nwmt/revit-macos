@@ -174,6 +174,37 @@ step_mackeys() { # Wine maps Cmd to Alt: Cmd alone opens the ribbon's KeyTips, C
   else detail "Cmd → Alt, Option types characters (Wine's default)$SAVE_NOTE"; fi
 }
 
+step_theme() { # Revit 2027 with "Use system setting" takes light or dark from the bottle's Windows theme (Personalize
+  # AppsUseLightTheme), which Wine does not take from the Mac. themeset.exe (tools/shims/themeset) sets it and tells a
+  # running Revit; it goes into the bottle with the mode in a file next to it, which the Revit app, ./revit theme and
+  # the menu bar app read. REVIT_THEME=mac (default: follow the Mac; CanvasTheme=1 is the tested pair) | light | dark
+  # (fixed). Revit must be closed: it writes Revit.ini when it quits. Outside an install the Revit app is made again
+  local mode="${REVIT_THEME:-mac}" d="$B/drive_c/Program Files/revit-macos" t v keys f n=0 rc
+  case "$mode" in
+    mac) t="$(mac_appearance)"; keys=(AppFrame.FollowSystemColorTheme=1 Colors.CanvasTheme=1) ;;
+    light|dark) t="$mode"; v=1; [ "$mode" = dark ] && v=0
+      keys=(AppFrame.FollowSystemColorTheme=0 AppFrame.Theme=$v Colors.CanvasTheme=$v) ;;
+    *) echo "unknown REVIT_THEME=$mode (mac, light, dark)"; return 1 ;;
+  esac
+  ensure_shim themeset || return 1
+  mkdir -p "$d" || return 1
+  cp "$(shim_dir)/themeset/themeset.exe" "$d/themeset.exe.new" && mv -f "$d/themeset.exe.new" "$d/themeset.exe" || return 1
+  printf '%s\n' "$mode" > "$d/theme.new" && mv -f "$d/theme.new" "$d/theme" || return 1
+  for f in "$B/drive_c/ProgramData/Autodesk/RVT $YEAR/UserDataCache/Revit.ini" \
+           "$B/drive_c/users/crossover/AppData/Roaming/Autodesk/Revit/Autodesk Revit $YEAR/Revit.ini"; do
+    [ -f "$f" ] || continue
+    python3 -I "$ROOT/tools/revitini.py" "$f" "${keys[@]}" || return 1
+    n=$((n + 1))
+  done
+  w "C:\\Program Files\\revit-macos\\themeset.exe" "$t"; rc=$?
+  [ $rc = 0 ] || [ $rc = 3 ] || { echo "themeset.exe returned $rc"; return 1; }   # 3: a Revit window did not answer
+  v=1; [ "$t" = dark ] && v=0
+  settings_wait "user.reg|Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Themes\\\\Personalize|\"AppsUseLightTheme\"=dword:0000000$v"
+  if [ -z "${INSTALL_PARENT:-}" ]; then "$ROOT/scripts/make-apps.sh" "$YEAR" "$NAME" --revit-only || return 1; fi
+  if [ "$mode" = mac ]; then detail "theme follows the Mac ($t now); Revit.ini: $n file(s)$SAVE_NOTE"
+  else detail "theme fixed: $mode; Revit.ini: $n file(s)$SAVE_NOTE"; fi
+}
+
 pdf_port_script() { # the printer port runs this path for every print job; it is stored in the bottle, so it must not
   # point into the app (moving the app would break printing): with a data folder of its own, a copy lives there
   if [ "$DATA" = "$ROOT" ]; then echo "$ROOT/scripts/ps2pdf-port.sh"; return 0; fi

@@ -10,6 +10,9 @@ if [ -f "$ROOT/.app-bundle" ]; then   # inside <App>.app/Contents/Resources/engi
 fi
 DATA="${REVIT_DATA:-$ROOT}"   # what the scripts write (installers, unpacked files, logs); the app sets it, a clone does not
 shim_dir() { echo "${SHIMS_DIR:-$ROOT/build}"; }   # our shims: build/ of a clone, or the app's prebuilt copy
+mac_appearance() { # dark or light: the Mac's look now (AppleInterfaceStyle is there only when dark). Tests: REVIT_DEFAULTS
+  "${REVIT_DEFAULTS:-/usr/bin/defaults}" read -g AppleInterfaceStyle 2>/dev/null | grep -qi dark && echo dark || echo light
+}
 CX="${REVIT_CX:-/Applications/CrossOver.app/Contents/SharedSupport/CrossOver}"
 BOTTLES="$HOME/Library/Application Support/CrossOver/Bottles"
 LOCK_DIR="${REVIT_LOCK_DIR:-$HOME/Library/Application Support/revit-macos}"   # one for every clone and the app:

@@ -53,9 +53,10 @@ NETFX_DIR = "drive_c/windows/Microsoft.NET/Framework64/v4.0.30319"
 DESKTOP = "drive_c/Program Files/dotnet/shared/Microsoft.WindowsDesktop.App"
 DOCUMENTS = "drive_c/users/crossover/Documents"
 NDP_KEY = "Software\\Microsoft\\NET Framework Setup\\NDP\\v4\\Full"
-# the steps retina and mackeys (scripts/steps/fixes.sh): settings, not fixes. Wine reads RetinaMode from MAC_DRIVER, the
+# the steps retina, mackeys and theme (scripts/steps/fixes.sh): settings, not fixes; ./revit set changes them, the
+# settings group and bottle.theme say what to do. Wine reads RetinaMode from MAC_DRIVER, the
 # keys from Revit.exe's AppDefaults first, LogPixels from DESKTOP_KEY (user.reg), then FONTS_HKLM (system.reg), then 96
-SETTING_STEPS = ("retina", "mackeys")
+SETTING_STEPS = ("retina", "mackeys", "theme")
 MAC_DRIVER = "Software\\Wine\\Mac Driver"
 MAC_DRIVER_APP = "Software\\Wine\\AppDefaults\\Revit.exe\\Mac Driver"
 DESKTOP_KEY = "Control Panel\\Desktop"
@@ -191,6 +192,8 @@ FIXES = {
     "dynamo": _fix("Dynamo's 3D preview draws black squares, lags or crashes"),
     "retina": _fix("text and drawings are blurry on a Retina screen", why="the settings group reads the registry"),
     "mackeys": _fix("Cmd works as Alt: Cmd+S opens a ribbon tab", why="the settings group reads the registry"),
+    "theme": _fix("Revit keeps the theme it got at install when the Mac turns light or dark",
+                  why="the theme check reads the bottle's theme file"),
     "revitlookup": _fix("RevitLookup", why="the add-ins checks list it"),
     "pyrevit": _fix("pyRevit", why="the add-ins checks list it"),
     "trust": _fix("Revit asks about signed add-ins on every start"),

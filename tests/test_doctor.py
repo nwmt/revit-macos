@@ -335,6 +335,12 @@ class Bottle(Sandbox):
         self.assertFalse([c.id for c in cs if c.id.startswith("fixes.wv2fix.")])   # left to install.steps
         self.assertIn("fixes.warpshim.system32.version.dll", self.by_id(cs))   # warpshim still has its own
 
+    def test_a_setting_the_bottle_never_ran_is_no_reason_to_rebuild(self):
+        self.profile = dict(self.profile, STEPS=STEPS + ["theme"])
+        self.records_clear()
+        self.record(requested=list(STEPS))
+        self.assertEqual(self.by_id(self.checks())["install.steps"].status, "ok")
+
     def test_install_log_of_an_old_bottle(self):
         self.records_clear()
         d = os.path.join(self.data, "logs", self.name, "20261001-100000-install")

@@ -101,7 +101,7 @@ reset; in_repo 'load_profile 2020; profile_json; load_profile 2027; profile_json
 check "profile_json: one JSON object per profile, with its lists" eval '/usr/bin/perl -MJSON::PP -ne '"'"'my $j = decode_json($_);
   exit 1 unless ref $j->{STEPS} eq "ARRAY" && ref $j->{PKGS} eq "ARRAY" && ref $j->{RICHEDIT} eq "ARRAY"; print "$j->{YEAR} ",
   scalar @{$j->{STEPS}}, " $j->{STEPS}[0] ", scalar @{$j->{PKGS}}, " $j->{DOTNET} [$j->{ENSCAPE}] $j->{RVTFIX_ENV}[0]\n"'"'"' <<<"$OUT" |
-  tr "\n" "|" | grep -qxF "2020 21 netfx 0 netfx47 [3] RVTFIX_CEF_ARGS=|2027 24 vc 32 net10 [4] |"'
+  tr "\n" "|" | grep -qxF "2020 21 netfx 0 netfx47 [3] RVTFIX_CEF_ARGS=|2027 25 vc 32 net10 [4] |"'
 reset; mkdir -p "$T/real"; ln -s "$T/real" "$T/link"; ln -s "$T/nowhere" "$T/dangling"
 in_repo 'for p in "$HOME/not/there/yet" "'"$T"'/link/sub" "'"$T"'/dangling"; do free_gb "$p"; volume_id "$p"; done'
 check "free_gb and volume_id: a number for a path that is not there, a link, a link to nothing" \
@@ -605,6 +605,54 @@ run_steps 2027 rvt2027-t mackeys; expect "mackeys=windows: Wine's default, with 
 check "mackeys=windows: n" called "Mac Driver] [/v] [LeftCommandIsCtrl] [/d] [n] [/f]"
 reset; mkbottle rvt2027-t 2027 2027; STEP_ENV=(REVIT_KEYS=pc); run_steps 2027 rvt2027-t mackeys
 expect "mackeys: an unknown value fails the step" 1 "mackeys"; check "mackeys: nothing done for it" not_called "[reg]"
+# theme: themeset.exe and the mode file in the bottle, Revit.ini, the Windows theme; outside an install the Revit app
+# again (make-apps.sh here records its call and fails while $T/apps-fail exists)
+TDIR="$BOTTLES/rvt2027-t/drive_c/Program Files/revit-macos"
+UINI="$BOTTLES/rvt2027-t/drive_c/users/crossover/AppData/Roaming/Autodesk/Revit/Autodesk Revit 2027/Revit.ini"
+SINI="$BOTTLES/rvt2027-t/drive_c/ProgramData/Autodesk/RVT 2027/UserDataCache/Revit.ini"
+PZ='[Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize] 1792953065'
+theme_sandbox() { # $1 = what the fake defaults says (Dark or nothing); Revit.ini in the profile, and in the seed with $2=seed
+  reset; mkbottle rvt2027-t 2027 2027; mkdir -p "$(dirname "$UINI")" "$T/bin"
+  python3 -I -c 'import sys; open(sys.argv[1], "wb").write(b"\xff\xfe" + "[AppFrame]\r\nTheme=0\r\n[Colors]\r\nCanvasTheme=0\r\n".encode("utf-16-le"))' "$UINI"
+  [ "${2:-}" != seed ] || { mkdir -p "$(dirname "$SINI")"; cp "$UINI" "$SINI"; }
+  printf '#!/bin/bash\n[ -z "%s" ] || echo %s\n' "$1" "$1" > "$T/bin/defaults"; chmod +x "$T/bin/defaults"
+  printf '#!/bin/bash\necho "make-apps $*" >> "%s"\n[ ! -e "%s" ]\n' "$CALLS" "$T/apps-fail" > "$R/scripts/make-apps.sh"
+}
+ini() { iconv -f UTF-16 -t UTF-8 "$1" | tr -d '\r'; }
+theme_run() { STEP_ENV=(REVIT_DEFAULTS="$T/bin/defaults" SETTINGS_SAVE_WAIT=1 "$@"); run_steps 2027 rvt2027-t theme; }
+theme_sandbox Dark seed; theme_run; expect "theme (mac) on a dark Mac" 0 "theme follows the Mac (dark now); Revit.ini: 2 file(s)"
+check "theme: themeset.exe and the mode file in the bottle" eval '[ "$(cat "$TDIR/themeset.exe")" = "fake themeset/themeset.exe" ] &&
+  [ "$(cat "$TDIR/theme")" = mac ] && [ ! -e "$TDIR/theme.new" ] && [ ! -e "$TDIR/themeset.exe.new" ]'
+check "theme: Revit follows the system theme, the view too, in both Revit.ini" eval 'for f in "$UINI" "$SINI"; do
+  ini "$f" | grep -qx FollowSystemColorTheme=1 && ini "$f" | grep -qx CanvasTheme=1 || exit 1; done'
+check "theme: the Windows theme dark, from the bottle's themeset.exe" called "[C:\\Program Files\\revit-macos\\themeset.exe] [dark]"
+check "theme: the Revit app again, Revit's alone" called "make-apps 2027 rvt2027-t --revit-only"
+theme_sandbox ""; regfile rvt2027-t user.reg "$PZ" '"AppsUseLightTheme"=dword:00000001'; theme_run
+expect "theme (mac) on a light Mac: no note once Wine has saved it" 0 "theme follows the Mac (light now); Revit.ini: 1 file(s)"
+check "theme: the Windows theme light" called "themeset.exe] [light]"; check "theme: no save note" eval '! grep -q "not saved" "$RUN/summary.txt"'
+theme_sandbox Dark; theme_run REVIT_THEME=light; expect "theme=light on a dark Mac: fixed light" 0 "theme fixed: light"
+check "theme=light: Revit's own setting, light, the view light" eval 'ini "$UINI" | grep -qx FollowSystemColorTheme=0 &&
+  ini "$UINI" | grep -qx Theme=1 && ini "$UINI" | grep -qx CanvasTheme=1 && [ "$(cat "$TDIR/theme")" = light ]'
+check "theme=light: the Windows theme light too" called "themeset.exe] [light]"
+theme_sandbox ""; theme_run REVIT_THEME=dark; expect "theme=dark" 0 "theme fixed: dark"
+check "theme=dark: Theme=0, CanvasTheme=0, Windows dark" eval 'ini "$UINI" | grep -qx Theme=0 && ini "$UINI" | grep -qx CanvasTheme=0 &&
+  called "themeset.exe] [dark]"'
+theme_sandbox ""; theme_run REVIT_THEME=blue; expect "theme: an unknown value fails the step" 1 "theme"
+check "theme: nothing done for it" eval 'grep -q "unknown REVIT_THEME=blue" "$RUN/theme.log" && [ ! -e "$TDIR" ] && not_called themeset'
+theme_sandbox ""; rule "themeset.exe" 3; theme_run; expect "theme: a Revit window that did not answer is no failure" 0 "theme follows"
+theme_sandbox ""; rule "themeset.exe" 1; theme_run; expect "theme: themeset failing fails the step" 1 "theme"
+check "theme: the log says why" grep -q "themeset.exe returned 1" "$RUN/theme.log"
+theme_sandbox ""; : > "$T/apps-fail"; theme_run; expect "theme: the Revit app not made fails the step" 1 "theme"
+rm "$T/apps-fail"; theme_run; expect "theme again after that: done" 0 "theme follows"
+check "theme again: the Revit app made" eval '[ "$(grep -c "make-apps 2027 rvt2027-t --revit-only" "$CALLS")" = 2 ]'
+theme_sandbox ""; theme_run INSTALL_PARENT=1; expect "theme under an install" 0 "theme follows"
+check "theme under an install: no Revit app (the plan's apps comes later)" not_called "make-apps"
+theme_sandbox Dark; rm "$UINI"; STEP_ENV=(RUN_KIND=steps); theme_run; expect "theme without Revit.ini yet" 0 "Revit.ini: 0 file(s)"
+reset; mkbottle rvt2027-t 2027 2027; mkdir -p "$(dirname "$UINI")"
+python3 -I -c 'import sys; open(sys.argv[1], "wb").write(b"\xff\xfe" + "[Language]\r\nSelect=en-US\r\n".encode("utf-16-le"))' "$UINI"
+STEP_ENV=(REVIT_THEME=dark); run_steps 2027 rvt2027-t revitini; expect "revitini 2027" 0 "revitini"
+check "revitini 2027: anti-aliasing off, the theme left to the step theme" eval 'ini "$UINI" | grep -qx Antialiasing=0 &&
+  ! ini "$UINI" | grep -q -e "^Theme=" -e FollowSystemColorTheme -e CanvasTheme'
 reset; mkbottle rvt2024-t 2024 2024; run_steps 2024 rvt2024-t pdfprinter
 expect "pdfprinter" 0 "pdfprinter"
 check "pdfprinter: the port path is quoted for /bin/sh (the sandbox path has a space)" called "|'$R/scripts/ps2pdf-port.sh'"
@@ -1209,8 +1257,7 @@ run_make_apps 2026 rvt2026-t; expect "make-apps 2026: the Revit Viewer app from 
 check "make-apps 2026: no theme part (no step theme)" eval '! grep -q "revit-macos/theme" "$H/Applications/Revit 2026 (rvt2026-t).app/Contents/Resources/script.txt"'
 # each app is built in a hidden <title> (<bottle>).new.app and replaces the old one only when complete
 APP27="$H/Applications/Revit 2027 (rvt2027-t).app"
-theme_profile() { grep -q '^STEPS+=(theme)' "$R/scripts/profiles/2027.sh" || echo 'STEPS+=(theme)' >> "$R/scripts/profiles/2027.sh"; }
-reset; make_apps_sandbox 2027 rvt2027-t "Revit 2027"; theme_profile; run_make_apps 2027 rvt2027-t
+reset; make_apps_sandbox 2027 rvt2027-t "Revit 2027"; run_make_apps 2027 rvt2027-t
 expect "make-apps 2027 with the step theme" 0 "done: ~/Applications/Revit 2027 (rvt2027-t).app"
 check "make-apps: built in the hidden .new.app, none left" eval 'called "osacompile [$H/Applications/.Revit 2027 (rvt2027-t).new.app]" &&
   [ ! -e "$H/Applications/.Revit 2027 (rvt2027-t).new.app" ] && [ -f "$APP27/Contents/Resources/script.txt" ]'
@@ -1225,7 +1272,7 @@ check "make-apps --revit-only: the new Revit app, the Viewer app kept, no Sign-I
 run_make_apps 2027 rvt2027-t --bogus; expect "make-apps: an unknown third word → 2" 2 "Usage: scripts/make-apps.sh <year> <bottle> [--revit-only]"
 # the real osacompile and osascript (on a Mac): the app's script runs the theme part and Revit with every path quoted
 if [ -x /usr/bin/osacompile ] && [ -x /usr/bin/osascript ]; then
-  reset; make_apps_sandbox 2027 rvt2027-t "Revit 2027"; theme_profile; rm "$T/stubs/osacompile"
+  reset; make_apps_sandbox 2027 rvt2027-t "Revit 2027"; rm "$T/stubs/osacompile"
   Q="$T/cx 'q"; cp -R "$CXF" "$Q"   # a CrossOver path with a quote and a space
   printf '#!/bin/bash\necho Dark\n' > "$T/dark-defaults"; chmod +x "$T/dark-defaults"
   TD="$BOTTLES/rvt2027-t/drive_c/Program Files/revit-macos"
