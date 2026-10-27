@@ -1128,6 +1128,38 @@ class GitReadOnly(Tmp):
         self.assertEqual(os.stat(idx).st_mtime_ns, before)
 
 
+class Trackpad(Build):
+    """The app's trackpad helper: its log, the log before it (their ends) and its state go into the report. Build's
+    fixture; Build's own tests are not run again (switched off below the class)."""
+    D = "home/Work Files/revit-macos/"
+
+    def test_log_and_state(self):
+        self.write(self.D + "logs/trackpad.log", "2026-10-26T10:00:00Z started\n2026-10-26T10:00:01Z view AfxFrameOrView140u\n"
+                   "2026-10-26T10:00:02Z hittest client-x: no answer twice, see %s/Library/x\n" % self.home)
+        self.write(self.D + "logs/trackpad.log.1", "2026-10-25T09:00:00Z started\n")
+        self.write(self.D + "trackpad/state.json", json.dumps({"session": "s", "pid": 1, "start": "x", "trusted": True,
+                   "posting": True, "tap": True, "bottles": {"client-x": {"ready": True}}}))
+        m = self.zip_members(self.build()["report_zip"])
+        for n in ("trackpad/trackpad.log", "trackpad/trackpad.log.1", "trackpad/state.json"):
+            self.assertIn(n, m)
+        t = m["trackpad/trackpad.log"].decode()
+        self.assertIn("view AfxFrameOrView140u", t)
+        self.assertNotIn(self.home, t); self.assertNotIn("client-x", t)
+        self.assertIn('"tap": true', m["trackpad/state.json"].decode().replace('"tap":true', '"tap": true'))
+
+    def test_a_long_log_gives_its_end(self):
+        self.write(self.D + "logs/trackpad.log", "".join("2026-10-26T10:00:00Z line %d\n" % i for i in range(3000)))
+        t = self.zip_members(self.build()["report_zip"])["trackpad/trackpad.log"].decode()
+        self.assertIn("line 2999", t); self.assertNotIn("line 0\n", t)
+
+    def test_no_trackpad_files(self):
+        self.assertFalse([n for n in self.zip_members(self.build()["report_zip"]) if n.startswith("trackpad/")])
+
+
+for _n in [n for n in vars(Build) if n.startswith("test_")]:
+    setattr(Trackpad, _n, None)
+
+
 class JournalBounded(unittest.TestCase):
     def test_kept_lines_are_cut_as_before(self):
         lines = ["' Build: 20260907_1515(x64)", "' Release: 2027.3"]

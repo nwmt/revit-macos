@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   app:
-    runs-on: macos-26   # arm64, Xcode 26: the SDK for the app's minimum macOS 26.0
+    runs-on: macos-26   # arm64, Xcode 26: its SDK builds for the app's minimum macOS 27.0 (Package.swift, app/app.conf)
     steps:
       - uses: actions/checkout@v5
         with:

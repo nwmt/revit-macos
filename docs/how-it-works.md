@@ -125,6 +125,16 @@ and every task. A task runs with `--events` in a new folder under `<data>/logs/r
 goes on when the app quits and the app finds it again when it opens. Cancel sends the task's process group the signal
 Ctrl-C sends in Terminal, and only to a task the app started.
 
+**Trackpad in Revit** (a switch in the app's Settings, off at first): in Revit's views two fingers pan, Shift and two
+fingers orbit, a pinch zooms; everywhere else scrolling stays scrolling, and mouse wheels are not touched. Wine passes
+no middle button and no pinch, so a helper app inside the app, `<app name> Trackpad`, turns the trackpad's gestures
+into a middle-button drag and the scroll wheel. It needs the permission in System Settings → Privacy & Security →
+Device Control and Data Access, and has it alone: nothing the app or the helper starts gets it. macOS sees all of
+Revit as one window, so the helper asks `./revit hittest` (our `hittest.exe` in the bottle) which Windows window is
+under the cursor when a gesture starts: only Revit's views pan and zoom, lists, Properties, the Project Browser and
+schedules keep scrolling. Checked on Revit 2027; in other years the gestures stay scrolling. The helper keeps a log in
+`<data>/logs/trackpad.log` (no window titles, no positions), which the diagnostic report includes.
+
 ## Our shims in tools/
 
 | Tool | What it fixes |
@@ -137,6 +147,7 @@ Ctrl-C sends in Terminal, and only to a task the app started.
 | `tools/shims/rvtfix` | Revit 2026+: crash from a drag-and-drop call on the browser's window, and white web panels with high CPU. Revit 2023–2025: blank start screen (CefSharp). Revit 2023+: crash when opening a view (a Windows function Wine lacks). The shim fixes the call, adds browser flags, answers the missing function and points Revit's graphics DLL at `tools/shims/d3dwp`, all in memory: Revit's files stay as installed. Revit 2027: maximize on a second display puts Revit on the main display; the shim moves the position Revit gives for that display onto it. Enscape 4.18 (2027) gets the same browser flags for its Asset Library. |
 | `tools/shims/wv2fix` | Revit 2024+: the built-in web browser (WebView2) crashes on clicks and resizes. The shim flushes pending drawing before such window changes and skips changes that change nothing. In Enscape 4.18 (2027) it loads `tools/shims/rvtfix` as soon as Enscape starts. |
 | `tools/shims/vkshim` | Enscape 3.4.4 in Revit 2020 and 4.18 in 2027: Enscape turns down the Mac GPU (it asks for a Windows memory-sharing extension and a blend feature that MoltenVK lacks), creates a query type that MoltenVK refuses, and under Wine its view never gets the keyboard focus. The shim reports the missing pieces, gives it a query type MoltenVK has, and on a click activates Enscape's view as Windows does. DXVK, which draws Revit's own interface, sees Vulkan unchanged. |
+| `tools/shims/hittest` | macOS sees Revit as one window and Wine tells no other process which Windows window is under the cursor. For the app's trackpad gestures it answers, for a point, the window there and its parents (class and title), until Revit ends. |
 | `tools/shims/pdfprinter` | The bottle has no printers. Adds the **Revit PDF** printer; Ghostscript turns its output into PDFs in `~/Documents/Revit-PDF`. |
 | `tools/revitini.py` | Writes the `Revit.ini` settings of the `revitini` step (UTF-16, as Revit keeps it). |
 | `tools/win_shortcut.py` | Reads the Start Menu shortcuts the installer creates and builds the macOS apps from them, with the same command line and icon. |

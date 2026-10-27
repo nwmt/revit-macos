@@ -557,8 +557,10 @@ def learn_bottles(ident, data, bottles, names=()):
     Autodesk user name and ID of each bottle in the Bottles folder (its Revit.ini and newest journal of each Revit
     year). For a report without a year, which reads the runs and the checks of every bottle."""
     found, dirs = list(names), []
-    if data:
-        found += _listdir(os.path.join(data, "logs"))
+    if data:   # folders only: logs/ also holds files (the trackpad helper's log), not bottles
+        logs = os.path.join(data, "logs")
+        found += [n for n in _listdir(logs)
+                  if os.path.isdir(os.path.join(logs, n)) and not os.path.islink(os.path.join(logs, n))]
     for n in (_listdir(bottles) if bottles else [])[:4 * BOTTLES_MAX]:
         p = os.path.join(bottles, n)
         if os.path.isdir(p) and not os.path.islink(p) and not NEVER_OPEN_RX.search(p):
@@ -1789,6 +1791,21 @@ def _take_run(c, d, kind):
             c.skipped.append((c.label(os.path.join(d, f)), _why_not(f, os.path.join(d, f))))
 
 
+def _take_trackpad(c, data):
+    """The menu bar app's trackpad helper (docs/how-it-works.md): its log and the one before it, each to its last 500
+    lines, and its state. The helper writes no window titles and no coordinates; paths and names are redacted here as
+    everywhere."""
+    for rel, name, what in (("logs/trackpad.log", "trackpad/trackpad.log", "log of the trackpad helper"),
+                            ("logs/trackpad.log.1", "trackpad/trackpad.log.1", "earlier log of the trackpad helper")):
+        p = os.path.join(data, rel)
+        if _regular(p):
+            lines, cut = _tail(p, 500)
+            c.add(name, what, "\n".join(_whole(lines)), src=c.label(p), cut="to its last 500 lines" if cut else None)
+    p = os.path.join(data, "trackpad", "state.json")
+    if _regular(p):
+        c.add("trackpad/state.json", "state of the trackpad helper", _text(p), src=c.label(p), keep="head")
+
+
 def _ini_allowed(path):
     ini = bottleread.read_ini(path)
     out = []
@@ -1845,6 +1862,7 @@ def _collect(root, data, bdir, year, bottle, run, doctor_json, now):
         else:
             c.skipped.append((os.path.basename(d.rstrip("/")), "a folder outside the log folder: not read"))
     c.facts["kinds"] = [k for k, _ in folders]
+    _take_trackpad(c, data)
     if bdir:
         rn = os.path.join(bdir, "revit-macos", "runs.ndjson")
         if _regular(rn):

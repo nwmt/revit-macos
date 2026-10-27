@@ -63,8 +63,8 @@ reset() { # a fresh sandbox for each test
     || { echo "sandbox setup failed"; exit 1; }
   cp "$REPO/revit" "$R/"; cp -R "$REPO/tools" "$R/"; cp "$REPO/scripts/lib/common.sh" "$REPO/scripts/lib/versions.sh" "$R/scripts/lib/"
   mkdir -p "$R/scripts/profiles"; cp "$REPO"/scripts/profiles/*.sh "$R/scripts/profiles/"
-  cp "$REPO/scripts/lib/addins.sh" "$REPO/scripts/lib/mcp.sh" "$REPO/scripts/lib/shims.sh" "$R/scripts/lib/" 2>/dev/null
-  [ ! -f "$REPO/scripts/mcp-launch.sh" ] || cp "$REPO/scripts/mcp-launch.sh" "$R/scripts/"; cp -R "$REPO/scripts/addins" "$REPO/scripts/steps" "$R/scripts/" 2>/dev/null
+  cp "$REPO/scripts/lib/addins.sh" "$REPO/scripts/lib/mcp.sh" "$REPO/scripts/lib/shims.sh" "$REPO/scripts/lib/handoff.sh" "$R/scripts/lib/" 2>/dev/null
+  [ ! -f "$REPO/scripts/mcp-launch.sh" ] || cp "$REPO/scripts/mcp-launch.sh" "$R/scripts/"; cp "$REPO/scripts/hittest-launch.sh" "$R/scripts/"; cp -R "$REPO/scripts/addins" "$REPO/scripts/steps" "$R/scripts/" 2>/dev/null
   stub "$R/install.sh"; stub "$R/scripts/run-steps.sh"; stub "$R/scripts/launch.sh"; stub "$R/scripts/smoke.sh"
   # ensure_shim's builder: done when build/<shim>/ holds a file, else it fails
   printf '#!/bin/bash\nfor f in "$(dirname "$0")/../build/$1"/*; do [ -f "$f" ] && exit 0; done\necho "no $1 to build"; exit 1\n' \
@@ -369,11 +369,17 @@ revit_exe() { touch "$BOTTLES/$1/drive_c/Program Files/Autodesk/Revit $2/Revit.e
 reset; bottle rvt2024-a 2024 2024; revit_exe rvt2024-a 2024; bottle rvt2025-b 2025 ""; bottle exp "" ""; run "" status --json
 expect "status --json" 0 '"bottles":['
 check "status: valid JSON" eval 'printf "%s" "$OUT" | /usr/bin/perl -MJSON::PP -e "local \$/; JSON::PP->new->decode(<STDIN>)"'
-check "status: a Revit bottle" grep -qF '{"name":"rvt2024-a","year":"2024","revit":true,"running":false,"addins":[]}' <<<"$OUT"
+check "status: a Revit bottle" grep -qF '{"name":"rvt2024-a","year":"2024","revit":true,"running":false,"revit_pids":[],"addins":[]}' <<<"$OUT"
 check "status: a half-installed bottle" grep -qF '{"name":"rvt2025-b","year":"2025","revit":false,' <<<"$OUT"
 check "status: a non-Revit bottle is left out" eval '! grep -q "\"exp\"" <<<"$OUT"'
 reset; bottle rvt2024-a 2024 2024; revit_exe rvt2024-a 2024; fake_revit rvt2024-a 2024; run "" status --json
 check "status: running" grep -qF '"name":"rvt2024-a","year":"2024","revit":true,"running":true' <<<"$OUT"
+reset; for b in rvt2027-a rvt2027-b; do bottle $b 2027 2027; revit_exe $b 2027; done; bottle rvt2025-a 2025 2025; revit_exe rvt2025-a 2025
+fake_revit rvt2027-a 2027; p27a=$!; fake_revit rvt2027-b 2027; p27b=$!; fake_revit rvt2025-a 2025; p25=$!; run "" status --json
+check "status: revit_pids, each bottle its own Revit processes" eval 'grep -qF "\"name\":\"rvt2027-a\",\"year\":\"2027\",\"revit\":true,\"running\":true,\"revit_pids\":[$p27a]" <<<"$OUT" &&
+  grep -qF "\"name\":\"rvt2027-b\",\"year\":\"2027\",\"revit\":true,\"running\":true,\"revit_pids\":[$p27b]" <<<"$OUT" &&
+  grep -qF "\"name\":\"rvt2025-a\",\"year\":\"2025\",\"revit\":true,\"running\":true,\"revit_pids\":[$p25]" <<<"$OUT"'
+run "" status; check "status: the human list has no pids" eval '! grep -q "$p27a" <<<"$OUT"'
 reset; fake_lock "install.sh 2024 rvt2024-a"; run "" status --json
 check "status: busy with its owner" grep -qF '"busy":{"busy":true,"command":"install.sh 2024 rvt2024-a"' <<<"$OUT"
 reset; run "" status --json; check "status: CrossOver found in the fake" grep -qF '"crossover":{"found":true' <<<"$OUT"
@@ -1062,6 +1068,85 @@ for c in "2027|remove 2027|cxbottle" "2027|rebuild 2027|install.sh" "|addins 202
   pyrevit_world; mcp_bg a mcp 2027 --server pyrevit; mcp_wait confirmed 100; mcp_wait lock_is_free 50; stop_fakes
   run "${c%%|*}" $(cut -d'|' -f2 <<<"$c")
   check "pyrevit connected, Revit closed: $(cut -d'|' -f2 <<<"$c") refused" eval '[ "$RC" != 0 ] && grep -q "through MCP" <<<"$OUT" && ! called "${c##*|}" && [ -d "$BOTTLES/rvt2027-a" ]'
+  exec 5>&-; wait "$LPID_a"
+done
+# ---- ./revit hittest (scripts/hittest-launch.sh): the app's window-under-a-point helper ----
+hit_cx() { # the fake CrossOver's wine plays hittest.exe: records its arguments (and FD8/FD9 if they reached it), holds a
+  # file of the bottle open, writes the ready file (--ready Z:\… → its Mac path), prints hello, echoes stdin.
+  # $T/hit-mode: noready | ignoreterm (no ready file, ignores TERM) | norevit (exit 3 at once)
+  cat > "$CXF/bin/wine" <<EOF
+#!/bin/bash
+[ "\$1" = --bottle ] || exit 0
+name="\$2"; shift 2; rf=""; prev=""
+for a in "\$@"; do [ "\$prev" = --ready ] && rf="\$a"; prev="\$a"; done
+{ printf '%s\n' "\$@"; [ -e /dev/fd/9 ] && echo FD9; [ -e /dev/fd/8 ] && echo FD8; } > "$T/hit-argv"
+bf="$BOTTLES/\$name/drive_c/hit-open.tmp"; touch "\$bf"; exec 4<"\$bf"
+case "\$(cat "$T/hit-mode" 2>/dev/null)" in
+  noready) sleep 60 ;;
+  ignoreterm) trap '' TERM; sleep 60 ;;
+  norevit) exit 3 ;;
+esac
+rf="\${rf#Z:}"; touch "\${rf//\\\\//}"
+echo "hello 1 0 0 3024 1964"; cat
+EOF
+  chmod +x "$CXF/bin/wine"
+}
+hit_shim() { mkdir -p "$R/build/hittest"; echo "fake hittest.exe" > "$R/build/hittest/hittest.exe"; }
+hit_world() { reset; bottle rvt2027-a 2027 2027; hit_shim; hit_cx; fake_revit rvt2027-a 2027; REVITP=$!; }
+hit_alive() { sandboxed 'revit-hittest\.'; }   # a process with this sandbox's ready-file token in its arguments
+
+reset; hit_shim; hit_cx; run_mcp hittest 2027
+check "hittest: no bottle → 1, stdout empty" eval '[ "$RC" = 1 ] && grep -q "There is no bottle rvt2027-a" <<<"$ERR" && mcp_stdout_empty'
+reset; bottle rvt2027-a 2027 2027; hit_shim; hit_cx; run_mcp hittest 2027
+check "hittest: Revit not running → 75, wine never started" eval '[ "$RC" = 75 ] && grep -q "Revit 2027 is not running in rvt2027-a" <<<"$ERR" && mcp_stdout_empty && [ ! -e "$T/hit-argv" ]'
+hit_world; rm -rf "$R/build/hittest"; run_mcp hittest 2027
+check "hittest: no hittest.exe → 1 with how to build it, wine never started" eval '[ "$RC" = 1 ] && grep -q "build-shims.sh hittest" <<<"$ERR" && mcp_stdout_empty && [ ! -e "$T/hit-argv" ]'
+for a in "2027 rvt2027-a extra" "2027 --json" "2027 --events $T/ev" "abcd" "20270"; do
+  hit_world; run_mcp hittest $a
+  check "hittest $a: usage → 2, wine never started" eval '[ "$RC" = 2 ] && grep -q "Usage: ./revit hittest <year> \[bottle\]" <<<"$ERR" && mcp_stdout_empty && [ ! -e "$T/hit-argv" ]'
+done
+reset; run "" --help; check "hittest is in the help" grep -qx "  hittest   for the app: the Windows window under a point (stdin/stdout)" <<<"$OUT"
+hit_world; printf '1 10 10\n' > "$T/in"; MCP_IN="$T/in"; run_mcp hittest 2027
+check "hittest: exit 0, stdout is hittest.exe's alone, stderr empty" eval '[ "$RC" = 0 ] && [ "$OUT" = "$(printf "hello 1 0 0 3024 1964\n1 10 10")" ] && [ -z "$ERR" ]'
+check "hittest: the shim by its Mac path, --ready Z:\\…\\revit-hittest.*, the year" eval '[ "$(sed -n 1p "$T/hit-argv")" = "$R/build/hittest/hittest.exe" ] &&
+  [ "$(sed -n 2p "$T/hit-argv")" = --ready ] && sed -n 3p "$T/hit-argv" | grep -q "^Z:\\\\.*\\\\revit-hittest\.[A-Za-z0-9]*$" && [ "$(sed -n 4p "$T/hit-argv")" = 2027 ]'
+check "hittest: neither the lock (fd 9) nor fd 8 reaches it" eval '! grep -qx -e FD9 -e FD8 "$T/hit-argv"'
+check "hittest: the ready file is gone afterwards" eval '! ls "${TMPDIR:-/tmp}"/revit-hittest.* >/dev/null 2>&1'
+hit_world; mcp_bg a hittest 2027; mcp_wait '[ -s "$T/mcp-out-a" ]' 100; mcp_wait lock_is_free 50
+check "hittest: the lock is released once it is ready" lock_is_free
+echo "7 1 2" >&5; mcp_wait 'grep -qx "7 1 2" "$T/mcp-out-a"' 50; check "hittest: requests after the handoff reach it" grep -qx "7 1 2" "$T/mcp-out-a"
+exec 5>&-; wait "$LPID_a"; check "hittest: end of input after the handoff → 0" test "$?" = 0
+hit_world; fake_lock "install.sh 2025 rvt2025-a"; locker=$!; run_mcp hittest 2027
+check "hittest: lock busy → 75 at once, wine never started" eval '[ "$RC" = 75 ] && grep -q "Another task is running" <<<"$ERR" && [ ! -e "$T/hit-argv" ]'
+run_mcp hittest 2027; check "hittest: still busy → 75 again" test "$RC" = 75
+run_mcp hittest 2027; check "hittest: busy a third time → 75" test "$RC" = 75
+kill "$locker"; wait "$locker" 2>/dev/null; MCP_IN=/dev/null; run_mcp hittest 2027
+check "hittest: the lock free again → it starts" eval '[ "$RC" = 0 ] && grep -q "^hello 1 " <<<"$OUT"'
+# the lock is taken between the first checks and lock_take: 75, not a failure
+hit_world; touch "$T/hold"; MCP_ENV=(HITTEST_TEST_HOLD="$T/hold"); mcp_bg a hittest 2027; mcp_wait '[ -e "$T/hold.reached" ]' 100
+fake_lock "install.sh 2025 rvt2025-a"; rm "$T/hold"; exec 5>&-; wait "$LPID_a"; rc=$?; MCP_ENV=()
+check "hittest: lock taken during the first checks → 75" eval '[ "$rc" = 75 ] && [ ! -e "$T/hit-argv" ]'
+hit_world; echo norevit > "$T/hit-mode"; run_mcp hittest 2027
+check "hittest: hittest.exe finds no Revit.exe (Revit just ended) → 75" eval '[ "$RC" = 75 ] && ! hit_alive && lock_is_free'
+hit_world; fake_mcphost rvt2027-a; other=$!; echo noready > "$T/hit-mode"; MCP_ENV=(HITTEST_HANDOFF_S=2); run_mcp hittest 2027; MCP_ENV=()
+check "hittest: not ready in time → 1, its processes gone, Revit and an MCP client alive, lock free" \
+  eval '[ "$RC" = 1 ] && grep -q "did not start within 2 s" <<<"$ERR" && mcp_stdout_empty && ! hit_alive && revit_alive && kill -0 "$other" 2>/dev/null && lock_is_free'
+hit_world; echo ignoreterm > "$T/hit-mode"; MCP_ENV=(HITTEST_HANDOFF_S=2); run_mcp hittest 2027; MCP_ENV=()
+check "hittest: a loader that ignores TERM → killed" eval '[ "$RC" = 1 ] && ! hit_alive && revit_alive'
+hit_world; echo noready > "$T/hit-mode"; MCP_ENV=(HITTEST_HANDOFF_S=20); mcp_bg a hittest 2027; mcp_wait '[ -s "$T/hit-argv" ]' 100; MCP_ENV=()
+kill "$REVITP"; wait "$REVITP" 2>/dev/null; run "2027" remove 2027
+check "hittest starting, Revit closed: remove refused, the bottle stays" \
+  eval '[ "$RC" != 0 ] && grep -q -e "is still closing" -e "Another task is running" <<<"$OUT" && ! called cxbottle && [ -d "$BOTTLES/rvt2027-a" ]'
+kill -TERM "$LPID_a"; wait "$LPID_a"; rc=$?; exec 5>&-
+check "hittest: TERM before the handoff → 143, its processes gone, lock free" eval '[ "$rc" = 143 ] && ! hit_alive && lock_is_free'
+hit_world; mcp_bg a hittest 2027; mcp_wait '[ -s "$T/mcp-out-a" ]' 100; mcp_wait lock_is_free 50
+kill -TERM "$LPID_a"; wait "$LPID_a"; rc=$?; exec 5>&-
+check "hittest: TERM after the handoff → 143, its processes gone, Revit alive" eval '[ "$rc" = 143 ] && ! hit_alive && revit_alive'
+# Revit closed, hittest.exe still there (the real one ends with Revit within a second): remove and rebuild wait
+for c in "2027|remove 2027|cxbottle" "2027|rebuild 2027|install.sh"; do
+  hit_world; mcp_bg a hittest 2027; mcp_wait '[ -s "$T/mcp-out-a" ]' 100; mcp_wait lock_is_free 50; stop_fakes
+  run "${c%%|*}" $(cut -d'|' -f2 <<<"$c")
+  check "hittest running, Revit closed: $(cut -d'|' -f2 <<<"$c") refused (still closing)" eval '[ "$RC" != 0 ] && grep -q "is still closing" <<<"$OUT" && ! called "${c##*|}" && [ -d "$BOTTLES/rvt2027-a" ]'
   exec 5>&-; wait "$LPID_a"
 done
 # ---- end ----

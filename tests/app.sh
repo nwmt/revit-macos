@@ -52,7 +52,7 @@ repo_copy() { # the repo as git sees it (tracked and new files, working-tree con
   (cd "$REPO" && git ls-files -z --cached --others --exclude-standard | while IFS= read -r -d '' f; do [ -e "$f" ] && printf '%s\0' "$f"; done \
     | cpio -p0dm --quiet "$R") || { echo "repo copy failed"; exit 1; }
   mkdir -p "$R/app"
-  printf "APP_NAME='Test App'\nAPP_BUNDLE_ID='io.example.testapp'\nAPP_MIN_MACOS=26.0\nAPP_REPO='example/test-app'\n" > "$R/app/app.conf"
+  printf "APP_NAME='Test App'\nAPP_BUNDLE_ID='io.example.testapp'\nAPP_MIN_MACOS=26.0\nAPP_REPO='example/test-app'\nTRACKPAD_HELPER_VERSION=1.0.0\nTRACKPAD_HELPER_CDHASH=''\n" > "$R/app/app.conf"
   ( cd "$R" && git init -q && git add -A && git -c core.hooksPath=/dev/null -c user.name=test -c user.email=test \
       commit -qm fixture && git tag "v$SHIMS_VERSION" ) || { echo "repo copy: git failed"; exit 1; }
 }
@@ -154,7 +154,7 @@ mkdir -p "$T/cx/bin"; for x in cxbottle wineserver; do printf '#!/bin/bash\nexit
 listing() { find "$1" -exec stat -f '%N %z %m' {} + | sort; }
 
 B="$T/out/Test App.app"; E="$B/Contents/Resources/engine"; RS="$B/Contents/Resources"
-in_sandbox "$R/app/make-bundle.sh" "$B" "$T/stub" "$TOOLS" 0.0.1
+in_sandbox "$R/app/make-bundle.sh" "$B" "$T/stub" "$TOOLS" 0.0.1 "$T/stub"
 expect "bundle: make-bundle.sh assembles the app" 0 ""
 miss=""; for f in "Contents/MacOS/Test App" Contents/Info.plist Contents/Resources/engine/tools/installer_source.py \
   Contents/Resources/engine/installers/CHECKSUMS.txt Contents/Resources/engine/LICENSE Contents/Resources/bin/7zz \
@@ -175,17 +175,23 @@ pl() { plutil -extract "$1" raw -o - "$B/Contents/Info.plist" 2>/dev/null; }
 check "bundle: Info.plist" eval '[ "$(pl CFBundleIdentifier)" = io.example.testapp ] && [ "$(pl CFBundleExecutable)" = "Test App" ] &&
   [ "$(pl CFBundleName)" = "Test App" ] && [ "$(pl CFBundleShortVersionString)" = 0.0.1 ] && [ "$(pl LSMinimumSystemVersion)" = 26.0 ] &&
   [ "$(pl LSUIElement)" = true ] && [ "$(pl AppRepository)" = example/test-app ]'
+HP="$B/Contents/Helpers/Test App Trackpad.app"; plh() { plutil -extract "$1" raw -o - "$HP/Contents/Info.plist" 2>/dev/null; }
+check "bundle: the trackpad helper, its own bundle ID and version" eval '[ -x "$HP/Contents/MacOS/Test App Trackpad" ] &&
+  [ "$(plh CFBundleIdentifier)" = io.example.testapp.trackpad ] && [ "$(plh CFBundleExecutable)" = "Test App Trackpad" ] &&
+  [ "$(plh CFBundleShortVersionString)" = 1.0.0 ] && [ "$(plh CFBundleVersion)" = 1.0.0 ] && [ "$(plh LSUIElement)" = true ] &&
+  [ "$(plh LSMinimumSystemVersion)" = 26.0 ]'
 pyc="$(find "$RS/python/lib/python3.99/__pycache__" -name 'm.*.pyc' 2>/dev/null | head -1)"
 check "bundle: Python bytecode is unchecked-hash" eval '[ -n "$pyc" ] && [ "$(od -An -tu4 -j4 -N4 "$pyc" | tr -d " ")" = 1 ]'
-in_sandbox "$R/app/make-bundle.sh" "$T/out/V.app" "$T/stub" "$TOOLS" 1.2;  expect "bundle: refuses version 1.2" 2 "X.Y.Z"
-in_sandbox "$R/app/make-bundle.sh" "$B" "$T/stub" "$TOOLS" 0.0.2;           expect "bundle: refuses an existing output" 2 "exists"
+in_sandbox "$R/app/make-bundle.sh" "$T/out/V.app" "$T/stub" "$TOOLS" 1.2 "$T/stub";  expect "bundle: refuses version 1.2" 2 "X.Y.Z"
+in_sandbox "$R/app/make-bundle.sh" "$B" "$T/stub" "$TOOLS" 0.0.2 "$T/stub";           expect "bundle: refuses an existing output" 2 "exists"
+in_sandbox "$R/app/make-bundle.sh" "$T/out/H.app" "$T/stub" "$TOOLS" 0.0.1;            expect "bundle: refuses without the helper" 2 "Usage"
 cp -R "$TOOLS" "$T/tools-noshim"; rm -rf "$T/tools-noshim/shims/wbemshim"
-in_sandbox "$R/app/make-bundle.sh" "$T/out/S.app" "$T/stub" "$T/tools-noshim" 0.0.1; expect "bundle: refuses an incomplete shim set" 2 "shims"
-check "bundle: a refusal leaves nothing behind" eval '[ -z "$(find "$T/out" -maxdepth 1 -name "*.partial")" ] && [ ! -e "$T/out/S.app" ] && [ ! -e "$T/out/V.app" ]'
+in_sandbox "$R/app/make-bundle.sh" "$T/out/S.app" "$T/stub" "$T/tools-noshim" 0.0.1 "$T/stub"; expect "bundle: refuses an incomplete shim set" 2 "shims"
+check "bundle: a refusal leaves nothing behind" eval '[ -z "$(find "$T/out" -maxdepth 1 -name "*.partial")" ] && [ ! -e "$T/out/S.app" ] && [ ! -e "$T/out/V.app" ] && [ ! -e "$T/out/H.app" ]'
 
 fake_bundle() { # $1 = app path: from here on, the real assembly with the fixture tools; $2 = tools (default $TOOLS)
   chmod -R u+w "$1" 2>/dev/null; rm -rf "$1"
-  (cd / && env "${CLEAN_ENV[@]}" PATH="$BASEPATH" "$R/app/make-bundle.sh" "$1" "$T/stub" "${2:-$TOOLS}" 0.0.1 >/dev/null) \
+  (cd / && env "${CLEAN_ENV[@]}" PATH="$BASEPATH" "$R/app/make-bundle.sh" "$1" "$T/stub" "${2:-$TOOLS}" 0.0.1 "$T/stub" >/dev/null) \
     || { echo "make-bundle failed for $1"; exit 1; }
 }
 AE="$A/Contents/Resources/engine"
@@ -286,20 +292,33 @@ sign_tools() { # $1 = folder, $2 = minimum macOS of _x.so, $3 = of 7zz's x86_64 
 cc_ 14.0 -arch arm64 -o "$T/stub-bin" "$T/main.c"
 sign_bundle() { # $1 = app path, $2 = tools folder: assembled with the Mach-O stub
   chmod -R u+w "$1" 2>/dev/null; rm -rf "$1"
-  (cd / && env "${CLEAN_ENV[@]}" PATH="$BASEPATH" "$R/app/make-bundle.sh" "$1" "$T/stub-bin" "$2" 0.0.1 >/dev/null)
+  (cd / && env "${CLEAN_ENV[@]}" PATH="$BASEPATH" "$R/app/make-bundle.sh" "$1" "$T/stub-bin" "$2" 0.0.1 "$T/stub-bin" >/dev/null)
 }
 SB="$T/s/Test App.app"
 if sign_tools "$T/stools" && sign_bundle "$SB" "$T/stools"; then
   in_sandbox "$R/app/sign.sh" "$SB" 26.0 "$T/inv.txt"
   expect "sign: sign.sh signs the app" 0 ""
   TAB=$'\t'
-  check "sign: the inventory holds the 5 images, not the archive or the object" eval '[ "$(wc -l < "$T/inv.txt" | tr -d " ")" = 5 ] &&
-    grep -q "^Contents/MacOS/Test App$TAB" "$T/inv.txt" && grep -qx "Contents/Resources/bin/7zz${TAB}x86_64 arm64" "$T/inv.txt" &&
+  check "sign: the inventory holds the 6 images (the helper's too), not the archive or the object" eval '[ "$(wc -l < "$T/inv.txt" | tr -d " ")" = 6 ] &&
+    grep -q "^Contents/MacOS/Test App$TAB" "$T/inv.txt" && grep -q "^Contents/Helpers/Test App Trackpad.app/Contents/MacOS/Test App Trackpad$TAB" "$T/inv.txt" && grep -qx "Contents/Resources/bin/7zz${TAB}x86_64 arm64" "$T/inv.txt" &&
     grep -q "_x.so" "$T/inv.txt" && grep -q "libpython3.99.dylib" "$T/inv.txt" && grep -q "python3.99$TAB" "$T/inv.txt" &&
     ! grep -q -e "x.o" -e "libx.a" "$T/inv.txt"'
   adhoc=1; while IFS="$TAB" read -r p _; do d="$(codesign -dv "$SB/$p" 2>&1)"; grep -q "Signature=adhoc" <<<"$d" || adhoc=0; done < "$T/inv.txt"
   check "sign: every image is signed ad hoc" eval '[ "$adhoc" = 1 ] && [ -s "$T/inv.txt" ]'
   check "sign: the app verifies --deep --strict" codesign --verify --strict --deep "$SB"
+  hsig="$(codesign -dv "$SB/Contents/Helpers/Test App Trackpad.app" 2>&1)"   # a variable: grep -q in a pipe would SIGPIPE codesign
+  check "sign: the helper is signed as its own bundle, with its bundle ID" eval 'grep -qx "Identifier=io.example.testapp.trackpad" <<<"$hsig"'
+  check "sign: the helper's CDHash next to the inventory" eval 'grep -qxE "[0-9a-f]{40}" "$T/inv.txt.cdhash" && [ "$(wc -l < "$T/inv.txt.cdhash" | tr -d " ")" = 1 ] &&
+    [ "$(cat "$T/inv.txt.cdhash")" = "$(codesign -dvvv "$SB/Contents/Helpers/Test App Trackpad.app" 2>&1 | sed -n "s/^CDHash=//p")" ]'
+  hconf() { printf "TRACKPAD_HELPER_VERSION=1.0.0\nTRACKPAD_HELPER_CDHASH='%s'\n" "$1" > "$T/hc.conf"; }
+  hconf "$(cat "$T/inv.txt.cdhash")"; in_sandbox "$R/app/check-helper-cdhash.sh" "$T/inv.txt.cdhash" "$T/hc.conf"
+  expect "cdhash: the recorded one → 0" 0 ""
+  hconf 0123456789abcdef0123456789abcdef01234567; in_sandbox "$R/app/check-helper-cdhash.sh" "$T/inv.txt.cdhash" "$T/hc.conf"
+  expect "cdhash: another one → 1, bump the version" 1 "bump TRACKPAD_HELPER_VERSION"
+  hconf ""; in_sandbox "$R/app/check-helper-cdhash.sh" "$T/inv.txt.cdhash" "$T/hc.conf"
+  expect "cdhash: none recorded → 1" 1 "TRACKPAD_HELPER_CDHASH"
+  hconf 0123456789abcdef0123456789abcdef01234567; in_sandbox TRACKPAD_HELPER_CDHASH_CHECK=0 "$R/app/check-helper-cdhash.sh" "$T/inv.txt.cdhash" "$T/hc.conf"
+  expect "cdhash: TRACKPAD_HELPER_CDHASH_CHECK=0 → 0" 0 ""
   ditto "$SB" "$T/s2/Test App.app"; printf '#' >> "$T/s2/Test App.app/Contents/Resources/engine/revit"
   check "sign: a changed engine file breaks the seal" eval 'codesign --verify --strict --deep "$SB" 2>/dev/null && ! codesign --verify --strict --deep "$T/s2/Test App.app" 2>/dev/null'
   sign_tools "$T/stools15" 15.0 && sign_bundle "$T/s3/Test App.app" "$T/stools15"

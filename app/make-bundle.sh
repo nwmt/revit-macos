@@ -1,23 +1,24 @@
 #!/usr/bin/env bash
 # Assembles <App>.app (name and bundle ID from app/app.conf):
 #   Contents/MacOS/<App>                the menu bar app
+#   Contents/Helpers/<App> Trackpad.app the trackpad helper: its own bundle ID and version (TRACKPAD_HELPER_VERSION)
 #   Contents/Resources/engine/          revit, install.sh, scripts/, tools/, installers/CHECKSUMS.txt, LICENSE, .app-bundle
 #   Contents/Resources/engine/build/    the shims release (+ .prebuilt)
 #   Contents/Resources/bin/, python/    7zz, cabextract, winetricks; Python
 #   Contents/Resources/Licenses/        one folder per component + README.txt
 # The engine reads .app-bundle (scripts/lib/common.sh): data in ~/Library/Application Support/<App>, these tools first.
-# Usage: app/make-bundle.sh <out.app> <app binary> <tools folder from app/fetch-tools.sh> <version X.Y.Z>
+# Usage: app/make-bundle.sh <out.app> <app binary> <tools folder from app/fetch-tools.sh> <version X.Y.Z> <helper binary>
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 refuse() { echo "$*" >&2; exit 2; }
-[ $# = 4 ] || refuse "Usage: app/make-bundle.sh <out.app> <app binary> <tools folder> <version X.Y.Z>"
-OUT="$1"; BIN="$2"; TOOLS="$3"; VER="$4"
+[ $# = 5 ] || refuse "Usage: app/make-bundle.sh <out.app> <app binary> <tools folder> <version X.Y.Z> <helper binary>"
+OUT="$1"; BIN="$2"; TOOLS="$3"; VER="$4"; HELPER="$5"
 . "$ROOT/app/app.conf"; . "$ROOT/app/tools.sh"; . "$ROOT/scripts/lib/shims.sh"
 [[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || refuse "The version must look like X.Y.Z: $VER"
 [[ "$APP_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9\ ]*$ ]] || refuse "APP_NAME in app/app.conf may hold letters, digits and spaces only"
 [[ "$APP_REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || refuse "APP_REPO in app/app.conf must be owner/name"
 [ ! -e "$OUT" ] || refuse "$OUT already exists"
-[ -f "$BIN" ] && [ -d "$TOOLS/bin" ] && [ -x "$TOOLS/python/bin/python3" ] || refuse "Missing the app binary or the tools in $TOOLS"
+[ -f "$BIN" ] && [ -f "$HELPER" ] && [ -d "$TOOLS/bin" ] && [ -x "$TOOLS/python/bin/python3" ] || refuse "Missing the app binary or the tools in $TOOLS"
 release_complete "$TOOLS/shims" || refuse "The shims in $TOOLS/shims do not hold every shim of SHIMS"
 P="$OUT.partial"; trap 'rm -rf "$P"' EXIT; rm -rf "$P"
 C="$P/Contents"; RES="$C/Resources"; E="$RES/engine"
@@ -27,6 +28,11 @@ sed -e "s|@APP_NAME@|$APP_NAME|g" -e "s|@APP_BUNDLE_ID@|$APP_BUNDLE_ID|g" -e "s|
   -e "s|@APP_MIN_MACOS@|$APP_MIN_MACOS|g" -e "s|@APP_REPO@|$APP_REPO|g" "$ROOT/app/Info.plist.in" > "$C/Info.plist"
 plutil -lint -s "$C/Info.plist"
 cp "$BIN" "$C/MacOS/$APP_NAME"; chmod 755 "$C/MacOS/$APP_NAME"
+HB="$C/Helpers/$APP_NAME Trackpad.app"; mkdir -p "$HB/Contents/MacOS"
+sed -e "s|@APP_NAME@|$APP_NAME|g" -e "s|@APP_BUNDLE_ID@|$APP_BUNDLE_ID|g" -e "s|@TRACKPAD_HELPER_VERSION@|$TRACKPAD_HELPER_VERSION|g" \
+  -e "s|@APP_MIN_MACOS@|$APP_MIN_MACOS|g" "$ROOT/app/Helper-Info.plist.in" > "$HB/Contents/Info.plist"
+plutil -lint -s "$HB/Contents/Info.plist"
+cp "$HELPER" "$HB/Contents/MacOS/$APP_NAME Trackpad"; chmod 755 "$HB/Contents/MacOS/$APP_NAME Trackpad"
 
 # the engine as git sees it (tracked and new files, not ignored ones), without the dev-only scripts: run directly,
 # they write into the engine folder and download a compiler; in the app nothing calls them

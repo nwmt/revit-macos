@@ -24,6 +24,7 @@ struct SettingsView: View {
                 if let e = settings.loginError { Text(e).font(.callout).foregroundStyle(.red) }
                 Toggle("Check for updates once a day", isOn: $settings.checkForUpdates)
             }
+            if let t = env.trackpad { TrackpadSection(model: t) }
             Section("Installer files") {
                 if let c = settings.cache {
                     Text(c.removableBytes > 0 ? "\(ByteCountFormatter().string(fromByteCount: c.removableBytes)) can be deleted" : "Nothing to delete")
@@ -62,5 +63,42 @@ struct SettingsView: View {
         guard Confirm.ask(String(localized: "Delete the installer files?"), String(localized: "A later install or rebuild downloads them again."),
                           button: String(localized: "Delete"), destructive: true) else { return }
         Task { await settings.clearCache() }
+    }
+}
+
+/// Trackpad in Revit: the switch, one status line, the button that line needs.
+struct TrackpadSection: View {
+    let model: TrackpadModel
+    private let settingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+
+    var body: some View {
+        Section("Trackpad in Revit") {
+            Toggle("Pan, orbit and zoom with the trackpad", isOn: Binding(get: { model.enabled },
+                                                                         set: { on in Task { await model.setEnabled(on) } }))
+                .disabled(model.line == .notInApplications)
+            Text("In Revit's views, two fingers pan, Shift and two fingers orbit, a pinch zooms. Elsewhere scrolling stays scrolling.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            switch model.line {
+            case .off: EmptyView()
+            case .starting: Text("Starting…").font(.callout)
+            case .on: Text("On").font(.callout)
+            case .waiting(let section):
+                Text("Waiting for permission: System Settings → Privacy & Security → \(section) → turn on the trackpad helper.")
+                    .font(.callout).fixedSize(horizontal: false, vertical: true)
+                Button("Open System Settings") { NSWorkspace.shared.open(settingsURL) }
+            case .lost:
+                Text("macOS no longer accepts the earlier permission (the helper changed).").font(.callout)
+                Button("Ask again") { Task { await model.askAgain() } }
+            case .lostManual:
+                Text("In System Settings → Privacy & Security → \(TrackpadModel.section), remove the trackpad helper with −, then turn this switch off and on.")
+                    .font(.callout).fixedSize(horizontal: false, vertical: true)
+                Button("Open System Settings") { NSWorkspace.shared.open(settingsURL) }
+            case .error(let e): Text("Not working: \(e)").font(.callout).foregroundStyle(.red)
+            case .notInApplications: Text("Works only for the app in the Applications folder.").font(.callout).foregroundStyle(.secondary)
+            }
+        }
+        .task {
+            while !Task.isCancelled { model.refresh(); try? await Task.sleep(for: .seconds(1)) }
+        }
     }
 }
