@@ -540,27 +540,36 @@ def collect_bottles(ctx):
 
 
 def activity(bottle, runner):
-    """stopped | active | unknown: whether a Wine process (wineserver, Revit, the licensing services) has the bottle
-    folder itself or a file in it open, by real paths as lsof prints them. Never asks Wine."""
+    """stopped | active | leftover | unknown: whether a Wine process (wineserver, Revit, the licensing services) has the
+    bottle folder itself or a file in it open, by real paths as lsof prints them. leftover: such processes, but no
+    wineserver among them: what a wineserver that crashed or was killed left behind (they ignore SIGTERM;
+    ./revit stop ends them). Never asks Wine."""
     real = os.path.realpath(bottle)
     rc, out = runner(["ps", "-axww", "-o", "pid=,comm=,args="])
     if rc != 0:
         return "unknown"
     mine = {os.getpid(), os.getppid()}
-    pids = []
+    pids, server = [], set()
     for line in out.splitlines():
         f = line.strip().split(None, 1)
         if len(f) == 2 and f[0].isdigit() and int(f[0]) not in mine and WINEISH.search(f[1]):
             pids.append(f[0])
+            if "wineserver" in f[1]:
+                server.add(f[0])
     if not pids:
         return "stopped"
     rc, out = runner(["lsof", "-w", "-n", "-P", "-Fn", "-p", ",".join(pids)])
     if rc is None:
         return "unknown"
+    pid, holders = None, set()
     for line in out.splitlines():
-        if line.startswith("n") and (line[1:] == real or line[1:].startswith(real.rstrip("/") + "/")):
-            return "active"
-    return "stopped"
+        if line.startswith("p"):
+            pid = line[1:]
+        elif line.startswith("n") and (line[1:] == real or line[1:].startswith(real.rstrip("/") + "/")):
+            holders.add(pid)
+    if not holders:
+        return "stopped"
+    return "active" if holders & server else "leftover"
 
 
 def documents(b, ctx):
@@ -938,7 +947,7 @@ def clone_check(f, cid, name, years, clone):
                      detail=f"state {state or 'unknown'}",
                      fix="if it is your own bottle, delete the file revit-macos/smoke-clone in it; if it is a copy, "
                          "delete it in CrossOver")
-    if owned or clone.get("activity") == "active":
+    if owned or clone.get("activity") in ("active", "leftover"):
         return Check(cid, "info", f"{name}: a temporary copy{of}, in use by ./revit test",
                      detail=f"state {state or 'unknown'}, " + ("the running ./revit test owns it" if owned else
                                                                "programs run in it"))
@@ -1289,7 +1298,7 @@ def runtime_check(f, b, step, kind):
                      fix=rebuild(f), doc=DOC["start-over"])
     rel, need = nf.get("release"), NETFX.get(str(p.get("DOTNET")), 0)
     if rel is None:
-        if b.get("activity") == "active":
+        if b.get("activity") in ("active", "leftover"):
             return Check("fixes.netfx", "info", ".NET Framework's version: not visible (bottle active)",
                          detail="Wine writes the registry to disk up to about 30 s late while the bottle runs")
         if nf.get("reg"):
@@ -1586,6 +1595,10 @@ def bottle_checks(f):
     if act == "active":
         out.append(Check("bottle.activity", "info", f"Revit or its background services run in {name}",
                          detail="what Wine changes reaches the registry on disk up to about 30 s later"))
+    elif act == "leftover":
+        out.append(Check("bottle.activity", "warn", f"Windows programs of an ended Wine session still run in {name}",
+                         detail="their wineserver is gone (it crashed or was killed); they keep the bottle busy",
+                         fix=f"./revit stop {y}{f['sfx']}"))
     elif act == "stopped":
         out.append(Check("bottle.activity", "ok", f"nothing runs in {name}"))
     else:

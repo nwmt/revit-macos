@@ -290,7 +290,10 @@ class Bottle(Sandbox):
         real = self.b
         self.runner.ps = ("  101 /x/wineserver wineserver\n  102 /bin/zsh -zsh\n"
                           "  103 /x/wine-preloader C:\\a\\Revit.exe\n")
-        for lsof, want in (("p101\nfcwd\nn%s\n" % real, "active"), ("p103\nn%s/drive_c/x.dll\n" % real, "active"),
+        for lsof, want in (("p101\nfcwd\nn%s\n" % real, "active"),
+                           ("p101\nn%s/drive_c\np103\nn%s/drive_c/x.dll\n" % (real, real), "active"),
+                           ("p103\nn%s/drive_c/x.dll\n" % real, "leftover"),   # no wineserver holds it: left behind
+                           ("p101\nn/elsewhere\np103\nn%s/drive_c/x.dll\n" % real, "leftover"),
                            ("p101\nn%s2/drive_c/x\n" % real, "stopped"), ("", "stopped"), (None, "unknown")):
             self.runner.lsof = lsof
             self.assertEqual(dr.activity(self.b, self.runner), want, lsof)
@@ -301,6 +304,18 @@ class Bottle(Sandbox):
         self.assertEqual([c[0] for c in self.runner.calls[n:]], ["ps"])   # no lsof without a Wine process
         self.runner.ps = None
         self.assertEqual(dr.activity(self.b, self.runner), "unknown")
+
+    def test_leftover_programs_are_a_warning_with_stop(self):
+        real = os.path.realpath(self.b)
+        self.runner.ps = "  103 /x/wine-preloader C:\\windows\\system32\\winedevice.exe\n"
+        self.runner.lsof = "p103\nfcwd\nn%s/drive_c/windows\n" % real
+        c = self.by_id(self.checks())["bottle.activity"]
+        self.assertEqual(c.status, "warn")
+        self.assertIn("Windows programs of an ended Wine session", c.title)
+        self.assertEqual(c.fix, "./revit stop %s" % self.year)
+        self.runner.ps = "  101 /x/wineserver wineserver\n" + self.runner.ps
+        self.runner.lsof = "p101\nn%s\n" % real + self.runner.lsof
+        self.assertEqual(self.by_id(self.checks())["bottle.activity"].status, "info")   # a live wineserver: in use
 
     def test_records(self):
         self.records_clear()

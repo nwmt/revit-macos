@@ -101,8 +101,12 @@ cxapp() { # $1 = path under ~/Applications/CrossOver, $2 = bottle: an app CrossO
   printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CXHelperAppBottleName</key><string>%s</string></dict></plist>\n' \
     "$2" > "$H/Applications/CrossOver/$1.app/Contents/Info.plist"
 }
-fake_revit() { # $1 = bottle, $2 = year: a process that looks like Revit.exe and holds a file open in that bottle
+fake_revit() { # $1 = bottle, $2 = year: a process that looks like Revit.exe and holds a file open in that bottle, and
+  # the bottle's wineserver beside it (a Revit always has one: without it, Revit would be a leftover). Revit starts
+  # last: callers take its PID from $!
   touch "$BOTTLES/$1/drive_c/open.tmp"
+  perl -e 'open(my $f, "<", $ARGV[0]) or die; sleep 60' "$BOTTLES/$1/drive_c/open.tmp" "$CXF/bin/wineserver" &
+  PIDS="$PIDS $!"
   perl -e 'open(my $f, "<", $ARGV[0]) or die; sleep 60' "$BOTTLES/$1/drive_c/open.tmp" \
     "C:\\Program Files\\Autodesk\\Revit $2\\Revit.exe" &
   PIDS="$PIDS $!"; sleep 1
@@ -112,6 +116,13 @@ fake_mcphost() { # $1 = bottle: a process that looks like our MCP launcher (mcph
   perl -e 'open(my $f, "<", $ARGV[0]) or die; sleep 60' "$BOTTLES/$1/drive_c/mcp.tmp" \
     "C:\\Program Files\\Autodesk\\Revit 2027 MCP Server Write-Tools Technical Preview\\mcphost.exe" --launch t &
   PIDS="$PIDS $!"; sleep 1
+}
+fake_leftover() { # $1 = bottle: a Windows program left behind by a wineserver that ended (winedevice.exe holds the
+  # bottle's folder and, like the real one, ignores SIGTERM). Its PID in LEFT
+  mkdir -p "$BOTTLES/$1/drive_c/windows"; touch "$BOTTLES/$1/drive_c/windows/held"
+  perl -e '$SIG{TERM} = "IGNORE"; open(my $f, "<", $ARGV[0]) or die; sleep 60' "$BOTTLES/$1/drive_c/windows/held" \
+    'C:\windows\system32\winedevice.exe' &
+  LEFT=$!; PIDS="$PIDS $LEFT"; sleep 1
 }
 fake_lock() { # $1 = owner text: a process that holds the repo's lock as a running script would
   mkdir -p "$H/Library/Application Support/revit-macos"
@@ -201,6 +212,19 @@ check "stop kills that bottle's wineserver" called "wineserver -k | REVIT_YEAR= 
 reset; bottle rvt2024-a 2024 2024; touch "$T/wineserver-idle"; run "" stop 2024; expect "stop when nothing runs" 0 "Nothing is running in rvt2024-a."
 check "idle: nothing killed" not_called "wineserver -k |"
 reset; bottle rvt2024-a 2024 2024; touch "$T/wineserver-fails"; run "" stop 2024; expect "stop reports a failure" 1 "Could not stop rvt2024-a."
+reset; bottle rvt2024-a 2024 2024; touch "$T/wineserver-idle"; fake_leftover rvt2024-a
+REVIT_LEFTOVER_AGE=0 run "" stop 2024
+expect "stop without a wineserver ends what it left behind" 0 "Ended 1 Windows program(s) left running in rvt2024-a after Wine stopped unexpectedly."
+check "leftover: the program is gone (SIGTERM would not do)" eval '! kill -0 "$LEFT" 2>/dev/null'
+check "leftover: no wineserver -k" not_called "wineserver -k |"
+reset; bottle rvt2024-a 2024 2024; touch "$T/wineserver-idle"; fake_leftover rvt2024-a; run "" stop 2024
+expect "a program younger than 10 s is not a leftover (Revit may be starting)" 0 "Nothing is running in rvt2024-a."
+check "young: the program still runs" kill -0 "$LEFT"
+reset; bottle rvt2024-a 2024 2024; bottle rvt2024-b 2024 2024; touch "$T/wineserver-idle"; fake_leftover rvt2024-b
+REVIT_LEFTOVER_AGE=0 run "" stop 2024
+expect "another bottle's leftover is not this bottle's" 0 "Nothing is running in rvt2024-a."
+check "another bottle: its program still runs" kill -0 "$LEFT"
+stop_fakes; kill -KILL "$LEFT" 2>/dev/null
 reset; bottle rvt2024-a 2024 2024; ln -s "$BOTTLES/rvt2024-a" "$BOTTLES/rvt2024-t"; run "" stop 2024 rvt2024-t
 expect "a bottle that is a link is refused" 1 "Bottle rvt2024-t is a link to another bottle."
 reset; rm -rf "$CXF"; bottle rvt2024-a 2024 2024; run "" stop 2024; expect "stop without CrossOver" 1 "CrossOver not found"

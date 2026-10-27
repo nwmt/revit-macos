@@ -474,7 +474,18 @@ case "$CMD" in
     need_crossover; bottle_guard running_ok "$YEAR" "$NAME"
     lock_take "./revit stop $YEAR $NAME"   # an install's Wine programs run in this bottle too: -k would end them
     bottle_guard running_ok "$YEAR" "$NAME"   # again, under the lock: the bottle may have changed meanwhile
-    if ! WINEPREFIX="$B" "$CX/bin/wineserver" -k0 2>/dev/null 7>&- 9>&-; then echo "Nothing is running in $NAME."; exit 0; fi
+    if ! WINEPREFIX="$B" "$CX/bin/wineserver" -k0 2>/dev/null 7>&- 9>&-; then
+      left="$(bottle_leftovers "$B")"   # no wineserver: programs it left behind (it crashed or was killed)
+      [ -n "$left" ] || { echo "Nothing is running in $NAME."; exit 0; }
+      ! WINEPREFIX="$B" "$CX/bin/wineserver" -k0 2>/dev/null 7>&- 9>&- \
+        || die "Revit $YEAR is starting in $NAME. Wait until it is open, then run ./revit stop $YEAR$SFX again."
+      # shellcheck disable=SC2086   # one PID per word
+      kill -KILL $left 2>/dev/null
+      for i in $(seq 1 30); do [ -n "$(bottle_leftovers "$B")" ] || break; sleep 0.1; done
+      [ -z "$(bottle_leftovers "$B")" ] || die "Could not end the Windows programs left in $NAME. Restart the Mac."
+      echo "Ended $(wc -w <<<"$left" | tr -d ' ') Windows program(s) left running in $NAME after Wine stopped unexpectedly."
+      exit 0
+    fi
     WINEPREFIX="$B" "$CX/bin/wineserver" -k 2>/dev/null 7>&- 9>&- || die "Could not stop $NAME. Quit CrossOver and try again."
     echo "Stopped Revit and everything else in $NAME. Start Revit again from ~/Applications." ;;
   logs)
