@@ -8,7 +8,41 @@ on:
 permissions:
   contents: read
 
+concurrency:   # a newer push to a pull request cancels its older run; every push to main keeps its own
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  suite:
+    # the sandbox suites side by side, on the runner the job check has (macOS on Apple Silicon, /bin/bash 3.2);
+    # revit-cli.sh in two halves (TEST_PART)
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: revit-cli 1/2
+            run: TEST_PART=1 tests/revit-cli.sh
+          - name: revit-cli 2/2
+            run: TEST_PART=2 tests/revit-cli.sh
+          - name: steps
+            run: tests/steps.sh
+          - name: plans, shims, smoke, app
+            run: tests/plans.sh && tests/shims.sh && tests/smoke.sh && tests/app.sh
+    name: sandbox (${{ matrix.name }})
+    steps:
+      - uses: actions/checkout@v5
+      - name: 7-Zip, as in the job check
+        run: command -v 7zz >/dev/null || brew install sevenzip
+      - name: Pinned test fixtures (the job check saves them; tests/fixtures.sh checks each sha256)
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/Library/Caches/revit-macos-tests
+          key: test-fixtures-${{ hashFiles('tests/*.sh', 'tests/*.py') }}
+          restore-keys: test-fixtures-
+      - name: Sandbox tests (/bin/bash 3.2)
+        run: ${{ matrix.run }}
+
   check:
     # macOS on Apple Silicon: the same /bin/bash 3.2, sips and toolchain users have
     runs-on: macos-15
@@ -33,14 +67,12 @@ jobs:
         run: python3 -I -m py_compile tools/*.py tools/shims/ncryptshim/gen_forwards.py tests/test_tools.py
       - name: 7-Zip for the installer tests (tools/installer_source.py reads a fake Create Installer with 7zz)
         run: command -v 7zz >/dev/null || brew install sevenzip
-      - name: Sandbox tests (/bin/bash 3.2)
-        run: |
-          tests/revit-cli.sh
-          tests/plans.sh
-          tests/steps.sh
-          tests/shims.sh
-          tests/smoke.sh
-          tests/app.sh
+      - name: Pinned test fixtures for the Python tests (tests/fixtures.sh checks each sha256)
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/revit-macos-tests
+          key: test-fixtures-${{ hashFiles('tests/*.sh', 'tests/*.py') }}
+          restore-keys: test-fixtures-
       - name: Python helper tests
         run: python3 -I -B -m unittest discover -s tests -p 'test_*.py'
       - name: Python helper tests under the system Python (3.9, what a Mac with only the Command Line Tools has)
