@@ -70,7 +70,8 @@ pymcp_listener() { # $1 = port: who listens there — ok (one listener on 127.0.
   [ "$(wc -l <<<"$pids" | tr -d ' ')" = 1 ] && [ "$addr" = "127.0.0.1:$1" ] || {
     grep -qv "^127\.0\.0\.1:" <<<"$addr" && { echo network; return 0; }; echo foreign; return 0; }
   rb="$(cd "$B" 2>/dev/null && pwd -P)"; p="$pids"
-  [ "$(basename "$(ps -o comm= -p "$p" 2>/dev/null)")" = wineserver ] && lsof -p "$p" -Fn 2>/dev/null | grep -qF "n$rb/" \
-    && { echo ok; return 0; }
+  # through a variable: a wineserver has thousands of files open, and `lsof | grep -q` under pipefail fails on SIGPIPE
+  out="$(lsof -p "$p" -Fn 2>/dev/null)"
+  [ "$(basename "$(ps -o comm= -p "$p" 2>/dev/null)")" = wineserver ] && grep -qF "n$rb/" <<<"$out" && { echo ok; return 0; }
   echo foreign
 }
