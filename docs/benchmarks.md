@@ -56,3 +56,10 @@ Windows laptop, done over remote desktop, which lowers its graphics score.
   `./revit install` sets by default, the graphics set Init+Graphics_simplified took 36.4 s against 29.2 s at 96 DPI
   (+24%), and 34.9 s with `retina=compact` (+19%): 2 runs each, up to 11% apart. Modeling and large models were not
   measured with Retina.
+- **2027, orbiting a large model:** the Snowdon Towers architectural sample (183 MB), its default 3D view, Retina on,
+  one orbit of 240 mouse moves per visual style, with a frame drawn after each move: Realistic 22.8 s (16 frames per
+  second), Shaded 26.5 s (9), Hidden Line 33.5 s (7.4), Consistent Colors 35.1 s (7.1), Wireframe 36.5 s (6.5),
+  Textures 75.7 s (3.6). A second run was within 10–25%. One CPU thread of Revit's drawing limits the speed, not the
+  GPU: the styles with edges draw 3–6 times as many lines, and in Textures Revit reads its texture files again for
+  every frame (about 6 MB per frame). The benchmark's graphics set does not show this: it redraws a small model without
+  orbiting.
