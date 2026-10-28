@@ -8,9 +8,10 @@ on:
 permissions:
   contents: read
 
-concurrency:   # a newer push to a pull request cancels its older run; every push to main keeps its own
-  group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+concurrency:   # a newer push to a pull request cancels its older run; every push to main keeps its own (a group of
+  # its own: a shared group would drop a pending run even without cancel-in-progress)
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   suite:
