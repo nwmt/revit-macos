@@ -1,0 +1,40 @@
+# The Mac side of the MCP server for Revit (Python), add-in python-mcp: the pinned upstream commit, its folder under
+# the data folder, the Python it runs on (the one python-build-standalone the app ships, app/tools.sh) and its venv.
+# Sourced after common.sh. Functions that can fail print the reason on stdout and return 1.
+PYMCP_COMMIT=6ca46b3ea96a8f7cce9894cf865d8f19ca2c549d
+
+pymcp_dir() { echo "$DATA/mcp/python-mcp/$PYMCP_COMMIT"; }   # venv/ and src/ (the patched upstream sources)
+pymcp_venv_python() { echo "$(pymcp_dir)/venv/bin/python3"; }
+
+pymcp_python() { # the python3 to build the venv from: the app's own, or in a clone the same pinned build, downloaded once
+  # into $DATA/mcp/python-<version> (sha256 from app/tools.sh; in a clone $DATA is the repo, whose tools/ is source).
+  # One Python version, one file of hashes (tools/python-mcp-requirements.txt); the Mac's python3 is often 3.9 (the CLT)
+  local d p tmp
+  if [ "${REVIT_BUNDLED:-}" = 1 ]; then
+    p="${APP_RES:-}/python/bin/python3"; [ -x "$p" ] && { echo "$p"; return 0; }
+    echo "the app has no Python at $p"; return 1
+  fi
+  ( . "$ROOT/app/tools.sh"
+    d="$DATA/mcp/python-$PYTHON_VERSION"; p="$d/bin/python3"
+    [ -x "$p" ] && { echo "$p"; exit 0; }
+    tmp="$DATA/mcp/.python-$PYTHON_VERSION.$$"; rm -rf "$tmp"; mkdir -p "$tmp" || { echo "cannot write $DATA/mcp"; exit 1; }
+    trap 'rm -rf "$tmp"' EXIT
+    curl -fsSL --retry 3 -o "$tmp/python.tar.gz" "$PYTHON_URL" >&2 || { echo "the Python download failed: $PYTHON_URL"; exit 1; }
+    [ "$(shasum -a 256 "$tmp/python.tar.gz" | cut -d' ' -f1)" = "$PYTHON_SHA256" ] \
+      || { echo "the Python download does not match PYTHON_SHA256 in app/tools.sh"; exit 1; }
+    tar xzf "$tmp/python.tar.gz" -C "$tmp" && [ -x "$tmp/python/bin/python3" ] || { echo "no python/bin/python3 in $PYTHON_URL"; exit 1; }
+    rm -rf "$d" && mv "$tmp/python" "$d" || { echo "cannot write $d"; exit 1; }
+    echo "$p" )
+}
+
+pymcp_venv_ensure() { # $(pymcp_dir)/venv with the pinned packages; rebuilt only when the requirements file changed
+  local py v req sha out
+  py="$(pymcp_python)" || { echo "$py"; return 1; }
+  v="$(pymcp_dir)/venv"; req="$ROOT/tools/python-mcp-requirements.txt"; sha="$(shasum -a 256 "$req" | cut -d' ' -f1)"
+  [ -x "$v/bin/python3" ] && [ "$(cat "$v/.req-sha" 2>/dev/null)" = "$sha" ] && return 0
+  mkdir -p "$(dirname "$v")" && rm -rf "$v.new" || { echo "cannot write $(dirname "$v")"; return 1; }
+  out="$("$py" -m venv "$v.new" 2>&1)" || { rm -rf "$v.new"; echo "cannot make the venv: $(tail -1 <<<"$out")"; return 1; }
+  out="$("$v.new/bin/python3" -m pip install -q --disable-pip-version-check --require-hashes --no-deps -r "$req" 2>&1)" \
+    || { rm -rf "$v.new"; echo "the Python packages could not be installed: $(tail -1 <<<"$out")"; return 1; }
+  echo "$sha" > "$v.new/.req-sha" && rm -rf "$v" && mv "$v.new" "$v" || { echo "cannot write $v"; return 1; }
+}

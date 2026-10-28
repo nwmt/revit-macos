@@ -428,5 +428,101 @@ class InstallerSource(Tmp):
         d = json.loads(self.tool("detect", self.inp).stdout)
         self.assertEqual((d["year"], d["kind"], d["complete"], d["downloadable"]), ("2026", "create-installer", False, True))
 
+LOCK = """version = 1
+[[package]]
+name = "root"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "httpx" },
+    { name = "mcp", extra = ["cli"] },
+]
+[package.optional-dependencies]
+test = [{ name = "pytest" }]
+
+[[package]]
+name = "httpx"
+version = "0.28.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [{ name = "anyio" }, { name = "winonly", marker = "sys_platform == 'win32'" }]
+sdist = { url = "https://x/httpx.tar.gz", hash = "sha256:aa" }
+wheels = [{ url = "https://x/httpx.whl", hash = "sha256:bb" }]
+
+[[package]]
+name = "mcp"
+version = "1.30.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [{ name = "anyio" }, { name = "old", marker = "python_full_version < '3.13'" }]
+wheels = [{ url = "https://x/mcp.whl", hash = "sha256:cc" }]
+[package.optional-dependencies]
+cli = [{ name = "typer" }, { name = "newer", marker = "python_full_version < '3.15' and platform_python_implementation != 'PyPy'" }]
+
+[[package]]
+name = "anyio"
+version = "4.15.1"
+source = { registry = "https://pypi.org/simple" }
+wheels = [{ url = "https://x/anyio.whl", hash = "sha256:dd" }]
+
+[[package]]
+name = "typer"
+version = "1.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [{ url = "https://x/typer-mac.whl", hash = "sha256:ee" }, { url = "https://x/typer-win.whl", hash = "sha256:ff" }]
+
+[[package]]
+name = "newer"
+version = "2.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [{ url = "https://x/newer.whl", hash = "sha256:11" }]
+
+[[package]]
+name = "old"
+version = "1.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [{ url = "https://x/old.whl", hash = "sha256:22" }]
+
+[[package]]
+name = "winonly"
+version = "1.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [{ url = "https://x/win.whl", hash = "sha256:33" }]
+
+[[package]]
+name = "pytest"
+version = "9.0.3"
+source = { registry = "https://pypi.org/simple" }
+wheels = [{ url = "https://x/pytest.whl", hash = "sha256:44" }]
+"""
+
+
+class PythonMcpRequirements(Tmp):
+    """tools/gen_python_mcp_requirements.py: the pinned packages for python-build-standalone 3.14 on macOS arm64."""
+    def gen(self):
+        open(self.path("uv.lock"), "w").write(LOCK)
+        return run("gen_python_mcp_requirements", self.path("uv.lock"))
+
+    def test_follows_the_root_with_the_cli_extra_and_markers(self):
+        r = self.gen()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        names = [l.split("==")[0] for l in r.stdout.splitlines() if l and not l.startswith("#")]
+        self.assertEqual(names, ["anyio", "httpx", "mcp", "newer", "typer"])   # sorted; no old, winonly, pytest
+
+    def test_every_file_hash_of_a_package(self):
+        lines = self.gen().stdout.splitlines()
+        self.assertIn("httpx==0.28.1 --hash=sha256:aa --hash=sha256:bb", lines)
+        self.assertIn("typer==1.0 --hash=sha256:ee --hash=sha256:ff", lines)
+
+    def test_deterministic(self):
+        self.assertEqual(self.gen().stdout, self.gen().stdout)
+
+    def test_the_committed_file(self):
+        txt = open(os.path.join(TOOLS, "python-mcp-requirements.txt")).read()
+        self.assertIn("6ca46b3ea96a8f7cce9894cf865d8f19ca2c549d", txt.splitlines()[0])
+        pins = [l for l in txt.splitlines() if l and not l.startswith("#")]
+        self.assertTrue(any(l.startswith("mcp==1.30.0 ") for l in pins))
+        self.assertTrue(any(l.startswith("httpx==0.28.1 ") for l in pins))
+        self.assertTrue(all("--hash=sha256:" in l for l in pins))
+
+
 if __name__ == "__main__":
     unittest.main()

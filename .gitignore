@@ -11,6 +11,9 @@ prefixes/
 *.wineprefix/
 drive_c/
 
+# ---- the MCP server for Revit (Python): its Python and venv in a clone (scripts/lib/pymcp.sh) ----
+/mcp/
+
 # ---- logs and debug output ----
 logs/
 *.log

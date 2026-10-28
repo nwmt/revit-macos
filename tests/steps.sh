@@ -39,6 +39,7 @@ reset() { # a fresh sandbox: the repo's scripts and tools, fake prebuilt shims, 
   mkdir -p "$R" "$H/Applications" "$BOTTLES" "$CXF/bin" "$T/cxtmp" "$CXF/lib/dxvk/x86_64-windows" "$CXF/lib/wine/x86_64-windows" \
     || { echo "sandbox setup failed"; exit 1; }
   cp -R "$REPO/scripts" "$REPO/tools" "$R/"
+  mkdir -p "$R/app" && cp "$REPO/app/tools.sh" "$R/app/"   # the pinned Python (scripts/lib/pymcp.sh)
   local f; for f in d3dwp/d3dwp.dll dpapi/dpapi.exe hittest/hittest.exe mcphost/mcphost.exe mcppipes/mcppipes.dll ncryptshim/ncrypt.dll pdfprinter/add_printer.exe rvtfix/rvtfix.dll \
     svcshim/svcshim.exe themeset/themeset.exe tlbpin/msls31.dll vkshim/vulkan-1.dll wbemshim/wbemshim.dll wv2fix/version.dll; do
     mkdir -p "$R/build/$(dirname "$f")"; echo "fake $f" > "$R/build/$f"
@@ -1457,5 +1458,51 @@ if [ -x /usr/bin/osacompile ] && [ -x /usr/bin/osascript ]; then
   rm "$TD/themeset.exe"; osa_run
   check "app, no themeset.exe: no themeset, Revit starts" eval '! grep -q "themeset.exe" "$CALLS" && grep -q "Revit.exe" "$CALLS"'
 fi
+
+# ---- python-mcp: the Mac side's Python and venv (scripts/lib/pymcp.sh) ----
+pymcp_world() { # a fake python-build-standalone archive on a fake curl; its python3 fakes venv and pip into $CALLS
+  mkdir -p "$T/srv/pysrc/python/bin" "$T/py"
+  cat > "$T/srv/pysrc/python/bin/python3" <<EOF
+#!/bin/bash
+echo "python3 \$*" >> "$CALLS"
+if [ "\$1 \$2" = "-m venv" ]; then mkdir -p "\$3/bin" && cp "\$0" "\$3/bin/python3"; exit 0; fi
+if [ "\$1 \$2" = "-m pip" ]; then [ -z "\${FAKE_PIP_FAIL:-}" ] || { echo "pip: hash mismatch" >&2; exit 1; }; exit 0; fi
+exit 0
+EOF
+  chmod +x "$T/srv/pysrc/python/bin/python3"; (cd "$T/srv/pysrc" && tar czf "$T/srv/py.tar.gz" python)
+  PYSHA="$(shasum -a 256 "$T/srv/py.tar.gz" | cut -d' ' -f1)"
+  printf 'PYTHON_VERSION=3.14.8\nPYTHON_URL=https://example.invalid/py.tar.gz\nPYTHON_SHA256=%s\n' "${1:-$PYSHA}" > "$R/app/tools.sh"
+  cat > "$T/curl" <<EOF
+#!/bin/bash
+echo "curl \$*" >> "$CALLS"; out=""; while [ \$# -gt 0 ]; do [ "\$1" = -o ] && out="\$2"; shift; done
+cp "$T/srv/py.tar.gz" "\$out"
+EOF
+  chmod +x "$T/curl"; D="$T/my data"; mkdir -p "$D"
+}
+pymcp() { OUT="$(cd / && "${SANDBOX_ENV[@]}" PATH="$T:$PATH" REVIT_DATA="$D" ROOT="$R" ${PYMCP_ENV[@]+"${PYMCP_ENV[@]}"} /bin/bash -c '. "$ROOT/scripts/lib/common.sh"; . "$ROOT/scripts/lib/pymcp.sh"; '"$1" 2>&1)"; RC=$?; PYMCP_ENV=(); }
+PYMCP_ENV=()
+reset; pymcp_world; pymcp 'pymcp_python'
+expect "pymcp_python: a clone downloads the pinned Python into the data folder" 0 "$D/mcp/python-3.14.8/bin/python3"
+check "pymcp_python: the file is there" test -x "$D/mcp/python-3.14.8/bin/python3"
+: > "$CALLS"; pymcp 'pymcp_python'
+check "pymcp_python: a second call downloads nothing" not_called "curl"
+reset; pymcp_world 0000000000000000000000000000000000000000000000000000000000000000; pymcp 'pymcp_python'
+expect "pymcp_python: a wrong download is refused by its sha256" 1 "PYTHON_SHA256"
+check "pymcp_python: nothing kept after a wrong download" test ! -e "$D/mcp/python-3.14.8"
+reset; pymcp_world; mkdir -p "$T/app/python/bin"; cp "$T/srv/pysrc/python/bin/python3" "$T/app/python/bin/"
+PYMCP_ENV=(REVIT_BUNDLED=1 APP_RES="$T/app"); pymcp 'pymcp_python'
+expect "pymcp_python: the app's own Python" 0 "$T/app/python/bin/python3"
+check "pymcp_python: the app downloads nothing" not_called "curl"
+reset; pymcp_world; pymcp 'pymcp_venv_ensure && pymcp_venv_python'
+expect "pymcp_venv_ensure: a venv under the data folder" 0 "$D/mcp/python-mcp/6ca46b3ea96a8f7cce9894cf865d8f19ca2c549d/venv/bin/python3"
+check "pymcp_venv_ensure: pip with --require-hashes and --no-deps from the pinned file" \
+  called "-m pip install -q --disable-pip-version-check --require-hashes --no-deps -r $R/tools/python-mcp-requirements.txt"
+: > "$CALLS"; pymcp 'pymcp_venv_ensure'
+check "pymcp_venv_ensure: unchanged requirements, no pip" not_called "-m pip"
+echo "# changed" >> "$R/tools/python-mcp-requirements.txt"; : > "$CALLS"; pymcp 'pymcp_venv_ensure'
+check "pymcp_venv_ensure: changed requirements, pip again" called "-m pip install"
+reset; pymcp_world; PYMCP_ENV=(FAKE_PIP_FAIL=1); pymcp 'pymcp_venv_ensure'
+expect "pymcp_venv_ensure: a failing pip is a refusal" 1 "the Python packages could not be installed"
+check "pymcp_venv_ensure: no half venv left" test ! -e "$D/mcp/python-mcp/6ca46b3ea96a8f7cce9894cf865d8f19ca2c549d/venv"
 
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]
