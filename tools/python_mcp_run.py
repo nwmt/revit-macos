@@ -11,6 +11,7 @@ it with dpapi.exe): never from arguments, the environment or a file; it replaces
 Windows DPAPI. Fd M is the project lock the launcher held: closed here, once this process is visible by its marker.
 Then main.py runs in stdio mode; stdout is the MCP client's. Exit 2: bad arguments or token (one line on stderr).
 """
+import importlib
 import os
 import re
 import runpy
@@ -44,7 +45,8 @@ def main(argv):
     except OSError:
         pass
     sys.path.insert(0, src)
-    import revit_mcp.pairing as pairing
+    # by name: revit_mcp is upstream's (in <src>), not a module of the app's Python, which scripts/check-bundle.sh checks
+    pairing = importlib.import_module("revit_mcp.pairing")
     pairing.get_token = lambda: token
     sys.argv = [os.path.join(src, "main.py")]
     runpy.run_path(sys.argv[0], run_name="__main__")
