@@ -250,9 +250,26 @@ hittest_running() { # $1 = bottle path: the app's hittest.exe (scripts/hittest-l
   done
   return 1
 }
+pymcp_wrappers() { # $1 = bottle real path: PIDs of tools/python_mcp_run.py for that bottle (./revit mcp --server python
+  # runs it on the Mac with the marker and the bottle's real path as its first arguments)
+  local p; for p in $(pgrep -f 'revit-macos-python-mcp' 2>/dev/null); do
+    ps -o command= -p "$p" 2>/dev/null | grep -qF -- " revit-macos-python-mcp $1 " && echo "$p"
+  done
+}
+pymcp_stop() { # $1 = bottle path: end its pymcp_wrappers (TERM, then KILL after 3 s)
+  local rb left i; rb="$(cd "$1" 2>/dev/null && pwd -P)" || return 0; left="$(pymcp_wrappers "$rb")"
+  [ -n "$left" ] || return 0
+  # shellcheck disable=SC2086   # one PID per word
+  kill -TERM $left 2>/dev/null
+  for i in $(seq 1 30); do [ -n "$(pymcp_wrappers "$rb")" ] || return 0; sleep 0.1; done
+  # shellcheck disable=SC2086
+  kill -KILL $(pymcp_wrappers "$rb") 2>/dev/null; return 0
+}
 mcp_running() { # $1 = bottle path: our MCP launcher (mcphost.exe, scripts/mcp-launch.sh) with files open in that
-  # bottle; the CrossOver loader that has mcphost.exe in its arguments counts too. Output through variables, as above
+  # bottle; the CrossOver loader that has mcphost.exe in its arguments counts too; the Mac-side server of
+  # --server python (pymcp_wrappers). Output through variables, as above
   local p rb out; rb="$(cd "$1" 2>/dev/null && pwd -P)" || return 1
+  [ -z "$(pymcp_wrappers "$rb")" ] || return 0
   for p in $(pgrep -f 'mcphost\.exe' 2>/dev/null); do
     out="$(lsof -p "$p" -Fn 2>/dev/null)"
     grep -qF "n$rb/" <<<"$out" && return 0

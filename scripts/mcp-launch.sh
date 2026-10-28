@@ -14,14 +14,16 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/scripts/lib/common.sh"; . "$ROOT/scripts/lib/addins.sh"; . "$ROOT/scripts/lib/shims.sh"
 . "$ROOT/scripts/lib/handoff.sh"
 exec 3>&1 1>&2   # fd 3 = the client's stdout, for the server only
-[ $# = 4 ] && [[ "$1" =~ ^[0-9]{4}$ ]] && { [ "$3" = 0 ] || [ "$3" = 1 ]; } && { [ "$4" = autodesk ] || [ "$4" = pyrevit ]; } \
-  || { echo "Usage: scripts/mcp-launch.sh <year> <bottle> <0|1> <autodesk|pyrevit>"; exit 2; }
+[ $# = 4 ] && [[ "$1" =~ ^[0-9]{4}$ ]] && { [ "$3" = 0 ] || [ "$3" = 1 ]; } \
+  && { [ "$4" = autodesk ] || [ "$4" = pyrevit ] || [ "$4" = python ]; } \
+  || { echo "Usage: scripts/mcp-launch.sh <year> <bottle> <0|1> <autodesk|pyrevit|python>"; exit 2; }
 YEAR="$1"; NAME="$2"; WRITE="$3"; SERVER="$4"; B="$(bottle_path "$NAME")"; SFX="$(bottle_sfx "$NAME" "$YEAR")"
 TOKEN=""; WPID=""; LF=""; PHASE=starting; SEEN=""
 HANDOFF_S="${MCP_HANDOFF_S:-30}"   # how long the launcher may take to confirm (tests shorten it)
 
 checks() { # the bottle, a running Revit, a complete MCP Server install (sets ID, its variant) or pyRevit's agent
   bottle_guard running_ok "$YEAR" "$NAME"
+  [ "$SERVER" != python ] || { checks_python; return; }
   [ "$SERVER" = autodesk ] || { checks_pyrevit; return; }
   addin_load revitmcp; addin_available || die "Autodesk's Revit MCP Server is for Revit ${ADDIN_TESTED[*]} only."
   revit_running "$B" "$YEAR" || die "Open Revit $YEAR with a model first."
@@ -42,11 +44,67 @@ checks_pyrevit() { # pyRevit's files first (no use opening Revit for a year with
   [ "$m" != not-registered ] || die "pyRevit's agent is on but not running in this Revit: reload pyRevit or restart Revit."
 }
 
+# --server python: the MCP server for Revit (Python) (scripts/addins/python-mcp.sh). Its server runs on the Mac
+# (tools/python_mcp_run.py, upstream main.py) and talks to pyRevit Routes on 127.0.0.1:48884; no Wine after the token
+PORT="${PYMCP_ROUTES_PORT:-48884}"   # PYMCP_* knobs are for tests only: a real Revit may listen on 48884 there
+checks_python() { # the add-in, a running Revit, the extension loaded, Routes of this bottle on 127.0.0.1, the pairing
+  local f
+  addin_load python-mcp; addin_available || die "MCP server for Revit (Python) is for Revit 2020 here."
+  addin_is_installed || die "MCP server for Revit (Python) is not installed in $NAME. Install it: ./revit addins $YEAR$SFX --only python-mcp --accept-eula python-mcp"
+  revit_running "$B" "$YEAR" || die "Open Revit $YEAR with a model first."
+  f="$B/$PYMCP_LOCAL_REL/startup-error.txt"
+  [ ! -f "$f" ] || die "The MCP extension failed to load in Revit: $(head -1 "$f" | tr -d '\r'). Reload pyRevit; if it repeats, run ./revit report $YEAR$SFX."
+  case "$(pymcp_listener "$PORT")" in
+    none) die "Turn on pyRevit Routes, or reload pyRevit: nothing answers on 127.0.0.1:$PORT." ;;
+    network) die "pyRevit Routes listens on the network: run ./revit addins $YEAR$SFX --only python-mcp --accept-eula python-mcp again." ;;
+    foreign) die "Port $PORT is taken by another program or another Revit: close it and try again." ;;
+  esac
+  [ -f "$B/$PYMCP_LOCAL_REL/pairing.dpapi" ] || die "In Revit: MCP → Bridge → Connect, then try again."
+}
+python_token() { # the pairing token, decrypted once by dpapi.exe in the bottle within PYMCP_DPAPI_S (30) s; on the
+  # deadline only that dpapi.exe ends. Stdout: the token (into a variable, never a file)
+  local s="${PYMCP_DPAPI_S:-30}" pairing='C:\users\crossover\AppData\Local\RevitMCPPython\pairing.dpapi'
+  ( "$CX/bin/wine" --bottle "$NAME" "$PYMCP_DPAPI_WIN" unprotect "$pairing" 2>/dev/null </dev/null 7>&- 8>&- 9>&- &
+    wp=$!
+    ( sleep "$s"; kill -TERM "$wp" 2>/dev/null; sleep 1; kill -KILL "$wp" 2>/dev/null ) >/dev/null 2>&1 7>&- 8>&- 9>&- &
+    kp=$!; wait "$wp"; rc=$?; kill "$kp" 2>/dev/null; exit "$rc" )
+}
+python_status() { # $1 = token: GET /revit_mcp/status/ within PYMCP_STATUS_S (10) s; the token goes to curl on stdin
+  local out rc code body
+  out="$(printf 'header = "Authorization: Bearer %s"\n' "$1" \
+    | curl -s -m "${PYMCP_STATUS_S:-10}" -K - -w '\n%{http_code}' "http://127.0.0.1:$PORT/revit_mcp/status/" 2>/dev/null)"; rc=$?
+  [ $rc != 28 ] || die "Revit does not answer: close any dialog in Revit, or run ./revit stop $YEAR$SFX."
+  [ $rc = 0 ] || die "Unexpected answer from Revit (no answer, curl $rc)."
+  code="${out##*$'\n'}"; body="${out%$'\n'*}"
+  case "$code" in
+    200) printf '%s' "$body" | /usr/bin/perl -MJSON::PP -e 'local $/; my $j = eval { decode_json(<STDIN>) };
+           exit(($j && ref $j eq "HASH" && ($j->{status} // "") eq "active") ? 0 : 1)' \
+           || die "Unexpected answer from Revit (HTTP 200)." ;;
+    401) die "The pairing changed. In Revit: MCP → Bridge → Connect again, then try again." ;;
+    503) die "Open a model in Revit $YEAR." ;;
+    404) die "The MCP extension is not loaded: reload pyRevit (pyRevit → Reload)." ;;
+    *) die "Unexpected answer from Revit (HTTP $code)." ;;
+  esac
+}
+python_launch() { # under the lock, after checks: dpapi.exe, the token, the status, then exec the marked wrapper with
+  # the token on a pipe (fd 4) and the lock (fd 9): the wrapper closes fd 9 once it runs, so the bottle is never
+  # unguarded between the two
+  local why tok rb
+  why="$(dpapi_ensure)" || die "Cannot get dpapi.exe: $why"
+  tok="$(python_token)" && [[ "$tok" =~ ^[0-9a-f]{64}$ ]] || die "In Revit: MCP → Bridge → Connect again (the pairing could not be read)."
+  python_status "$tok"
+  [ -z "${PYMCP_EXEC_HOLD:-}" ] || { touch "$PYMCP_EXEC_HOLD.reached"; while [ -e "$PYMCP_EXEC_HOLD" ]; do sleep 0.1; done; }   # tests
+  rb="$(cd "$B" && pwd -P)"
+  exec "$(pymcp_venv_python)" -I "$ROOT/tools/python_mcp_run.py" revit-macos-python-mcp "$rb" "$(pymcp_dir)/src" \
+    --token-fd 4 --lock-fd 9 4< <(printf %s "$tok") >&3 3>&- 7>&- 8>&-
+}
+
 checks
 [ -z "${MCP_TEST_HOLD:-}" ] || { touch "$MCP_TEST_HOLD.reached"; while [ -e "$MCP_TEST_HOLD" ]; do sleep 0.1; done; }   # tests
 trap 'on_signal INT 130' INT; trap 'on_signal TERM 143' TERM; trap 'on_signal HUP 129' HUP
 lock_take --no-trap "./revit mcp $YEAR $NAME"
 checks   # again, under the lock: the bottle or Revit may have changed meanwhile
+[ "$SERVER" != python ] || python_launch
 if [ "$SERVER" = pyrevit ]; then why="$(plain_host_ensure)" || die "Cannot get mcphost.exe: $why"; fi
 
 TOKEN="revit-mcp-$(uuidgen | tr 'A-Z' 'a-z')"

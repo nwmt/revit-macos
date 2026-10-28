@@ -65,7 +65,7 @@ Usage: ./revit <command> <year> [bottle]
   stop      quit a Revit that hangs
   logs      list the newest logs
   debug     start Revit and record a log
-  mcp       connect an AI assistant to a running Revit (--server pyrevit; docs/mcp.md)
+  mcp       connect an AI assistant to a running Revit (--server pyrevit|python; docs/mcp.md)
   hittest   for the app: the Windows window under a point (stdin/stdout)
   theme     for the app: Revit's theme follows the Mac's light or dark look now
   rebuild   delete the bottle and install Revit again
@@ -134,7 +134,8 @@ if [ "$CMD" = mcp ]; then   # stdout belongs to the MCP client: no events, no mo
   case "${SERVER:=autodesk}" in
     autodesk) ;;
     pyrevit) [ "$WRITE" = 0 ] || FLAG_ERR="pyRevit decides what an agent may change: pyRevit → Settings → Agent Runtime." ;;
-    *) FLAG_ERR="Unknown MCP server: $SERVER. Known: autodesk, pyrevit" ;;
+    python) [ "$WRITE" = 0 ] || FLAG_ERR="Changes are approved in Revit, one by one: the extension asks before every change." ;;
+    *) FLAG_ERR="Unknown MCP server: $SERVER. Known: autodesk, pyrevit, python" ;;
   esac
 fi
 if [ "$CMD" = hittest ]; then   # the app's: stdout is the protocol; a year and a bottle, no options
@@ -481,6 +482,7 @@ case "$CMD" in
     need_crossover; bottle_guard running_ok "$YEAR" "$NAME"
     lock_take "./revit stop $YEAR $NAME"   # an install's Wine programs run in this bottle too: -k would end them
     bottle_guard running_ok "$YEAR" "$NAME"   # again, under the lock: the bottle may have changed meanwhile
+    pymcp_stop "$B"   # an assistant connected through ./revit mcp --server python: its server on the Mac goes too
     if ! WINEPREFIX="$B" "$CX/bin/wineserver" -k0 2>/dev/null 7>&- 9>&-; then
       left="$(bottle_leftovers "$B")"   # no wineserver: programs it left behind (it crashed or was killed)
       [ -n "$left" ] || { echo "Nothing is running in $NAME."; exit 0; }

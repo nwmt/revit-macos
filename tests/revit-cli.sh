@@ -10,7 +10,8 @@ CLEAN_ENV=(-u REVIT_DATA -u REVIT_LOCK_DIR -u SHIMS_DIR -u REVIT_BUNDLED -u REVI
   -u REVIT_FOR_BOTTLE -u INSTALL_PARENT -u W_CACHE -u SHIMS_FROM_SOURCE -u RUN_DIR -u RUN_KIND -u CX_RECREATE
   -u INSTALL_DRYRUN -u REVIT_LANG -u ODIS_PKGS -u REVIT_THEME -u REVIT_DEFAULTS -u REVIT_YEAR -u SMOKE_TIMEOUT -u SMOKE_START_WAIT
   -u SMOKE_STALL -u SMOKE_WORKER_WAIT -u SMOKE_POLL -u SMOKE_PREP_TIMEOUT -u REVIT_CX_TMP -u REVIT_WATCH_IDLE -u REVIT_WATCH_LOCK_WAIT -u REVIT_WATCH_LSOF -u MCP_TEST_HOLD -u MCP_HANDOFF_S
-  -u REVIT_RETINA -u REVIT_KEYS -u SETTINGS_SAVE_WAIT)
+  -u REVIT_RETINA -u REVIT_KEYS -u SETTINGS_SAVE_WAIT
+  -u PYMCP_ROUTES_PORT -u PYMCP_DPAPI_S -u PYMCP_STATUS_S -u PYMCP_EXEC_HOLD -u PYMCP_TEST_HOLD -u REVIT_HOST -u REVIT_PORT)
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)" && [ -d "$TMP" ] || { echo "mktemp failed" >&2; exit 1; }   # an empty TOP would be the current folder
 TOP="$(cd "$TMP" && pwd -P)" || exit 1   # /var → /private/var: lsof reports real paths
@@ -960,7 +961,7 @@ reset; bottle rvt2027-a 2027 2027; mcp_cx; fake_revit rvt2027-a 2027; run_mcp mc
 check "mcp: not installed → the install command" eval '[ "$RC" != 0 ] && grep -qF "Install it: ./revit addins 2027 --only revitmcp --accept-eula revitmcp" <<<"$ERR" && mcp_stdout_empty'
 reset; bottle rvt2027-a 2027 2027; run_mcp status --write; check "--write on another command" eval '[ "$RC" != 0 ] && grep -qx "Unknown option: --write" <<<"$ERR"'
 reset; run_mcp mcp 2027 rvt2027-a extra; check "mcp: extra arguments" eval '[ "$RC" != 0 ] && grep -q "Too many arguments" <<<"$ERR" && mcp_stdout_empty'
-reset; run "" --help; check "mcp is in the help" grep -qx "  mcp       connect an AI assistant to a running Revit (--server pyrevit; docs/mcp.md)" <<<"$OUT"
+reset; run "" --help; check "mcp is in the help" grep -qx "  mcp       connect an AI assistant to a running Revit (--server pyrevit|python; docs/mcp.md)" <<<"$OUT"
 for c in "$MCPW||--tool-permission=StableReadOnly" "$MCPW|--write|--tool-permission=Stable --tool-min-permission=StableReadOnly" \
   "$MCPE||--tool-permission=StableReadOnly" "$MCPE|--write|--tool-permission=Experimental --tool-min-permission=StableReadOnly"; do
   v="${c%%|*}"; f="$(cut -d'|' -f2 <<<"$c")"; want="${c##*|}"
@@ -1123,6 +1124,122 @@ for c in "2027|remove 2027|cxbottle" "2027|rebuild 2027|install.sh" "|addins 202
   check "pyrevit connected, Revit closed: $(cut -d'|' -f2 <<<"$c") refused" eval '[ "$RC" != 0 ] && grep -q "through MCP" <<<"$OUT" && ! called "${c##*|}" && [ -d "$BOTTLES/rvt2027-a" ]'
   exec 5>&-; wait "$LPID_a"
 done
+# ---- ./revit mcp --server python (the MCP server for Revit (Python), add-in python-mcp) ----
+PMC=6ca46b3ea96a8f7cce9894cf865d8f19ca2c549d; PMTOK=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+PMPORT=$((40000 + RANDOM % 20000))   # the fake Routes: never the real 48884, where a real Revit may listen
+pm_install() { # $1 = bottle: what addin_is_installed and the launcher look at; the venv python is a fake that records
+  # its arguments and fd 4's type, holds like the wrapper (PYMCP_TEST_HOLD, before it closes fd 9), then echoes stdin
+  local b="$BOTTLES/$1" e="$BOTTLES/$1/drive_c/users/crossover/AppData/Roaming" v="$R/mcp/python-mcp/$PMC/venv/bin"
+  mkdir -p "$e/pyRevit/Extensions/revit-mcp-python.extension" "$e/pyRevit-Master/pyrevitlib/pyrevit/routes/server" \
+    "$b/drive_c/users/crossover/AppData/Local/RevitMCPPython" "$v" "$R/mcp/python-mcp/$PMC/src" "$R/build/dpapi" "$R/tools/pyrevit48"
+  touch "$e/pyRevit/Extensions/revit-mcp-python.extension/startup.py"
+  cp "$REPO/tools/pyrevit48/revitmacos_serial.py" "$R/tools/pyrevit48/"
+  cp "$REPO/tools/pyrevit48/revitmacos_serial.py" "$e/pyRevit-Master/pyrevitlib/pyrevit/routes/server/"
+  echo blob > "$b/drive_c/users/crossover/AppData/Local/RevitMCPPython/pairing.dpapi"; echo "fake dpapi.exe" > "$R/build/dpapi/dpapi.exe"
+  cat > "$v/python3" <<EOF
+#!/bin/bash
+{ printf '%s\n' "\$@"; stat -f %HT /dev/fd/4; echo "token=\$(cat <&4)"; [ -e /dev/fd/9 ] && echo FD9; echo "host=\${REVIT_HOST:-}"; } > "$T/py-argv"
+if [ -n "\${PYMCP_TEST_HOLD:-}" ]; then touch "\$PYMCP_TEST_HOLD.reached"; while [ -e "\$PYMCP_TEST_HOLD" ]; do sleep 0.1; done; fi
+exec 9>&-; cat
+EOF
+  chmod +x "$v/python3"
+}
+pm_cx() { # the fake CrossOver's wine plays dpapi.exe: prints the token, or fails ($T/dpapi-mode fail), or hangs (hang)
+  cat > "$CXF/bin/wine" <<EOF
+#!/bin/bash
+[ "\$1" = --bottle ] || exit 0
+printf '%s\n' "\$@" > "$T/dpapi-argv"
+case "\$(cat "$T/dpapi-mode" 2>/dev/null)" in fail) echo "DPAPI refused" >&2; exit 2 ;; hang) exec perl -e 'sleep 60' "$T/dpapi-hang" ;; esac
+printf '%s' "$PMTOK"
+EOF
+  chmod +x "$CXF/bin/wine"
+}
+pm_routes() { # $1 = bottle, $2 = address (127.0.0.1 | 0.0.0.0), $3 = exe ($SRV: a wineserver of the bottle): a fake
+  # pyRevit Routes on $PMPORT; $T/routes-mode: 200 (default) | 401 | 503 | 404 | hang | garbage
+  touch "$BOTTLES/$1/drive_c/routes.tmp"
+  "${3:-$SRV}" -MIO::Socket::INET -e '
+    open(my $f, "<", $ARGV[0]) or die; my $s = IO::Socket::INET->new(LocalAddr => $ARGV[1], LocalPort => $ARGV[2],
+      Listen => 5, ReuseAddr => 1) or die; while (my $c = $s->accept) { my $h = ""; while (<$c>) { $h .= $_; last if /^\r?$/ }
+      open(my $m, "<", $ARGV[3]); my $mode = $m ? <$m> : "200"; $mode = "200" unless defined $mode; chomp $mode;
+      open(my $l, ">>", $ARGV[4]); print $l $h; close $l;
+      if ($mode eq "hang") { sleep 30; next }
+      if ($mode eq "garbage") { print $c "HTTP/1.0 200 OK\r\n\r\nnot json"; close $c; next }
+      my $b = $mode eq "200" ? q({"status": "active", "health": "healthy", "api_name": "revit_mcp"}) : q({"error": "x"});
+      print $c "HTTP/1.0 $mode X\r\nContent-Type: application/json\r\n\r\n$b"; close $c }' \
+    "$BOTTLES/$1/drive_c/routes.tmp" "$2" "$PMPORT" "$T/routes-mode" "$T/routes-log" &
+  PIDS="$PIDS $!"; sleep 1
+}
+pm_world() { # $1 = bottle (rvt2020-a): installed add-in, Revit running, Routes answering, dpapi giving the token
+  reset; bottle "${1:-rvt2020-a}" 2020 2020; pm_install "${1:-rvt2020-a}"; pm_cx; fake_revit "${1:-rvt2020-a}" 2020
+  pm_routes "${1:-rvt2020-a}" 127.0.0.1; rm -f "$T/routes-mode" "$T/dpapi-mode" "$T/py-argv"
+}
+PMENV=(PYMCP_ROUTES_PORT="$PMPORT" PYMCP_DPAPI_S=3 PYMCP_STATUS_S=2)
+pmr() { MCP_ENV=("${PMENV[@]}" ${PMX[@]+"${PMX[@]}"}); PMX=(); run_mcp mcp 2020 --server python "$@"; MCP_ENV=(); }
+PMX=()
+refused_pm() { [ "$RC" != 0 ] && grep -qF -- "$1" <<<"$ERR" && mcp_stdout_empty && [ ! -e "$T/py-argv" ]; }
+reset; bottle rvt2027-a 2027 2027; MCP_ENV=("${PMENV[@]}"); run_mcp mcp 2027 --server python; MCP_ENV=()
+check "python: 1 on 2027 → for 2020 here" refused_pm "MCP server for Revit (Python) is for Revit 2020 here."
+reset; bottle rvt2020-a 2020 2020; pm_cx; fake_revit rvt2020-a 2020; pmr
+check "python: 2 not installed → the install command" refused_pm "./revit addins 2020 --only python-mcp --accept-eula python-mcp"
+pm_world; stop_fakes; pmr; check "python: 3 no Revit → open Revit first" refused_pm "Open Revit 2020 with a model first."
+pm_world; printf 'Traceback (most recent call last):\nSyntaxError: x\n' > "$BOTTLES/rvt2020-a/drive_c/users/crossover/AppData/Local/RevitMCPPython/startup-error.txt"; pmr
+check "python: 4 startup error → its first line" refused_pm "The MCP extension failed to load in Revit: Traceback (most recent call last)"
+reset; bottle rvt2020-a 2020 2020; pm_install rvt2020-a; pm_cx; fake_revit rvt2020-a 2020; pmr
+check "python: 5 nobody listens → turn on Routes" refused_pm "Turn on pyRevit Routes, or reload pyRevit"
+reset; bottle rvt2020-a 2020 2020; pm_install rvt2020-a; pm_cx; fake_revit rvt2020-a 2020; pm_routes rvt2020-a 0.0.0.0; pmr
+check "python: 5 Routes on the network → refused" refused_pm "pyRevit Routes listens on the network"
+reset; bottle rvt2020-a 2020 2020; pm_install rvt2020-a; pm_cx; fake_revit rvt2020-a 2020; pm_routes rvt2020-a 127.0.0.1 perl; pmr
+check "python: 5 another program on the port → refused" refused_pm "Port $PMPORT is taken by another program"
+pm_world; rm "$BOTTLES/rvt2020-a/drive_c/users/crossover/AppData/Local/RevitMCPPython/pairing.dpapi"; pmr
+check "python: 6 no pairing → Connect" refused_pm "In Revit: MCP → Bridge → Connect"
+pm_world; echo fail > "$T/dpapi-mode"; pmr; check "python: 7 dpapi fails → Connect again" refused_pm "Connect again"
+pm_world; echo hang > "$T/dpapi-mode"; t0=$SECONDS; pmr
+check "python: 7 dpapi hangs → refused within its deadline, nothing left" eval 'refused_pm "Connect again" && [ $((SECONDS - t0)) -le 8 ] && ! sandboxed "dpapi-hang"'
+for c in "401|Connect again" "503|Open a model in Revit 2020" "404|reload pyRevit" "garbage|Unexpected answer from Revit" "hang|Revit does not answer"; do
+  pm_world; echo "${c%%|*}" > "$T/routes-mode"; t0=$SECONDS; pmr
+  check "python: 8 status ${c%%|*} → ${c#*|}" eval 'refused_pm "${c#*|}" && [ $((SECONDS - t0)) -le 8 ]'
+done
+check "python: the status check sends the token, never in an argument" eval 'grep -qF "Authorization: Bearer $PMTOK" "$T/routes-log" && ! grep -rqF "$PMTOK" "$T/dpapi-argv"'
+pm_world; MCP_ENV=(); run_mcp mcp 2020 --server python --write
+check "python: --write refused" eval '[ "$RC" != 0 ] && grep -qF "Changes are approved in Revit, one by one" <<<"$ERR" && mcp_stdout_empty'
+pm_world; run_mcp mcp 2020 --server nope; check "mcp: unknown server names python" eval 'grep -qF "Known: autodesk, pyrevit, python" <<<"$ERR"'
+pm_world; printf '{"jsonrpc":"2.0"}\n' > "$T/in"; MCP_IN="$T/in"; PMX=(REVIT_HOST=10.0.0.1 REVIT_PORT=1); pmr
+check "python: connected, stdout is the server's alone" eval '[ "$RC" = 0 ] && [ "$OUT" = "$(cat "$T/in")" ] && [ -z "$ERR" ]'
+check "python: the wrapper, its marker, the bottle, the sources, fds 4 and 9" eval '[ "$(sed -n "1,9p" "$T/py-argv" | tr "\n" "|")" = "-I|$R/tools/python_mcp_run.py|revit-macos-python-mcp|$(cd "$BOTTLES/rvt2020-a" && pwd -P)|$R/mcp/python-mcp/$PMC/src|--token-fd|4|--lock-fd|9|" ]'
+check "python: the token comes through a pipe on fd 4" eval 'grep -qx "Fifo File" "$T/py-argv" && grep -qx "token=$PMTOK" "$T/py-argv"'
+check "python: the lock fd reaches the wrapper" grep -qx FD9 "$T/py-argv"
+check "python: REVIT_HOST/REVIT_PORT of the caller do not change the address checked" grep -qF "GET /revit_mcp/status/" "$T/routes-log"
+# a here-string (a temp file in bash 3.2) instead of the pipe: the fd 4 check catches it
+pm_world; cp "$R/scripts/mcp-launch.sh" "$T/launch.orig"; perl -pi -e 's/4< <\(printf %s "\$tok"\)/4<<<"\$tok"/' "$R/scripts/mcp-launch.sh"
+pmr; check "python: a here-string launcher fails the fd 4 check" eval '[ -s "$T/py-argv" ] && ! grep -qx "Fifo File" "$T/py-argv"'; cp "$T/launch.orig" "$R/scripts/mcp-launch.sh"
+# handoff: the lock is held until the marked wrapper runs; protection never lapses
+for hold in PYMCP_EXEC_HOLD PYMCP_TEST_HOLD; do
+  pm_world; touch "$T/hold"; MCP_ENV=("${PMENV[@]}" "$hold=$T/hold"); mcp_bg a mcp 2020 --server python; MCP_ENV=()
+  mcp_wait '[ -e "$T/hold.reached" ]' 100
+  check "python: at $hold the lock is held" eval '! lock_is_free'
+  run "" stop 2020; check "python: at $hold stop refused: the lock is busy" eval '[ "$RC" != 0 ] && grep -q "Another task is running" <<<"$OUT" && sandboxed "Revit 2020.Revit.exe"'
+  rm "$T/hold"; mcp_wait '[ -s "$T/py-argv" ]' 100; mcp_wait lock_is_free 50
+  check "python: after $hold the lock is free" lock_is_free
+  stop_fakes; run "" addins 2020; check "python: after $hold, Revit closed, addins refused through MCP" eval '[ "$RC" != 0 ] && grep -q "through MCP" <<<"$OUT"'
+  exec 5>&-; wait "$LPID_a"
+done
+for c in "2020|remove 2020|cxbottle" "2020|rebuild 2020|install.sh" "|addins 2020|run-steps.sh"; do
+  pm_world; MCP_ENV=("${PMENV[@]}"); mcp_bg a mcp 2020 --server python; MCP_ENV=(); mcp_wait '[ -s "$T/py-argv" ]' 100; mcp_wait lock_is_free 50; stop_fakes
+  run "${c%%|*}" $(cut -d'|' -f2 <<<"$c")
+  check "python connected, Revit closed: $(cut -d'|' -f2 <<<"$c") refused" eval '[ "$RC" != 0 ] && grep -q "through MCP" <<<"$OUT" && ! called "${c##*|}" && [ -d "$BOTTLES/rvt2020-a" ]'
+  exec 5>&-; wait "$LPID_a"
+done
+pm_world; MCP_ENV=("${PMENV[@]}"); mcp_bg a mcp 2020 --server python; MCP_ENV=(); mcp_wait '[ -s "$T/py-argv" ]' 100; stop_fakes
+exec 5>&-; wait "$LPID_a"; run "" addins 2020 --only revitlookup
+check "python: EOF ends the wrapper, protection goes" eval '! grep -q "through MCP" <<<"$OUT"'
+# another bottle's wrapper does not keep this one away; stop ends this bottle's wrapper only
+pm_world rvt2020-a; bottle rvt2020-b 2020 2020; pm_install rvt2020-b; MCP_ENV=("${PMENV[@]}"); mcp_bg a mcp 2020 --server python; MCP_ENV=()
+mcp_wait '[ -s "$T/py-argv" ]' 100; mcp_wait lock_is_free 50
+run "" addins 2020 rvt2020-b --only revitlookup; check "python: another bottle's wrapper does not block" eval '! grep -q "through MCP" <<<"$OUT"'
+run "" stop 2020 rvt2020-b; check "python: stop of another bottle leaves this wrapper" eval 'sandboxed "revit-macos-python-mcp"'
+run "" stop 2020; check "python: stop ends this bottle's wrapper" eval '[ "$RC" = 0 ] && mcp_wait "! sandboxed revit-macos-python-mcp" 50'
+run "" addins 2020 --only revitlookup; check "python: after stop, addins runs" eval '! grep -q "through MCP" <<<"$OUT"'
+exec 5>&-; wait "$LPID_a" 2>/dev/null
 # ---- ./revit hittest (scripts/hittest-launch.sh): the app's window-under-a-point helper ----
 hit_cx() { # the fake CrossOver's wine plays hittest.exe: records its arguments (and FD8/FD9 if they reached it), holds a
   # file of the bottle open, writes the ready file (--ready Z:\… → its Mac path), prints hello, echoes stdin.

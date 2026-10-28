@@ -15,6 +15,7 @@ import os
 import re
 import runpy
 import sys
+import time
 
 
 def die(msg):
@@ -33,6 +34,11 @@ def main(argv):
         token = f.read(200).strip()
     if not re.fullmatch(r"[0-9a-f]{64}", token):
         die("The pairing token from Revit is not valid. In Revit: MCP > Bridge > Connect again.")
+    hold = os.environ.get("PYMCP_TEST_HOLD")   # tests only: pause here, still holding the lock
+    if hold:
+        open(hold + ".reached", "w").close()
+        while os.path.exists(hold):
+            time.sleep(0.1)
     try:
         os.close(lock_fd)
     except OSError:

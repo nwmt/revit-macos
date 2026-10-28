@@ -50,3 +50,26 @@ pymcp_server_state() { # $1 = server.py: original (pyRevit 4.8.12 as installed),
   elif patch --binary -s -f -R --dry-run "$1" "$ROOT/tools/patches/pyrevit48/server.py.patch" >/dev/null 2>&1; then echo patched
   else echo foreign; fi
 }
+
+PYMCP_DPAPI_WIN='C:\ProgramData\revit-macos\dpapi\dpapi.exe'
+dpapi_ensure() { # our dpapi.exe in the bottle, equal to $(shim_dir)/dpapi/dpapi.exe afterwards: written only when
+  # missing or different, through a temporary file beside it. Under the lock. Needs shims.sh. 1 with the reason
+  local src t="$B/drive_c/ProgramData/revit-macos/dpapi/dpapi.exe" out
+  out="$(ensure_shim dpapi 2>&1)" || { tail -1 <<<"$out"; return 1; }
+  src="$(shim_dir)/dpapi/dpapi.exe"; [ -f "$src" ] || { echo "no $src"; return 1; }
+  cmp -s "$src" "$t" && return 0
+  mkdir -p "$(dirname "$t")" && cp "$src" "$t.tmp.$$" && mv -f "$t.tmp.$$" "$t" || { rm -f "$t.tmp.$$"; echo "cannot write $t"; return 1; }
+}
+pymcp_listener() { # $1 = port: who listens there — ok (one listener on 127.0.0.1, a wineserver of this bottle), none,
+  # network (on every address, or another than 127.0.0.1) or foreign (another program)
+  local out pids addr p rb
+  out="$(lsof -nP -iTCP:"$1" -sTCP:LISTEN -Fpn 2>/dev/null)"
+  pids="$(sed -n 's/^p//p' <<<"$out" | sort -u)"; [ -n "$pids" ] || { echo none; return 0; }
+  addr="$(sed -n 's/^n//p' <<<"$out" | sort -u)"
+  [ "$(wc -l <<<"$pids" | tr -d ' ')" = 1 ] && [ "$addr" = "127.0.0.1:$1" ] || {
+    grep -qv "^127\.0\.0\.1:" <<<"$addr" && { echo network; return 0; }; echo foreign; return 0; }
+  rb="$(cd "$B" 2>/dev/null && pwd -P)"; p="$pids"
+  [ "$(basename "$(ps -o comm= -p "$p" 2>/dev/null)")" = wineserver ] && lsof -p "$p" -Fn 2>/dev/null | grep -qF "n$rb/" \
+    && { echo ok; return 0; }
+  echo foreign
+}
