@@ -65,7 +65,7 @@ reset() { # a fresh sandbox for each test
     || { echo "sandbox setup failed"; exit 1; }
   cp "$REPO/revit" "$R/"; cp -R "$REPO/tools" "$R/"; cp "$REPO/scripts/lib/common.sh" "$REPO/scripts/lib/versions.sh" "$R/scripts/lib/"
   mkdir -p "$R/scripts/profiles"; cp "$REPO"/scripts/profiles/*.sh "$R/scripts/profiles/"
-  cp "$REPO/scripts/lib/addins.sh" "$REPO/scripts/lib/mcp.sh" "$REPO/scripts/lib/shims.sh" "$REPO/scripts/lib/handoff.sh" "$R/scripts/lib/" 2>/dev/null
+  cp "$REPO/scripts/lib/addins.sh" "$REPO/scripts/lib/mcp.sh" "$REPO/scripts/lib/pymcp.sh" "$REPO/scripts/lib/shims.sh" "$REPO/scripts/lib/handoff.sh" "$R/scripts/lib/" 2>/dev/null
   [ ! -f "$REPO/scripts/mcp-launch.sh" ] || cp "$REPO/scripts/mcp-launch.sh" "$R/scripts/"; cp "$REPO/scripts/hittest-launch.sh" "$REPO/scripts/theme-launch.sh" "$R/scripts/"; cp "$REPO/scripts/lib/wine.sh" "$R/scripts/lib/"; cp -R "$REPO/scripts/addins" "$REPO/scripts/steps" "$R/scripts/" 2>/dev/null
   stub "$R/install.sh"; stub "$R/scripts/run-steps.sh"; stub "$R/scripts/launch.sh"; stub "$R/scripts/smoke.sh"
   # ensure_shim's builder: done when build/<shim>/ holds a file, else it fails
