@@ -253,7 +253,7 @@ in Revit views.
 
 Check that **Trackpad in Revit** is on in the app's Settings and that its line says **On**. If it asks for permission:
 System Settings → Privacy & Security → Device Control and Data Access, turn on **<app name> Trackpad**. The gestures
-work in Revit 2027's views; in other years and in schedules, lists and Properties scrolling stays scrolling.
+work in Revit 2020's and 2027's views; in other years and in schedules, lists and Properties scrolling stays scrolling.
 
 ### The trackpad stopped working after an update
 

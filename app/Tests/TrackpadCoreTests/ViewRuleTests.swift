@@ -8,6 +8,10 @@ func reply(_ chain: [(String, String)], complete: Bool = true) -> HitReply {
 let plan = reply([("AfxFrameOrView140u", ""), ("AfxMDIFrame140u", "Floor Plan: L1"), ("Top", "Autodesk Revit 2027")])
 
 @Test func aViewOf2027() { #expect(ViewRule.isView(year: 2027, reply: plan)) }
+@Test func aViewOf2020() {
+    #expect(ViewRule.isView(year: 2020, reply: reply([("AfxFrameOrView140u", ""), ("AfxMDIFrame140u", "Floor Plan: Level 1"),
+                                                     ("Afx:0000000140000000:40", "Autodesk Revit 2020.2")])))
+}
 @Test func anUncheckedYear() { #expect(!ViewRule.isView(year: 2026, reply: plan)) }
 @Test func aScheduleAtAnyLevel() {
     #expect(!ViewRule.isView(year: 2027, reply: reply([("AfxFrameOrView140u", ""), ("A", "x"), ("B", "Schedule: S")])))

@@ -138,7 +138,7 @@ into a middle-button drag and the scroll wheel. It needs the permission in Syste
 Device Control and Data Access, and has it alone: nothing the app or the helper starts gets it. macOS sees all of
 Revit as one window, so the helper asks `./revit hittest` (our `hittest.exe` in the bottle) which Windows window is
 under the cursor when a gesture starts: only Revit's views pan and zoom, lists, Properties, the Project Browser and
-schedules keep scrolling. Checked on Revit 2027; in other years the gestures stay scrolling. The helper keeps a log in
+schedules keep scrolling. Checked on Revit 2020 and 2027; in other years the gestures stay scrolling. The helper keeps a log in
 `<data>/logs/trackpad.log` (no window titles, no positions), which the diagnostic report includes.
 
 ## Our shims in tools/
