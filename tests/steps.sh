@@ -677,7 +677,7 @@ printf '#!/bin/bash\nexit 0\n' > "$T/bin/winetricks"; chmod +x "$T/bin/winetrick
 lic_rule 1 2020; release_rule 0x70805; sc_running
 rule "rvt.cmd" 0 "mkdir -p '$RV20/Samples'; touch '$RV20/Revit.exe' '$RV20/Samples/rac_basic_sample_project.rvt' '$RV20/Samples/rac_basic_sample_family.rfa'"
 rule "dotNetFx47.exe" 0 "mkdir -p '$BOTTLES/rvt2020-t/drive_c/windows/Microsoft.NET/Framework64/v4.0.30319'; touch '$BOTTLES/rvt2020-t/drive_c/windows/Microsoft.NET/Framework64/v4.0.30319/clr.dll'"
-STEP_ENV=(PATH="$T/bin:$PATH"); run_steps 2020 rvt2020-t
+STEP_ENV=(PATH="$T/bin:$PATH" SETTINGS_SAVE_WAIT=1); run_steps 2020 rvt2020-t
 expect "the whole 2020 profile runs" 0 "samples"; miss=""
 check "a run without failed steps prints no file error" eval '! grep -q "No such file" <<<"$OUT"'
 for s in netfx vc fonts licensing svcshim adsso rcl rvt ret materials register ncryptshim ssoenv wbemshim richedit dynamo \
