@@ -647,6 +647,12 @@ class PythonMcp(Sandbox):
             if status == "fail" and cid != "mcp.python.startup":
                 self.assertEqual(cs[cid].fix, fix, cid)
 
+    def test_a_later_duplicate_host_is_what_pyrevit_uses(self):
+        self.install()
+        self.write(os.path.join(self.b, dr.PYREVIT_CONFIG_REL), '[routes]\nenabled = true\nhost = "127.0.0.1"\nport = 48884\n'
+                   'host = "0.0.0.0"\n\n[revit-mcp-python.extension]\ndisabled = false\n')
+        self.assertEqual(self.mcp()["mcp.python.routes"].status, "fail")
+
     def test_startup_error_names_its_first_line(self):
         self.install()
         self.write(os.path.join(self.b, dr.PYMCP_LOCAL_REL, "startup-error.txt"), "Traceback (x)\nSyntaxError\n")

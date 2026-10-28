@@ -568,6 +568,15 @@ class PyrevitIni(Tmp):
     def test_missing_file(self):
         self.assertEqual(run("pyrevit_ini", "set", self.path("none.ini"), "routes", "port", "1").returncode, 1)
 
+    def test_duplicates_become_one_line(self):
+        p = self.ini("[routes]\nhost = \"127.0.0.1\"\nenabled = true\nHost = \"0.0.0.0\"\n")
+        run("pyrevit_ini", "set", p, "routes", "host", '"127.0.0.1"')
+        self.assertEqual(self.text(), '[routes]\nhost = "127.0.0.1"\nenabled = true\n')
+
+    def test_get_takes_the_last_like_pyrevit(self):
+        p = self.ini("[routes]\nhost = \"127.0.0.1\"\nhost = \"0.0.0.0\"\n")
+        self.assertEqual(run("pyrevit_ini", "get", p, "routes", "host").stdout, '"0.0.0.0"\n')
+
 
 class PythonMcpRun(Tmp):
     """tools/python_mcp_run.py: runs upstream main.py with a fixed endpoint and the pairing token from a pipe."""

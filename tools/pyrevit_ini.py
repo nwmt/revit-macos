@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: MIT
 """One key of pyRevit's pyRevit_config.ini, the rest of the file byte for byte.
 
-  pyrevit_ini.py set <ini> <section> <key> <value>   replace the key (section and key in any case) or add it at the
-                                                      end of its section; a missing section is added at the end
-  pyrevit_ini.py get <ini> <section> <key>            print the value; exit 1 when there is none
+  pyrevit_ini.py set <ini> <section> <key> <value>   replace the key (section and key in any case; more than one
+                                                      becomes one) or add it at the end of its section; a missing
+                                                      section is added at the end
+  pyrevit_ini.py get <ini> <section> <key>            print the value (the last one, as pyRevit reads it); exit 1
+                                                      when there is none
 Values are written as given: pyRevit quotes strings itself (host = "127.0.0.1"), booleans and numbers are bare.
 Line ends stay as the file has them (pyRevit writes LF; a file from Windows may have CRLF). Exit 1: no such file.
 """
@@ -15,8 +17,8 @@ KEY = re.compile(r"^\s*([^=\s][^=]*?)\s*=(.*)$")
 
 
 def find(lines, section, key):
-    """(index of the section header or None, index of the key line or None, index after the section's last line)."""
-    head = at = None
+    """(index of the section header or None, indexes of the key's lines, index after the section's last line)."""
+    head, at = None, []
     end = len(lines)
     for i, line in enumerate(lines):
         s = SECTION.match(line.rstrip("\r\n"))
@@ -27,10 +29,10 @@ def find(lines, section, key):
             if s.group(1).strip().lower() == section.lower():
                 head = i
             continue
-        if head is not None and at is None:
+        if head is not None:
             k = KEY.match(line.rstrip("\r\n"))
             if k and k.group(1).strip().lower() == key.lower():
-                at = i
+                at.append(i)
     return head, at, end
 
 
@@ -48,13 +50,15 @@ def main(argv):
     lines = text.splitlines(keepends=True)
     head, at, end = find(lines, section, key)
     if argv[1] == "get":
-        if at is None:
+        if not at:
             return 1
-        print(KEY.match(lines[at].rstrip("\r\n")).group(2).strip())
+        print(KEY.match(lines[at[-1]].rstrip("\r\n")).group(2).strip())
         return 0
     new = "%s = %s%s" % (key, argv[5], nl)
-    if at is not None:
-        lines[at] = new
+    if at:
+        lines[at[0]] = new
+        for i in reversed(at[1:]):   # pyRevit would take the last one
+            del lines[i]
     elif head is not None:
         while end > head + 1 and not lines[end - 1].strip():   # after the section's last line, before blank lines
             end -= 1

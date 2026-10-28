@@ -1140,7 +1140,7 @@ pm_install() { # $1 = bottle: what addin_is_installed and the launcher look at; 
   cat > "$v/python3" <<EOF
 #!/bin/bash
 [ "\$1 \$2" != "-I -c" ] || exit 0   # the launcher's "does the venv work" probe
-{ printf '%s\n' "\$@"; stat -f %HT /dev/fd/4; echo "token=\$(cat <&4)"; [ -e /dev/fd/9 ] && echo FD9; echo "host=\${REVIT_HOST:-}"; } > "$T/py-argv"
+{ printf '%s\n' "\$@"; stat -f %HT /dev/fd/4; echo "token=\$(cat <&4)"; [ -e /dev/fd/9 ] && echo FD9; echo "host=\${REVIT_HOST:-}"; env | grep -q "$PMTOK" && echo TOKEN-IN-ENV; } > "$T/py-argv"
 if [ -n "\${PYMCP_TEST_HOLD:-}" ]; then touch "\$PYMCP_TEST_HOLD.reached"; while [ -e "\$PYMCP_TEST_HOLD" ]; do sleep 0.1; done; fi
 exec 9>&-; cat
 EOF
@@ -1151,7 +1151,11 @@ pm_cx() { # the fake CrossOver's wine plays dpapi.exe: prints the token, or fail
 #!/bin/bash
 [ "\$1" = --bottle ] || exit 0
 printf '%s\n' "\$@" > "$T/dpapi-argv"
-case "\$(cat "$T/dpapi-mode" 2>/dev/null)" in fail) echo "DPAPI refused" >&2; exit 2 ;; hang) exec perl -e 'sleep 60' "$T/dpapi-hang" ;; esac
+case "\$(cat "$T/dpapi-mode" 2>/dev/null)" in
+  fail) echo "DPAPI refused" >&2; exit 2 ;;
+  hang) exec perl -e 'sleep 60' "$T/dpapi-hang" ;;
+  orphan) perl -e 'sleep 60' "$T/dpapi-child" & exit 0 ;;   # a child that outlives the launcher and keeps its stdout
+esac
 printf '%s' "$PMTOK"
 EOF
   chmod +x "$CXF/bin/wine"
@@ -1197,6 +1201,8 @@ check "python: 6 no pairing → Connect" refused_pm "In Revit: MCP → Bridge �
 pm_world; echo fail > "$T/dpapi-mode"; pmr; check "python: 7 dpapi fails → Connect again" refused_pm "Connect again"
 pm_world; echo hang > "$T/dpapi-mode"; t0=$SECONDS; pmr
 check "python: 7 dpapi hangs → refused within its deadline, nothing left" eval 'refused_pm "Connect again" && [ $((SECONDS - t0)) -le 8 ] && ! sandboxed "dpapi-hang"'
+pm_world; echo orphan > "$T/dpapi-mode"; t0=$SECONDS; pmr
+check "python: 7 dpapi leaves a child holding its output → refused at once, the child ended" eval 'refused_pm "Connect again" && [ $((SECONDS - t0)) -le 8 ] && ! sandboxed "dpapi-child"'
 for c in "401|Revit refused the pairing" "503|Open a model in Revit 2020" "404|reload pyRevit" "garbage|Unexpected answer from Revit" "hang|Revit does not answer"; do
   pm_world; echo "${c%%|*}" > "$T/routes-mode"; t0=$SECONDS; pmr
   check "python: 8 status ${c%%|*} → ${c#*|}" eval 'refused_pm "${c#*|}" && [ $((SECONDS - t0)) -le 8 ]'
@@ -1218,6 +1224,8 @@ check "python: the wrapper, its marker, the bottle, the sources, fds 4 and 9" ev
 check "python: the token comes through a pipe on fd 4" eval 'grep -qx "Fifo File" "$T/py-argv" && grep -qx "token=$PMTOK" "$T/py-argv"'
 check "python: the lock fd reaches the wrapper" grep -qx FD9 "$T/py-argv"
 check "python: REVIT_HOST/REVIT_PORT of the caller do not change the address checked" grep -qF "GET /revit_mcp/status/" "$T/routes-log"
+pm_world; printf '{"jsonrpc":"2.0"}\n' > "$T/in"; MCP_IN="$T/in"; PMX=(tok=exported-by-the-caller); pmr
+check "python: an exported tok of the caller does not carry the token into the wrapper's environment" eval '[ "$RC" = 0 ] && ! grep -qx TOKEN-IN-ENV "$T/py-argv"'
 # a here-string (a temp file in bash 3.2) instead of the pipe: the fd 4 check catches it
 pm_world; cp "$R/scripts/mcp-launch.sh" "$T/launch.orig"; perl -pi -e 's/4< <\(printf %s "\$tok"\)/4<<<"\$tok"/' "$R/scripts/mcp-launch.sh"
 pmr; check "python: a here-string launcher fails the fd 4 check" eval '[ -s "$T/py-argv" ] && ! grep -qx "Fifo File" "$T/py-argv"'; cp "$T/launch.orig" "$R/scripts/mcp-launch.sh"

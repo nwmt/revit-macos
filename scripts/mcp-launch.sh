@@ -61,14 +61,17 @@ checks_python() { # the add-in, a running Revit, the extension loaded, Routes of
   esac
   [ -f "$B/$PYMCP_LOCAL_REL/pairing.dpapi" ] || die "In Revit: MCP → Bridge → Connect, then try again."
 }
-python_token() { # the pairing token, decrypted once by dpapi.exe in the bottle within PYMCP_DPAPI_S (30) s; on the
-  # deadline only that dpapi.exe ends. Stdout: the token (into a variable, never a file)
+python_token() { # the pairing token, decrypted once by dpapi.exe in the bottle within PYMCP_DPAPI_S (30) s. The
+  # launch runs in a process group of its own: on the deadline, and once the launcher is done, whatever is left of it
+  # ends (a child that kept the output would hold this up), nothing else of the bottle. Stdout: the token (into a
+  # variable, never a file)
   local s="${PYMCP_DPAPI_S:-30}" pairing='C:\users\crossover\AppData\Local\RevitMCPPython\pairing.dpapi'
-  ( "$CX/bin/wine" --bottle "$NAME" "$PYMCP_DPAPI_WIN" unprotect "$pairing" 2>/dev/null </dev/null 3>&- 7>&- 8>&- 9>&- &
+  ( /usr/bin/perl -e 'setpgrp(0, 0); exec @ARGV or exit 127' "$CX/bin/wine" --bottle "$NAME" "$PYMCP_DPAPI_WIN" unprotect \
+      "$pairing" 2>/dev/null </dev/null 3>&- 7>&- 8>&- 9>&- &
     wp=$!
     # fd 3 is the client's stdout: a leftover sleep must not keep it open
-    ( sleep "$s"; kill -TERM "$wp" 2>/dev/null; sleep 1; kill -KILL "$wp" 2>/dev/null ) >/dev/null 2>&1 3>&- 7>&- 8>&- 9>&- &
-    kp=$!; wait "$wp"; rc=$?; kill "$kp" 2>/dev/null; exit "$rc" )
+    ( sleep "$s"; kill -TERM -- "-$wp" 2>/dev/null; sleep 1; kill -KILL -- "-$wp" 2>/dev/null ) >/dev/null 2>&1 3>&- 7>&- 8>&- 9>&- &
+    kp=$!; wait "$wp"; rc=$?; kill -KILL -- "-$wp" 2>/dev/null; kill "$kp" 2>/dev/null; exit "$rc" )
 }
 python_status() { # $1 = token: GET /revit_mcp/status/ within PYMCP_STATUS_S (10) s; the token goes to curl on stdin
   local out rc code body
@@ -91,6 +94,7 @@ python_launch() { # under the lock, after checks: dpapi.exe, the token, the stat
   # the token on a pipe (fd 4) and the lock (fd 9): the wrapper closes fd 9 once it runs, so the bottle is never
   # unguarded between the two
   local why tok rb
+  export -n tok 2>/dev/null   # a tok the caller exported would carry the token into every child
   why="$(dpapi_ensure)" || die "Cannot get dpapi.exe: $why"
   tok="$(python_token)" && [[ "$tok" =~ ^[0-9a-f]{64}$ ]] || die "In Revit: MCP → Bridge → Connect again (the pairing could not be read)."
   python_status "$tok"

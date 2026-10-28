@@ -1557,7 +1557,8 @@ def collect_pyrevit_agent(p):
 
 
 def ini_values(text):
-    """pyRevit_config.ini as {section: {key: value}}, sections and keys in lower case (tools/pyrevit_ini.py's rules)."""
+    """pyRevit_config.ini as {section: {key: value}}, sections and keys in lower case, the last of a repeated key
+    (as pyRevit reads it; tools/pyrevit_ini.py's rules)."""
     out, sec = {}, None
     for line in text.splitlines():
         m = re.match(r"^\s*\[(.+?)\]\s*$", line)
@@ -1566,7 +1567,7 @@ def ini_values(text):
             continue
         m = re.match(r"^\s*([^=\s][^=]*?)\s*=(.*)$", line)
         if m and sec is not None:
-            sec.setdefault(m.group(1).strip().lower(), m.group(2).strip())
+            sec[m.group(1).strip().lower()] = m.group(2).strip()
     return out
 
 
