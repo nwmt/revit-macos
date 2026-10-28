@@ -610,7 +610,7 @@ reset; bottle rvt2027-a 2027 2027; run "" set 2027 retina=big; expect "set: an u
 reset; bottle rvt2027-a 2027 2027; run "" set 2027 keys=pc; expect "set: an unknown keys value" 1 "keys is mac or windows"
 reset; bottle rvt2027-a 2027 2027; run "" set 2027 retina=on retina=off; expect "set: a setting twice" 1 "retina is given twice."
 check "set: nothing runs after a bad setting" not_called "run-steps.sh"
-reset; bottle rvt2026-a 2026 2026; run "" set 2026 retina=off; expect "set: only where the profile has the steps" 1 "Retina and Mac keys are tested on Revit 2027 only."
+reset; bottle rvt2026-a 2026 2026; run "" set 2026 retina=off; expect "set: only where the profile has the steps" 1 "Retina and Mac keys are tested on Revit 2020 and 2027 only."
 reset; bottle rvt2027-a 2027 2027; run "" set 2027 theme=dark; expect "set theme=dark" 0 "Revit 2027 (rvt2027-a): theme=dark. Applies the next time Revit starts."
 check "set theme=dark: the theme step with its value, one steps run" eval 'called "run-steps.sh 2027 rvt2027-a theme | " && called "THEME=dark" &&
   [ "$(grep -c run-steps.sh "$CALLS")" = 1 ]'
@@ -1164,7 +1164,7 @@ check "hittest: exit 0, stdout is hittest.exe's alone, stderr empty" eval '[ "$R
 check "hittest: the shim by its Mac path, --ready Z:\\…\\revit-hittest.*, the year" eval '[ "$(sed -n 1p "$T/hit-argv")" = "$R/build/hittest/hittest.exe" ] &&
   [ "$(sed -n 2p "$T/hit-argv")" = --ready ] && sed -n 3p "$T/hit-argv" | grep -q "^Z:\\\\.*\\\\revit-hittest\.[A-Za-z0-9]*$" && [ "$(sed -n 4p "$T/hit-argv")" = 2027 ]'
 check "hittest: neither the lock (fd 9) nor fd 8 reaches it" eval '! grep -qx -e FD9 -e FD8 "$T/hit-argv"'
-check "hittest: the ready file is gone afterwards" eval '! ls "${TMPDIR:-/tmp}"/revit-hittest.* >/dev/null 2>&1'
+check "hittest: the ready file is gone afterwards" eval 'f="$(sed -n 3p "$T/hit-argv")"; [ -n "${f##*\\}" ] && [ ! -e "${TMPDIR:-/tmp}/${f##*\\}" ]'   # its own: a real hittest may run beside
 hit_world; mcp_bg a hittest 2027; mcp_wait '[ -s "$T/mcp-out-a" ]' 100; mcp_wait lock_is_free 50
 check "hittest: the lock is released once it is ready" lock_is_free
 echo "7 1 2" >&5; mcp_wait 'grep -qx "7 1 2" "$T/mcp-out-a"' 50; check "hittest: requests after the handoff reach it" grep -qx "7 1 2" "$T/mcp-out-a"
