@@ -168,7 +168,8 @@ seconds (60 for Python and pictures of views): after that the assistant stops wa
 allowed. `--write` is for Autodesk's server only.
 
 Two of its tools do nothing on a Mac: `launch_revit` and `list_revit_installations` look for Revit in Windows, outside
-the bottle. Start Revit from `~/Applications` instead.
+the bottle. Start Revit from `~/Applications` instead. Close documents in Revit yourself:
+[`close_document` hangs Revit 2020](../versions/2020.md#known-issues).
 
 ### Troubleshoot
 
