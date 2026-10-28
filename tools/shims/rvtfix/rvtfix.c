@@ -69,6 +69,14 @@
  *    Fix: when a Chrome_WidgetWin_* window of ours is created, shown or gets a new parent (WinEvent hook in its thread),
  *    clear WS_EX_TRANSPARENT on its ancestors of this process. WindowFromPoint still finds the browser's window.
  *    RVTFIX_WV2_OPAQUE set and empty disables.
+ * 9. Status bar in the dark theme (2027): Revit's status bar is a msctls_statusbar32 whose parts it draws itself
+ *    (SBT_OWNERDRAW), text only, on a background it leaves to the control. Wine's comctl32 fills that background with
+ *    the visual style (light.msstyles, class Status) in both themes -> a light text area and light gaps between the
+ *    controls. Fix: replace uxtheme's DrawThemeBackground for comctl32 (its export, and the delay import slots of the
+ *    comctl32 already loaded); on a status bar's window, while the bottle's Windows theme is dark (Personalize
+ *    AppsUseLightTheme = 0, which the step theme keeps equal to Revit's theme), fill with Revit's dark status bar color
+ *    instead. The size grip and every other window are drawn as before. Only in Revit.exe. RVTFIX_STATUSBAR set and
+ *    empty disables.
  *
  * 4 and 5 run when the DLL loads (LdrRegisterDllNotification), or at once if it is already loaded.
  *
@@ -77,6 +85,7 @@
 #include <windows.h>
 #include <ole2.h>
 #include <winternl.h>
+#include <psapi.h>
 #define SHIM_NAME "rvtfix"
 #include "hook.h"
 
@@ -476,6 +485,96 @@ static void fix_opaque(HINSTANCE inst)
         trace("WebView2 host: no WinEvent hook (%lu)\n", GetLastError());
 }
 
+/* --- 9. status bar in the dark theme --- */
+typedef HRESULT (WINAPI *draw_theme_bg_fn)(HANDLE, HDC, int, int, const RECT *, const RECT *);
+static draw_theme_bg_fn orig_draw_theme_bg;
+#define SB_DARK RGB(59, 68, 83)   /* Revit 2027's own status bar panes in the dark theme */
+#define SP_GRIPPER 3              /* vssym32.h: the size grip keeps its look */
+
+static BOOL bottle_dark(void) /* AppsUseLightTheme = 0, read again at most every 500 ms */
+{
+    static DWORD checked;
+    static BOOL dark;
+    DWORD now = GetTickCount(), v = 1, size = sizeof(v);
+    if (!checked || now - checked > 500) {
+        if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                         L"AppsUseLightTheme", RRF_RT_REG_DWORD, NULL, &v, &size)) v = 1;
+        dark = !v;
+        checked = now ? now : 1;
+    }
+    return dark;
+}
+
+static BOOL is_statusbar(HWND hwnd)
+{
+    static HWND last;   /* the status bar paints often: one class lookup per window it was not */
+    WCHAR cls[32];
+    if (hwnd == last) return TRUE;
+    if (!GetClassNameW(hwnd, cls, 32) || lstrcmpiW(cls, L"msctls_statusbar32")) return FALSE;
+    last = hwnd;
+    return TRUE;
+}
+
+static HRESULT WINAPI hook_draw_theme_bg(HANDLE theme, HDC hdc, int part, int state, const RECT *rc, const RECT *clip)
+{
+    HWND hwnd;
+    RECT r;
+    if (part != SP_GRIPPER && rc && (hwnd = WindowFromDC(hdc)) && is_statusbar(hwnd) && bottle_dark()) {
+        if (!clip || IntersectRect(&r, rc, clip)) {
+            if (!clip) r = *rc;
+            COLORREF old = SetDCBrushColor(hdc, SB_DARK);
+            FillRect(hdc, &r, GetStockObject(DC_BRUSH));
+            SetDCBrushColor(hdc, old);
+        }
+        return S_OK;
+    }
+    return orig_draw_theme_bg(theme, hdc, part, state, rc, clip);
+}
+
+static int replace_pointer(HMODULE mod, void *from, void *to) /* in the module's writable sections: its import slots */
+{
+    BYTE *base = (BYTE *)mod;
+    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+    IMAGE_SECTION_HEADER *s = IMAGE_FIRST_SECTION(nt);
+    int i, n = 0;
+    for (i = 0; i < nt->FileHeader.NumberOfSections; i++, s++) {
+        if (!(s->Characteristics & IMAGE_SCN_MEM_WRITE)) continue;
+        void **p = (void **)(base + s->VirtualAddress), **end = (void **)((BYTE *)p + s->Misc.VirtualSize);
+        for (; p < end; p++)
+            if (*p == from && write_mem(p, &to, sizeof(to))) n++;
+    }
+    return n;
+}
+
+static void fix_statusbar(void)
+{
+    WCHAR path[MAX_PATH], *slash, env[8];
+    HMODULE ux, mods[512];
+    DWORD need = 0, i;
+    BYTE *thunk;
+    int n = 0;
+    if (!GetModuleFileNameW(NULL, path, MAX_PATH) || !(slash = wcsrchr(path, L'\\')) || lstrcmpiW(slash + 1, L"Revit.exe"))
+        return;
+    SetLastError(0);
+    if (!GetEnvironmentVariableW(L"RVTFIX_STATUSBAR", env, 8) && GetLastError() != ERROR_ENVVAR_NOT_FOUND) {
+        trace("status bar: disabled (RVTFIX_STATUSBAR is empty)\n");
+        return;
+    }
+    if (!(ux = LoadLibraryW(L"uxtheme.dll")) || !(thunk = alloc_near((BYTE *)ux, 0x1000))) { trace("uxtheme: no thunk\n"); return; }
+    if (!patch_export(ux, "DrawThemeBackground", (void *)hook_draw_theme_bg, (void **)&orig_draw_theme_bg, thunk)) {
+        trace("uxtheme: DrawThemeBackground not found\n");
+        return;
+    }
+    FlushInstructionCache(GetCurrentProcess(), thunk, 16);
+    /* a comctl32 that has already called it keeps the resolved address in its delay import slot */
+    if (K32EnumProcessModules(GetCurrentProcess(), mods, sizeof(mods), &need))
+        for (i = 0; i < need / sizeof(HMODULE) && i < 512; i++)
+            if (GetModuleFileNameW(mods[i], path, MAX_PATH) && (slash = wcsrchr(path, L'\\')) &&
+                !lstrcmpiW(slash + 1, L"comctl32.dll"))
+                n += replace_pointer(mods[i], (void *)orig_draw_theme_bg, (void *)hook_draw_theme_bg);
+    trace("status bar: DrawThemeBackground hooked (%d resolved slots in comctl32 replaced)\n", n);
+}
+
 static void fix_dragdrop(void)
 {
     HMODULE ole = LoadLibraryW(L"ole32.dll");
@@ -502,6 +601,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
         fix_autodesk();
         fix_maxpos(inst);
         fix_opaque(inst);
+        fix_statusbar();
         watch_dlls(); /* under the loader lock: no DLL loads between the checks above and this */
     }
     return TRUE;

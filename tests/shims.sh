@@ -73,7 +73,7 @@ fill_release() { # rest = shim files: build/ as get-shims.sh leaves it after unp
 reset; run "$R/scripts/build-shims.sh" rvtfix
 expect "build-shims builds one shim" 0 "built: build/rvtfix/rvtfix.dll"
 check "rvtfix: common headers, no timestamp, built in .new/ under its own name, its source and libraries" \
-  called "[-I$R/tools/shims/common] [-Wl,--no-insert-timestamp] [-o] [$R/build/rvtfix/.new/rvtfix.dll] [$R/tools/shims/rvtfix/rvtfix.c] [-luser32] [-lole32]"
+  called "[-I$R/tools/shims/common] [-Wl,--no-insert-timestamp] [-o] [$R/build/rvtfix/.new/rvtfix.dll] [$R/tools/shims/rvtfix/rvtfix.c] [-luser32] [-lole32] [-lgdi32] [-ladvapi32]"
 check "rvtfix: moved into build/rvtfix/, no .new left" test "$(cat "$R/build/rvtfix/rvtfix.dll")" = "fake rvtfix.dll" -a ! -e "$R/build/rvtfix/.new"
 reset; run "$R/scripts/build-shims.sh" hittest
 expect "hittest builds" 0 "built: build/hittest/hittest.exe"
