@@ -51,6 +51,7 @@ For `./revit addins`. It downloads RevitLookup (github.com/lookup-foundation/Rev
 | Enscape 3.4.4 | 2020 | `Enscape-3.4.4-94564.msi` | `installers/addins/enscape/` |
 | Enscape 4.18 LTS | 2027 | `Enscape-4.18.2.1657-lts.exe` | `installers/addins/enscape/` |
 | System.ValueTuple 4.5.0, for Enscape | 2020 | `system.valuetuple.4.5.0.nupkg` | `installers/redist/nuget/` |
+| MCP server for Revit (Python) | 2020 | `6ca46b3ea96a8f7cce9894cf865d8f19ca2c549d.tar.gz` (downloaded) | `installers/addins/python-mcp/` |
 | Revit MCP Server Write-Tools | 2027 | `PublicMcpServer.exe` | `installers/addins/publicmcpserver/` |
 | Revit MCP Server Experimental-Tools | 2027 | `PublicMcpServerExperimental.exe` | `installers/addins/publicmcpserver/` |
 
@@ -133,6 +134,7 @@ installers/
 │   ├── revitlookup/RevitLookup-<year>….msi
 │   ├── pyrevit48/pyRevit_4.8.12.22247_signed.exe          2020
 │   ├── pyrevit7/pyRevit_7.0.0.26278_signed.exe            2023–2027
+│   ├── python-mcp/<commit>.tar.gz                         downloaded; 2020
 │   └── enscape/
 │       ├── Enscape-3.4.4-94564.msi                        2020
 │       └── Enscape-4.18.2.1657-lts.exe                    2027

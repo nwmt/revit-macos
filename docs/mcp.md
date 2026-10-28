@@ -1,21 +1,22 @@
 # Connect an AI assistant to Revit
 
 An AI assistant on your Mac (Claude Code, Claude Desktop, Cursor) can read the model open in Revit and, if you allow
-it, change it, through an MCP server. This project starts two of them for you:
+it, change it, through an MCP server. This project starts three of them for you:
 
 | Server | Revit versions | What the assistant can do | What it turns on |
 |---|---|---|---|
 | [Autodesk Revit MCP Server](#autodesk-revit-mcp-server) | 2027 | Ready-made tools: query the model, read elements, change parameters, move and rotate. No new walls, floors or doors | Autodesk analytics (ADP); a Technical Preview |
 | [pyRevit's agent](#pyrevits-agent) | 2023–2027, with the pyRevit that `./revit addins` installs | Runs Python inside Revit: reads the model, builds elements, captures views | Nothing else |
+| [MCP server for Revit (Python)](#mcp-server-for-revit-python) | 2020 | Ready-made tools (model, levels, views as pictures, families, colors, save) and Python inside Revit; you approve each change in Revit | pyRevit Routes, on this Mac only |
 
 What has been tried on which version is on the [version pages](../versions/).
 
-For both:
+For all of them:
 
 - **Your AI assistant sends what it reads from the model to its provider** (Anthropic, OpenAI and so on).
 - **Anyone who uses this Mac under your macOS account can connect** to the Revit you have open.
 - While an assistant is connected, `./revit addins`, `rebuild` and `remove` refuse to run. Close the assistant first.
-- **Stop:** close the assistant, or run `./revit stop 2027` (it quits Revit too).
+- **Stop:** close the assistant, or run `./revit stop <year>` (it quits Revit too).
 
 ## Autodesk Revit MCP Server
 
@@ -122,3 +123,61 @@ What the assistant may change is set in pyRevit's settings, not here: `--write` 
 - **"pyRevit's agent is on but not running in this Revit":** pyRevit → Reload, or restart Revit.
 - **"pyRevit's agent needs pyRevit 7":** this Revit version gets an older pyRevit here.
 - **"Open Revit 2027 with a model first":** start Revit, open a model, then reconnect the assistant.
+
+## MCP server for Revit (Python)
+
+[MCP server for Revit (Python)](https://github.com/mcp-servers-for-revit/mcp-server-for-revit-python) is an open
+source pyRevit extension. Here it is for Revit 2020, whose pyRevit has no agent of its own.
+
+Before you install it:
+
+- **It turns on pyRevit Routes**, a small web server inside Revit, reachable from this Mac only.
+- **It changes one file of pyRevit 4.8** so that Routes passes on the pairing and serves one request at a time.
+- **The assistant can run Python inside Revit without a sandbox.** Revit shows every change and every script before
+  it runs, and runs it only if you click **Yes**.
+
+### Install
+
+1. Quit Revit. Install pyRevit if it is not there yet: `./revit addins 2020 --only pyrevit`.
+2. Install the server and accept its license:
+   ```bash
+   ./revit addins 2020 --only python-mcp --accept-eula python-mcp
+   ```
+   It downloads the extension and the Python packages it needs on the Mac (internet needed once).
+3. Start Revit and open a model. In Revit: **MCP → Bridge → Connect**, read the notice and click **Yes**. This pairs
+   Revit with the assistants on this Mac; **Disconnect** undoes it.
+
+`./revit doctor 2020 --all` then lists "the MCP server for Revit (Python) is ready".
+
+### Connect
+
+Open Revit with a model, then give your assistant the full path to `revit` in this project folder:
+
+- **Claude Code:**
+  ```bash
+  claude mcp add --scope user revit-python -- /full/path/to/revit-macos/revit mcp 2020 --server python
+  ```
+- **Claude Desktop** (not tried yet): in `~/Library/Application Support/Claude/claude_desktop_config.json`, then
+  restart Claude:
+  ```json
+  {"mcpServers": {"revit-python": {"command": "/full/path/to/revit-macos/revit", "args": ["mcp", "2020", "--server", "python"]}}}
+  ```
+
+When the assistant asks to change the model or run Python, Revit shows **Revit MCP request review**. Answer within 30
+seconds (60 for Python and pictures of views): after that the assistant stops waiting, though Revit still does what you
+allowed. `--write` is for Autodesk's server only.
+
+Two of its tools do nothing on a Mac: `launch_revit` and `list_revit_installations` look for Revit in Windows, outside
+the bottle. Start Revit from `~/Applications` instead.
+
+### Troubleshoot
+
+- **"Turn on pyRevit Routes, or reload pyRevit":** pyRevit → Reload, or restart Revit.
+- **"In Revit: MCP → Bridge → Connect":** pair once, as in [Install](#install-1).
+- **"The pairing changed" or "Connect again":** you clicked Connect again, so the assistant's copy is old: restart the
+  server in the assistant (in Claude Code, `/mcp`, then reconnect `revit-python`).
+- **"Open a model in Revit 2020":** open a model, then reconnect the assistant.
+- **"The MCP extension failed to load in Revit":** pyRevit → Reload. If it says so again, run `./revit report 2020`
+  and attach the report to an issue.
+- **"Revit does not answer":** a dialog in Revit is waiting for you. Close it, or run `./revit stop 2020`.
+- **"pyRevit Routes listens on the network":** run the install command again; it puts Routes back on this Mac only.
