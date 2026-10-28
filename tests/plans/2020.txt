@@ -5,6 +5,6 @@ Plan:
   4. scripts/new-bottle.sh 2020 rvt2020-a
   5. scripts/run-steps.sh 2020 rvt2020-a
   6. scripts/make-apps.sh 2020 rvt2020-a
-Steps: netfx vc fonts licensing svcshim adsso rcl rvt ret materials register ncryptshim ssoenv wbemshim richedit dynamo d3d9dxvk warpshim rvtfix tlbpin samples
+Steps: netfx vc fonts licensing svcshim adsso rcl rvt ret materials register ncryptshim ssoenv wbemshim richedit dynamo d3d9dxvk warpshim rvtfix tlbpin samples retina mackeys
 
 Fix the items marked ✗ and run ./revit install 2020 again.

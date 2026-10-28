@@ -103,12 +103,12 @@ reset; in_repo 'load_profile 2020; profile_json; load_profile 2027; profile_json
 check "profile_json: one JSON object per profile, with its lists" eval '/usr/bin/perl -MJSON::PP -ne '"'"'my $j = decode_json($_);
   exit 1 unless ref $j->{STEPS} eq "ARRAY" && ref $j->{PKGS} eq "ARRAY" && ref $j->{RICHEDIT} eq "ARRAY"; print "$j->{YEAR} ",
   scalar @{$j->{STEPS}}, " $j->{STEPS}[0] ", scalar @{$j->{PKGS}}, " $j->{DOTNET} [$j->{ENSCAPE}] $j->{RVTFIX_ENV}[0]\n"'"'"' <<<"$OUT" |
-  tr "\n" "|" | grep -qxF "2020 21 netfx 0 netfx47 [3] RVTFIX_CEF_ARGS=|2027 25 vc 32 net10 [4] |"'
+  tr "\n" "|" | grep -qxF "2020 23 netfx 0 netfx47 [3] RVTFIX_CEF_ARGS=|2027 25 vc 32 net10 [4] |"'
 reset; mkdir -p "$T/real"; ln -s "$T/real" "$T/link"; ln -s "$T/nowhere" "$T/dangling"
 in_repo 'for p in "$HOME/not/there/yet" "'"$T"'/link/sub" "'"$T"'/dangling"; do free_gb "$p"; volume_id "$p"; done'
 check "free_gb and volume_id: a number for a path that is not there, a link, a link to nothing" \
   eval '[ "$(grep -cE "^[0-9]+$" <<<"$OUT")" = 6 ] && [ "$(sed -n 2p <<<"$OUT")" = "$(stat -f %d "$T")" ]'
-reset; in_repo 'load_profile 2020 && echo "${#STEPS[@]} ${STEPS[0]} ${STEPS[20]}"'; expect "the 2020 profile has its 21 steps" 0 "21 netfx samples"
+reset; in_repo 'load_profile 2020 && echo "${#STEPS[@]} ${STEPS[0]} ${STEPS[22]}"'; expect "the 2020 profile has its 23 steps" 0 "23 netfx mackeys"
 reset; in_repo 'for y in "${REVIT_SUPPORTED[@]}"; do load_profile "$y"; in_list pdfprinter "${STEPS[@]}" && echo "$y"; done; echo checked'
 expect "no year installs the PDF printer by default" 0 "checked"; check "pdfprinter in no STEPS" test "$OUT" = checked
 
