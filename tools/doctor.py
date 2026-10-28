@@ -832,6 +832,15 @@ MCP_EXPIRES = "2028-05-01"   # the Technical Preview stops working then
 # pyRevit's agent (./revit mcp --server pyrevit; scripts/lib/mcp.sh holds the same paths and ini rules)
 PYREVIT_CLONE_REL = "drive_c/users/crossover/AppData/Roaming/pyRevit-Master"
 PYREVIT_CONFIG_REL = "drive_c/users/crossover/AppData/Roaming/pyRevit/pyRevit_config.ini"
+# the MCP server for Revit (Python), add-in python-mcp (scripts/lib/pymcp.sh holds the same commit and paths)
+PYMCP_COMMIT = "6ca46b3ea96a8f7cce9894cf865d8f19ca2c549d"
+PYMCP_EXT_REL = "drive_c/users/crossover/AppData/Roaming/pyRevit/Extensions/revit-mcp-python.extension"
+PYMCP_LOCAL_REL = "drive_c/users/crossover/AppData/Local/RevitMCPPython"
+PYMCP_SERVER_REL = PYREVIT_CLONE_REL + "/pyrevitlib/pyrevit/routes/server"
+# a marker of each patch in tools/patches/python-mcp/*.patch: (file in the extension, text the patch puts there)
+PYMCP_PATCH_MARKS = (("startup.py", "startup-error.txt"), ("revit_mcp/code_execution.py", "_printer(captured_output)"),
+                     ("revit_mcp/views.py", "Uri.UnescapeDataString"),
+                     ("revit_mcp/pairing.py", "except (IOError, OSError, ValueError, PairingError):"))
 
 
 def collect_mcp(ctx, p):
@@ -949,6 +958,7 @@ def collect_bottle(ctx):
     b["logs"] = collect_logs(ctx, p, b["records"])
     b["mcp"] = collect_mcp(ctx, p)
     b["pyrevit_agent"] = collect_pyrevit_agent(p)
+    b["pymcp"] = collect_pymcp(ctx, p)
     if any(s in (ctx.profile.get("STEPS") or []) for s in SETTING_STEPS):
         b["settings"] = collect_settings(p)
     return b
@@ -1546,6 +1556,77 @@ def collect_pyrevit_agent(p):
     return a
 
 
+def ini_values(text):
+    """pyRevit_config.ini as {section: {key: value}}, sections and keys in lower case (tools/pyrevit_ini.py's rules)."""
+    out, sec = {}, None
+    for line in text.splitlines():
+        m = re.match(r"^\s*\[(.+?)\]\s*$", line)
+        if m:
+            sec = out.setdefault(m.group(1).strip().lower(), {})
+            continue
+        m = re.match(r"^\s*([^=\s][^=]*?)\s*=(.*)$", line)
+        if m and sec is not None:
+            sec.setdefault(m.group(1).strip().lower(), m.group(2).strip())
+    return out
+
+
+def collect_pymcp(ctx, p):
+    """python-mcp in bottle p, from files: None when its extension folder is not there."""
+    j = os.path.join
+    ext = j(p, PYMCP_EXT_REL)
+    if not os.path.isdir(ext):
+        return None
+
+    def text(path):
+        try:
+            with open(path, encoding="utf-8-sig", errors="replace") as fh:
+                return fh.read()
+        except OSError:
+            return None
+    srv = text(j(p, PYMCP_SERVER_REL, "server.py")) or ""
+    ours = file_info(j(ctx.root, "tools/pyrevit48/revitmacos_serial.py"))["sha256"]
+    ini = ini_values(text(j(p, PYREVIT_CONFIG_REL)) or "")
+    err = text(j(p, PYMCP_LOCAL_REL, "startup-error.txt"))
+    return {"extension": all(m in (text(j(ext, f)) or "") for f, m in PYMCP_PATCH_MARKS),
+            "serverpy": "revitmacos_serial.dispatch(self, request, route_handler)" in srv,
+            "module": ours is not None and file_info(j(p, PYMCP_SERVER_REL, "revitmacos_serial.py"))["sha256"] == ours,
+            "routes": [ini.get("routes", {}).get(k) for k in ("enabled", "host", "port")]
+                      + [ini.get("revit-mcp-python.extension", {}).get("disabled")],
+            "venv": os.access(j(ctx.data, "mcp/python-mcp", PYMCP_COMMIT, "venv/bin/python3"), os.X_OK),
+            "startup_error": err.strip().splitlines()[0] if err and err.strip() else None,
+            "pairing": os.path.isfile(j(p, PYMCP_LOCAL_REL, "pairing.dpapi"))}
+
+
+def pymcp_checks(f, b):
+    """python-mcp: what ./revit mcp <year> --server python needs, when its extension folder is there."""
+    m, y, sfx = b.get("pymcp"), f["year"], f["sfx"]
+    if not m:
+        return []
+    fix, out = f"./revit addins {y}{sfx} --only python-mcp --accept-eula python-mcp", []
+    if not m["extension"]:
+        out.append(Check("mcp.python.extension", "fail", "the MCP extension for pyRevit is missing its fixes for Revit "
+                         f"{y}", fix=fix))
+    if not m["serverpy"]:
+        out.append(Check("mcp.python.serverpy", "fail", "pyRevit Routes is not set up for the MCP extension", fix=fix))
+    if not m["module"]:
+        out.append(Check("mcp.python.module", "fail", "pyRevit Routes misses this project's revitmacos_serial.py: "
+                         "pyRevit does not load", fix=fix))
+    if [str(v).lower() if v is not None else None for v in m["routes"]] != ["true", '"127.0.0.1"', "48884", "false"]:
+        out.append(Check("mcp.python.routes", "fail", "pyRevit Routes is off, or not on 127.0.0.1:48884, or the MCP "
+                         "extension is off", fix=fix))
+    if not m["venv"]:
+        out.append(Check("mcp.python.venv", "fail", "the MCP server's Python on this Mac is missing", fix=fix))
+    if m["startup_error"]:
+        out.append(Check("mcp.python.startup", "fail", "the MCP extension failed to load in Revit: " + m["startup_error"],
+                         fix=f"reload pyRevit; if it repeats, ./revit report {y}{sfx}"))
+    if not m["pairing"]:
+        out.append(Check("mcp.python.pairing", "info", "not paired yet: in Revit, MCP → Bridge → Connect"))
+    if not out:
+        out.append(Check("mcp.python.ready", "ok",
+                         f"the MCP server for Revit (Python) is ready: ./revit mcp {y}{sfx} --server python"))
+    return out
+
+
 def pyrevit_agent_checks(f, b):
     """One ok line when pyRevit's agent is ready for ./revit mcp --server pyrevit; nothing otherwise (no problem)."""
     a = b.get("pyrevit_agent") or {}
@@ -1736,7 +1817,7 @@ def bottle_checks(f):
     out += app_checks(f, b)
     out += install_checks(f, b) + since_install(f, b)
     if b.get("revit_exe"):
-        out += fixes_checks(f, b) + settings_checks(f, b) + theme_checks(f, b) + wineserver_checks(f, b) + addin_checks(f) + pyrevit_config_checks(f, b) + mcp_checks(f, b) + pyrevit_agent_checks(f, b)
+        out += fixes_checks(f, b) + settings_checks(f, b) + theme_checks(f, b) + wineserver_checks(f, b) + addin_checks(f) + pyrevit_config_checks(f, b) + mcp_checks(f, b) + pyrevit_agent_checks(f, b) + pymcp_checks(f, b)
     return out + logs_checks(f, b)
 
 

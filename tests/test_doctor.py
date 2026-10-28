@@ -589,6 +589,77 @@ class Bottle(Sandbox):
         self.assertEqual(self.by_id(dr.run_checks(self.facts))["addins.pdfprinter.gs"].status, "warn")
 
 
+class PythonMcp(Sandbox):
+    """The MCP server for Revit (Python), add-in python-mcp (doctor's mcp group, files only)."""
+    MODULE = "# revitmacos_serial v1\n"
+
+    def install(self):
+        j, b = os.path.join, self.b
+        e = j(b, dr.PYMCP_EXT_REL)
+        self.write(j(e, "startup.py"), "# startup-error.txt\nregister_routes()\n")
+        self.write(j(e, "revit_mcp/code_execution.py"), '"print": _printer(captured_output)\n')
+        self.write(j(e, "revit_mcp/views.py"), "Uri.UnescapeDataString\n")
+        self.write(j(e, "revit_mcp/pairing.py"), "except (IOError, OSError, ValueError, PairingError):\n")
+        srv = j(b, dr.PYREVIT_CLONE_REL, "pyrevitlib/pyrevit/routes/server")
+        self.write(j(srv, "server.py"), "return revitmacos_serial.dispatch(self, request, route_handler)\r\n")
+        self.write(j(srv, "revitmacos_serial.py"), self.MODULE)
+        self.write(j(self.root, "tools/pyrevit48/revitmacos_serial.py"), self.MODULE)
+        self.write(j(b, dr.PYREVIT_CONFIG_REL), '[routes]\nenabled = true\nhost = "127.0.0.1"\nport = 48884\n\n'
+                   '[revit-mcp-python.extension]\ndisabled = false\n')
+        self.write(j(self.data, "mcp/python-mcp", dr.PYMCP_COMMIT, "venv/bin/python3"), "#!/bin/sh\n", mode=0o755)
+        self.write(j(b, dr.PYMCP_LOCAL_REL, "pairing.dpapi"), "blob")
+
+    def mcp(self):
+        return {c.id: c for c in self.checks() if c.group == "mcp" and c.id.startswith("mcp.python")}
+
+    def test_nothing_without_the_extension(self):
+        self.assertEqual(self.mcp(), {})
+
+    def test_complete_is_ready(self):
+        self.install()
+        cs = self.mcp()
+        self.assertEqual(list(cs), ["mcp.python.ready"])
+        self.assertEqual(cs["mcp.python.ready"].title, "the MCP server for Revit (Python) is ready: ./revit mcp %d --server python" % self.year)
+
+    def test_each_piece(self):
+        j = os.path.join
+        fix = "./revit addins %d --only python-mcp --accept-eula python-mcp" % self.year
+        cases = [
+            (lambda: self.write(j(self.b, dr.PYMCP_EXT_REL, "revit_mcp/views.py"), "unquote\n"), "mcp.python.extension", "fail"),
+            (lambda: self.write(j(self.b, dr.PYREVIT_CLONE_REL, "pyrevitlib/pyrevit/routes/server/server.py"), "x\r\n"),
+             "mcp.python.serverpy", "fail"),
+            (lambda: self.write(j(self.b, dr.PYREVIT_CLONE_REL, "pyrevitlib/pyrevit/routes/server/revitmacos_serial.py"), "old"),
+             "mcp.python.module", "fail"),
+            (lambda: os.remove(j(self.b, dr.PYREVIT_CLONE_REL, "pyrevitlib/pyrevit/routes/server/revitmacos_serial.py")),
+             "mcp.python.module", "fail"),
+            (lambda: self.write(j(self.b, dr.PYREVIT_CONFIG_REL), "[routes]\nEnabled = True\nport = 9999\n"), "mcp.python.routes", "fail"),
+            (lambda: os.remove(j(self.data, "mcp/python-mcp", dr.PYMCP_COMMIT, "venv/bin/python3")), "mcp.python.venv", "fail"),
+            (lambda: self.write(j(self.b, dr.PYMCP_LOCAL_REL, "startup-error.txt"), "Traceback (x)\nSyntaxError\n"),
+             "mcp.python.startup", "fail"),
+            (lambda: os.remove(j(self.b, dr.PYMCP_LOCAL_REL, "pairing.dpapi")), "mcp.python.pairing", "info"),
+        ]
+        for spoil, cid, status in cases:
+            self.install()
+            spoil()
+            cs = self.mcp()
+            self.assertEqual(cs[cid].status, status, cid)
+            self.assertNotIn("mcp.python.ready", cs, cid)
+            if status == "fail" and cid != "mcp.python.startup":
+                self.assertEqual(cs[cid].fix, fix, cid)
+
+    def test_startup_error_names_its_first_line(self):
+        self.install()
+        self.write(os.path.join(self.b, dr.PYMCP_LOCAL_REL, "startup-error.txt"), "Traceback (x)\nSyntaxError\n")
+        self.assertIn("Traceback (x)", self.mcp()["mcp.python.startup"].title)
+
+    def test_reinstall_brings_ready_back(self):
+        self.install()
+        self.write(os.path.join(self.b, dr.PYREVIT_CLONE_REL, "pyrevitlib/pyrevit/routes/server/revitmacos_serial.py"), "old")
+        self.assertNotIn("mcp.python.ready", self.mcp())
+        self.install()
+        self.assertIn("mcp.python.ready", self.mcp())
+
+
 class Mcp(Sandbox):
     """The Revit MCP Server's files (doctor's mcp group); the sandbox year stands in for 2027."""
 
