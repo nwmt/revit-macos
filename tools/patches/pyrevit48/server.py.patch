@@ -1,0 +1,59 @@
+--- server.py.orig
++++ server.py
+@@ -17,6 +17,7 @@
+ from pyrevit.routes.server import base
+ from pyrevit.routes.server import handler
+ from pyrevit.routes.server import router
++from pyrevit.routes.server import revitmacos_serial   # revit-macos: one Revit request at a time
+ 
+ 
+ mlogger = get_logger(__name__)
+@@ -75,13 +76,20 @@
+                 if content_type == 'application/json':
+                     data = json.loads(data)
+ 
+-        return base.Request(
++        request = base.Request(
+             path=path,
+             method=method,
+             data=data,
+             params=router.extract_route_params(route.pattern, path)
+         )
++        # revit-macos: pass the HTTP headers on, as newer pyRevit does
++        for key, value in self.headers.items():
++            request.add_header(key, value)
++        return request
+ 
++    def make_response(self, status, data):   # revit-macos: for revitmacos_serial
++        return base.Response(status=status, data=data)
++
+     def _prepare_host_handler(self, request, route_handler):
+         # create the base Revit external event handler
+         # upon Raise(), finds and runs the appropriate func
+@@ -132,24 +140,8 @@
+ 
+         # if handler has uiapp in arguments, run in host api context
+         if handler.RequestHandler.wants_api_context(route_handler):
+-            # create a handler and event object in host
+-            req_hndlr, event_hndlr = \
+-                self._prepare_host_handler(request, route_handler)
+-
+-            # do the handling work
+-            # if request has callback url, raise the event handler and return
+-            #   the handler, when executed, will notify the callback url
+-            if request.callback_url:
+-                self._call_host_event(req_hndlr, event_hndlr)
+-                # acknowledge the request is accepted and return
+-                self._write_response(base.Response(status=base.NO_CONTENT))
+-            # otherwise run the handler and wait
+-            else:
+-                self._call_host_event_sync(req_hndlr, event_hndlr)
+-                # prepare response
+-                # grab response from req_hndlr.response
+-                # req_hndlr.response getter is thread-safe
+-                self._write_response(req_hndlr.response)
++            # revit-macos: the shared handler, one request at a time (revitmacos_serial.py)
++            return revitmacos_serial.dispatch(self, request, route_handler)
+         # otherwise run here
+         else:
+             # now run the method, and gret response
