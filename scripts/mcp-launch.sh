@@ -64,15 +64,16 @@ checks_python() { # the add-in, a running Revit, the extension loaded, Routes of
 python_token() { # the pairing token, decrypted once by dpapi.exe in the bottle within PYMCP_DPAPI_S (30) s; on the
   # deadline only that dpapi.exe ends. Stdout: the token (into a variable, never a file)
   local s="${PYMCP_DPAPI_S:-30}" pairing='C:\users\crossover\AppData\Local\RevitMCPPython\pairing.dpapi'
-  ( "$CX/bin/wine" --bottle "$NAME" "$PYMCP_DPAPI_WIN" unprotect "$pairing" 2>/dev/null </dev/null 7>&- 8>&- 9>&- &
+  ( "$CX/bin/wine" --bottle "$NAME" "$PYMCP_DPAPI_WIN" unprotect "$pairing" 2>/dev/null </dev/null 3>&- 7>&- 8>&- 9>&- &
     wp=$!
-    ( sleep "$s"; kill -TERM "$wp" 2>/dev/null; sleep 1; kill -KILL "$wp" 2>/dev/null ) >/dev/null 2>&1 7>&- 8>&- 9>&- &
+    # fd 3 is the client's stdout: a leftover sleep must not keep it open
+    ( sleep "$s"; kill -TERM "$wp" 2>/dev/null; sleep 1; kill -KILL "$wp" 2>/dev/null ) >/dev/null 2>&1 3>&- 7>&- 8>&- 9>&- &
     kp=$!; wait "$wp"; rc=$?; kill "$kp" 2>/dev/null; exit "$rc" )
 }
 python_status() { # $1 = token: GET /revit_mcp/status/ within PYMCP_STATUS_S (10) s; the token goes to curl on stdin
   local out rc code body
   out="$(printf 'header = "Authorization: Bearer %s"\n' "$1" \
-    | curl -s -m "${PYMCP_STATUS_S:-10}" -K - -w '\n%{http_code}' "http://127.0.0.1:$PORT/revit_mcp/status/" 2>/dev/null)"; rc=$?
+    | curl -q --noproxy '*' -s -m "${PYMCP_STATUS_S:-10}" -K - -w '\n%{http_code}' "http://127.0.0.1:$PORT/revit_mcp/status/" 2>/dev/null)"; rc=$?
   [ $rc != 28 ] || die "Revit does not answer: close any dialog in Revit, or run ./revit stop $YEAR$SFX."
   [ $rc = 0 ] || die "Unexpected answer from Revit (no answer, curl $rc)."
   code="${out##*$'\n'}"; body="${out%$'\n'*}"
@@ -80,7 +81,7 @@ python_status() { # $1 = token: GET /revit_mcp/status/ within PYMCP_STATUS_S (10
     200) printf '%s' "$body" | /usr/bin/perl -MJSON::PP -e 'local $/; my $j = eval { decode_json(<STDIN>) };
            exit(($j && ref $j eq "HASH" && ($j->{status} // "") eq "active") ? 0 : 1)' \
            || die "Unexpected answer from Revit (HTTP 200)." ;;
-    401) die "The pairing changed. In Revit: MCP → Bridge → Connect again, then try again." ;;
+    401) die "Revit refused the pairing it has just given: pyRevit Routes does not pass it on. Run ./revit addins $YEAR$SFX --only python-mcp --accept-eula python-mcp again, then restart Revit." ;;
     503) die "Open a model in Revit $YEAR." ;;
     404) die "The MCP extension is not loaded: reload pyRevit (pyRevit → Reload)." ;;
     *) die "Unexpected answer from Revit (HTTP $code)." ;;

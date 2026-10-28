@@ -17,6 +17,8 @@ addin_files() {
   return 0
 }
 addin_is_installed() {
-  [ -f "$B/$PYMCP_EXT_REL/startup.py" ] && [ -x "$(pymcp_venv_python)" ] \
-    && cmp -s "$ROOT/tools/pyrevit48/revitmacos_serial.py" "$(dirname "$(pymcp_server_py)")/revitmacos_serial.py"
+  # pyRevit installed again puts back its own server.py: then this add-in is not installed any more
+  [ -f "$B/$PYMCP_EXT_REL/startup.py" ] && pymcp_venv_works \
+    && cmp -s "$ROOT/tools/pyrevit48/revitmacos_serial.py" "$(dirname "$(pymcp_server_py)")/revitmacos_serial.py" \
+    && [ "$(pymcp_server_state "$(pymcp_server_py)")" = patched ]
 }

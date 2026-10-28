@@ -1135,9 +1135,11 @@ pm_install() { # $1 = bottle: what addin_is_installed and the launcher look at; 
   touch "$e/pyRevit/Extensions/revit-mcp-python.extension/startup.py"
   cp "$REPO/tools/pyrevit48/revitmacos_serial.py" "$R/tools/pyrevit48/"
   cp "$REPO/tools/pyrevit48/revitmacos_serial.py" "$e/pyRevit-Master/pyrevitlib/pyrevit/routes/server/"
+  printf '            return revitmacos_serial.dispatch(self, request, route_handler)\r\n' > "$e/pyRevit-Master/pyrevitlib/pyrevit/routes/server/server.py"
   echo blob > "$b/drive_c/users/crossover/AppData/Local/RevitMCPPython/pairing.dpapi"; echo "fake dpapi.exe" > "$R/build/dpapi/dpapi.exe"
   cat > "$v/python3" <<EOF
 #!/bin/bash
+[ "\$1 \$2" != "-I -c" ] || exit 0   # the launcher's "does the venv work" probe
 { printf '%s\n' "\$@"; stat -f %HT /dev/fd/4; echo "token=\$(cat <&4)"; [ -e /dev/fd/9 ] && echo FD9; echo "host=\${REVIT_HOST:-}"; } > "$T/py-argv"
 if [ -n "\${PYMCP_TEST_HOLD:-}" ]; then touch "\$PYMCP_TEST_HOLD.reached"; while [ -e "\$PYMCP_TEST_HOLD" ]; do sleep 0.1; done; fi
 exec 9>&-; cat
@@ -1195,11 +1197,18 @@ check "python: 6 no pairing → Connect" refused_pm "In Revit: MCP → Bridge �
 pm_world; echo fail > "$T/dpapi-mode"; pmr; check "python: 7 dpapi fails → Connect again" refused_pm "Connect again"
 pm_world; echo hang > "$T/dpapi-mode"; t0=$SECONDS; pmr
 check "python: 7 dpapi hangs → refused within its deadline, nothing left" eval 'refused_pm "Connect again" && [ $((SECONDS - t0)) -le 8 ] && ! sandboxed "dpapi-hang"'
-for c in "401|Connect again" "503|Open a model in Revit 2020" "404|reload pyRevit" "garbage|Unexpected answer from Revit" "hang|Revit does not answer"; do
+for c in "401|Revit refused the pairing" "503|Open a model in Revit 2020" "404|reload pyRevit" "garbage|Unexpected answer from Revit" "hang|Revit does not answer"; do
   pm_world; echo "${c%%|*}" > "$T/routes-mode"; t0=$SECONDS; pmr
   check "python: 8 status ${c%%|*} → ${c#*|}" eval 'refused_pm "${c#*|}" && [ $((SECONDS - t0)) -le 8 ]'
 done
 check "python: the status check sends the token, never in an argument" eval 'grep -qF "Authorization: Bearer $PMTOK" "$T/routes-log" && ! grep -rqF "$PMTOK" "$T/dpapi-argv"'
+pm_world; printf '            return base.Request(\r\n' > "$BOTTLES/rvt2020-a/drive_c/users/crossover/AppData/Roaming/pyRevit-Master/pyrevitlib/pyrevit/routes/server/server.py"; pmr
+check "python: 2 pyRevit installed again over the patch → the install command" refused_pm "./revit addins 2020 --only python-mcp --accept-eula python-mcp"
+pm_world; printf '{"jsonrpc":"2.0"}\n' > "$T/in"; MCP_IN="$T/in"; PMX=(http_proxy=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9); pmr
+check "python: a proxy in the environment does not get the status check" eval '[ "$RC" = 0 ] && grep -qF "GET /revit_mcp/status/" "$T/routes-log"'
+pm_world; echo 503 > "$T/routes-mode"; t0=$SECONDS
+(cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" PYMCP_ROUTES_PORT="$PMPORT" PYMCP_DPAPI_S=8 PYMCP_STATUS_S=2 /bin/bash "$R/revit" mcp 2020 --server python </dev/null 2>/dev/null | cat >/dev/null)
+check "python: a refusal after the token closes the client's stdout at once" eval '[ $((SECONDS - t0)) -le 5 ]'
 pm_world; MCP_ENV=(); run_mcp mcp 2020 --server python --write
 check "python: --write refused" eval '[ "$RC" != 0 ] && grep -qF "Changes are approved in Revit, one by one" <<<"$ERR" && mcp_stdout_empty'
 pm_world; run_mcp mcp 2020 --server nope; check "mcp: unknown server names python" eval 'grep -qF "Known: autodesk, pyrevit, python" <<<"$ERR"'

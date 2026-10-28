@@ -176,6 +176,8 @@ the bottle. Start Revit from `~/Applications` instead.
 - **"In Revit: MCP → Bridge → Connect":** pair once, as in [Install](#install-1).
 - **"The pairing changed" or "Connect again":** you clicked Connect again, so the assistant's copy is old: restart the
   server in the assistant (in Claude Code, `/mcp`, then reconnect `revit-python`).
+- **"Revit refused the pairing it has just given":** pyRevit was installed again and undid this add-in's change to it.
+  Run `./revit addins 2020 --only python-mcp --accept-eula python-mcp` again, then restart Revit.
 - **"Open a model in Revit 2020":** open a model, then reconnect the assistant.
 - **"The MCP extension failed to load in Revit":** pyRevit → Reload. If it says so again, run `./revit report 2020`
   and attach the report to an issue.

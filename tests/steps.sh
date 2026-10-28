@@ -1501,6 +1501,8 @@ check "pymcp_venv_ensure: pip with --require-hashes and --no-deps from the pinne
 check "pymcp_venv_ensure: unchanged requirements, no pip" not_called "-m pip"
 echo "# changed" >> "$R/tools/python-mcp-requirements.txt"; : > "$CALLS"; pymcp 'pymcp_venv_ensure'
 check "pymcp_venv_ensure: changed requirements, pip again" called "-m pip install"
+printf '#!/bin/bash\nexit 1\n' > "$D/mcp/python-mcp/6ca46b3ea96a8f7cce9894cf865d8f19ca2c549d/venv/bin/python3"; : > "$CALLS"; pymcp 'pymcp_venv_ensure'
+check "pymcp_venv_ensure: a venv whose Python no longer works is made again" called "-m pip install"
 reset; pymcp_world; PYMCP_ENV=(FAKE_PIP_FAIL=1); pymcp 'pymcp_venv_ensure'
 expect "pymcp_venv_ensure: a failing pip is a refusal" 1 "the Python packages could not be installed"
 check "pymcp_venv_ensure: no half venv left" test ! -e "$D/mcp/python-mcp/6ca46b3ea96a8f7cce9894cf865d8f19ca2c549d/venv"

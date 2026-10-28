@@ -9,6 +9,7 @@ PYMCP_LOCAL_REL="drive_c/users/crossover/AppData/Local/RevitMCPPython"   # the e
 
 pymcp_dir() { echo "$DATA/mcp/python-mcp/$PYMCP_COMMIT"; }   # venv/ and src/ (the patched upstream sources)
 pymcp_venv_python() { echo "$(pymcp_dir)/venv/bin/python3"; }
+pymcp_venv_works() { "$(pymcp_venv_python)" -I -c "import mcp" >/dev/null 2>&1; }   # also after the app's Python changed
 
 pymcp_python() { # the python3 to build the venv from: the app's own, or in a clone the same pinned build, downloaded once
   # into $DATA/mcp/python-<version> (sha256 from app/tools.sh; in a clone $DATA is the repo, whose tools/ is source).
@@ -35,7 +36,7 @@ pymcp_venv_ensure() { # $(pymcp_dir)/venv with the pinned packages; rebuilt only
   local py v req sha out
   py="$(pymcp_python)" || { echo "$py"; return 1; }
   v="$(pymcp_dir)/venv"; req="$ROOT/tools/python-mcp-requirements.txt"; sha="$(shasum -a 256 "$req" | cut -d' ' -f1)"
-  [ -x "$v/bin/python3" ] && [ "$(cat "$v/.req-sha" 2>/dev/null)" = "$sha" ] && return 0
+  [ "$(cat "$v/.req-sha" 2>/dev/null)" = "$sha" ] && pymcp_venv_works && return 0
   mkdir -p "$(dirname "$v")" && rm -rf "$v.new" || { echo "cannot write $(dirname "$v")"; return 1; }
   out="$("$py" -m venv "$v.new" 2>&1)" || { rm -rf "$v.new"; echo "cannot make the venv: $(tail -1 <<<"$out")"; return 1; }
   out="$("$v.new/bin/python3" -m pip install -q --disable-pip-version-check --require-hashes --no-deps -r "$req" 2>&1)" \
@@ -47,7 +48,7 @@ pymcp_server_py() { echo "$B/$PYREVIT_CLONE_REL/pyrevitlib/pyrevit/routes/server
 pymcp_server_state() { # $1 = server.py: original (pyRevit 4.8.12 as installed), patched (ours applied) or foreign
   [ -f "$1" ] || { echo foreign; return 0; }
   if [ "$(shasum -a 256 "$1" | cut -d' ' -f1)" = "$PYREVIT48_SERVER_SHA" ]; then echo original
-  elif patch --binary -s -f -R --dry-run "$1" "$ROOT/tools/patches/pyrevit48/server.py.patch" >/dev/null 2>&1; then echo patched
+  elif grep -qF "revitmacos_serial.dispatch(self, request, route_handler)" "$1"; then echo patched   # doctor: the same mark
   else echo foreign; fi
 }
 
