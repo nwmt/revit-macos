@@ -353,5 +353,65 @@ if sign_tools "$T/stools" && sign_bundle "$SB" "$T/stools"; then
   check "dmg: the .sha256 checks out" eval '(cd "$T" && shasum -a 256 -c t.dmg.sha256 >/dev/null)'
 else fail "sign: fixture" "cc, lipo, ar or make-bundle failed"; fi
 
+# ---- python-mcp in the app: the venv from the app's own Python, outside the bundle; an MCP exchange through it ----
+PMC=6ca46b3ea96a8f7cce9894cf865d8f19ca2c549d; PMDATA="$T/pm data"; PMTOK=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+PMTAR="$(bash "$REPO/tests/fixtures.sh" "https://github.com/mcp-servers-for-revit/mcp-server-for-revit-python/archive/$PMC.tar.gz" 6406be6574efe9519b34110ccf04d1499bb47f0e3fc36ba902a30b9575e1f0f6 python-mcp-6ca46b3.tar.gz)"; pmrc=$?
+if [ "$pmrc" = 77 ] || ! curl -sfI --max-time 10 https://pypi.org/simple/ >/dev/null 2>&1; then echo "SKIP python-mcp in the app: no network"
+else
+  PMA="$T/out/PM.app"; PME="$PMA/Contents/Resources/engine"; PMR="$PMA/Contents/Resources"
+  fake_bundle "$PMA"; chmod -R a-w "$PMA"; touch "$T/before-pm"; sleep 1; : > "$CALLS"
+  OUT="$(cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_DATA="$PMDATA" PATH="$BASEPATH" ROOT="$PME" /bin/bash -c \
+    '. "$ROOT/scripts/lib/common.sh"; . "$ROOT/scripts/lib/pymcp.sh"; pymcp_venv_ensure && pymcp_venv_python' 2>&1)"; RC=$?
+  expect "python-mcp in the app: the venv under the app's data folder" 0 "$PMDATA/mcp/python-mcp/$PMC/venv/bin/python3"
+  check "python-mcp in the app: made from the app's Python" grep -qF "$PMR/python/bin/python3 -m venv" "$CALLS"
+  check "python-mcp in the app: nothing written into the app" test -z "$(find "$PMA" -newer "$T/before-pm" 2>/dev/null)"
+  mkdir -p "$T/pmsrc"; tar xzf "$PMTAR" -C "$T/pmsrc"; PMS="$T/pmsrc/mcp-server-for-revit-python-$PMC"
+  for p in "$REPO"/tools/patches/python-mcp/*.patch; do patch -p1 -s --forward -d "$PMS" -i "$p" >/dev/null || fail "python-mcp in the app: patch $p" ""; done
+  if lsof -nP -iTCP:48884 -sTCP:LISTEN >/dev/null 2>&1; then echo "SKIP python-mcp in the app: the MCP exchange (127.0.0.1:48884 is taken: a Revit is open)"
+  else
+    OUT="$("$HOST_PY" -I - "$PMDATA/mcp/python-mcp/$PMC/venv/bin/python3" "$PME/tools/python_mcp_run.py" "$PMS" "$PMTOK" <<'PY' 2>&1
+import http.server, json, os, subprocess, sys, threading, time
+py, wrapper, src, tok = sys.argv[1:5]
+class Routes(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        ok = self.headers.get("Authorization") == "Bearer " + tok
+        body = json.dumps({"status": "active", "health": "healthy", "api_name": "revit_mcp", "revit_available": True,
+                           "document_title": "sample"} if ok else {"error": "pairing"}).encode()
+        self.send_response(200 if ok else 401); self.send_header("Content-Type", "application/json"); self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, *a):
+        pass
+srv = http.server.HTTPServer(("127.0.0.1", 48884), Routes); threading.Thread(target=srv.serve_forever, daemon=True).start()
+r, w = os.pipe(); os.write(w, tok.encode()); os.close(w); lock = os.open(os.devnull, os.O_RDONLY)
+env = {k: v for k, v in os.environ.items() if k not in ("REVIT_HOST", "REVIT_PORT")}
+p = subprocess.Popen([py, "-I", wrapper, "revit-macos-python-mcp", "/x/rvt2020-a", src, "--token-fd", str(r), "--lock-fd", str(lock)],
+                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, pass_fds=(r, lock), env=env, text=True)
+os.close(r)
+def send(m):
+    p.stdin.write(json.dumps(m) + "\n"); p.stdin.flush()
+def recv(i):
+    while True:
+        line = p.stdout.readline()
+        if not line:
+            sys.exit("no answer to %d" % i)
+        m = json.loads(line)
+        if m.get("id") == i:
+            return m
+send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+      "clientInfo": {"name": "test", "version": "1"}}})
+print("init", recv(1)["result"]["serverInfo"]["name"])
+send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+send({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "get_revit_status", "arguments": {}}})
+print("call", recv(2)["result"]["content"][0]["text"].replace("\n", " | "))
+p.stdin.close(); p.wait(10)
+PY
+)"; RC=$?
+    expect "python-mcp in the app: initialize through the bundle's wrapper" 0 "init Revit MCP Server"
+    expect "python-mcp in the app: a tool call reaches Routes with the token" 0 "Status: active"
+    check "python-mcp in the app: still nothing written into the app" test -z "$(find "$PMA" -newer "$T/before-pm" 2>/dev/null)"
+  fi
+  chmod -R u+w "$PMA"
+fi
+
 echo "$((n - fails))/$n passed"
 [ "$fails" = 0 ]
