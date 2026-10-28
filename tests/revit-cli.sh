@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Tests for ./revit and the argument checks of install.sh, in a sandbox: a fake HOME, a fake CrossOver
 # (REVIT_CX) and stub install scripts. Runs them under /bin/bash 3.2, as on a user's Mac. Nothing real is touched.
-# Usage: tests/revit-cli.sh
+# Usage: tests/revit-cli.sh (TEST_PART=1 or 2: one half of it, see below)
 set -uo pipefail
 # every control variable of the engine: none of the caller's may reach the sandbox (a REVIT_DATA or REVIT_SOURCE_LIST
 # could point at real folders); tests set what they need after this
@@ -21,8 +21,11 @@ BOTTLES="$H/Library/Application Support/CrossOver/Bottles"
 PIDS=""
 SRV="$TOP/srv bin/wineserver"   # a fake wineserver: a copy of perl, so that its executable (ps comm) is a wineserver
 mkdir -p "${SRV%/*}" && cp /usr/bin/perl "$SRV" || { echo "fake wineserver setup failed" >&2; exit 1; }
-stop_fakes() { # the fake processes and their children (sleep), and wait so none is left for the next test's pgrep
-  local p; for p in $PIDS; do pkill -P "$p" 2>/dev/null; kill "$p" 2>/dev/null; wait "$p" 2>/dev/null; done; PIDS=""
+stop_fakes() { # the fake processes and their children (sleep), and wait so none is left for the next test's pgrep; a fake
+  # that ignores TERM (winedevice.exe) gets KILL after 1 s
+  local p i; for p in $PIDS; do pkill -P "$p" 2>/dev/null; kill "$p" 2>/dev/null
+    for i in 1 2 3 4 5 6 7 8 9 10; do case "$(ps -o stat= -p "$p" 2>/dev/null)" in ""|Z*) break ;; esac; sleep 0.1; done
+    kill -KILL "$p" 2>/dev/null; wait "$p" 2>/dev/null; done; PIDS=""
 }
 trap 'stop_fakes; chmod -R u+w "$TOP" 2>/dev/null; rm -rf "$TOP"' EXIT
 n=0; fails=0
@@ -104,40 +107,42 @@ cxapp() { # $1 = path under ~/Applications/CrossOver, $2 = bottle: an app CrossO
   printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CXHelperAppBottleName</key><string>%s</string></dict></plist>\n' \
     "$2" > "$H/Applications/CrossOver/$1.app/Contents/Info.plist"
 }
+RDY="$TOP/ready"   # a fake writes it (perl, path in $ENV{RDY}) once it holds what it should; fake_ready waits for it
+fake_ready() { local i; for i in $(seq 1 100); do [ -e "$RDY" ] && break; sleep 0.05; done; rm -f "$RDY"; }   # at most 5 s
 fake_revit() { # $1 = bottle, $2 = year: a process that looks like Revit.exe and holds a file open in that bottle, and
   # the bottle's wineserver beside it (a Revit always has one: without it, Revit would be a leftover). Revit starts
   # last: callers take its PID from $!
   touch "$BOTTLES/$1/drive_c/open.tmp"
-  "$SRV" -e 'open(my $f, "<", $ARGV[0]) or die; sleep 60' "$BOTTLES/$1/drive_c/open.tmp" &
-  PIDS="$PIDS $!"
-  perl -e 'open(my $f, "<", $ARGV[0]) or die; sleep 60' "$BOTTLES/$1/drive_c/open.tmp" \
+  RDY="$RDY" "$SRV" -e 'open(my $f, "<", $ARGV[0]) or die; open(my $r, ">", $ENV{RDY}) and close $r; sleep 60' "$BOTTLES/$1/drive_c/open.tmp" &
+  PIDS="$PIDS $!"; fake_ready
+  RDY="$RDY" perl -e 'open(my $f, "<", $ARGV[0]) or die; open(my $r, ">", $ENV{RDY}) and close $r; sleep 60' "$BOTTLES/$1/drive_c/open.tmp" \
     "C:\\Program Files\\Autodesk\\Revit $2\\Revit.exe" &
-  PIDS="$PIDS $!"; sleep 1
+  PIDS="$PIDS $!"; fake_ready
 }
 fake_mcphost() { # $1 = bottle: a process that looks like our MCP launcher (mcphost.exe) and holds a file open there
   touch "$BOTTLES/$1/drive_c/mcp.tmp"
-  perl -e 'open(my $f, "<", $ARGV[0]) or die; sleep 60' "$BOTTLES/$1/drive_c/mcp.tmp" \
+  RDY="$RDY" perl -e 'open(my $f, "<", $ARGV[0]) or die; open(my $r, ">", $ENV{RDY}) and close $r; sleep 60' "$BOTTLES/$1/drive_c/mcp.tmp" \
     "C:\\Program Files\\Autodesk\\Revit 2027 MCP Server Write-Tools Technical Preview\\mcphost.exe" --launch t &
-  PIDS="$PIDS $!"; sleep 1
+  PIDS="$PIDS $!"; fake_ready
 }
 fake_leftover() { # $1 = bottle: a Windows program left behind by a wineserver that ended (winedevice.exe holds the
   # bottle's folder and, like the real one, ignores SIGTERM). Its PID in LEFT
   mkdir -p "$BOTTLES/$1/drive_c/windows"; touch "$BOTTLES/$1/drive_c/windows/held"
-  perl -e '$SIG{TERM} = "IGNORE"; open(my $f, "<", $ARGV[0]) or die; sleep 60' "$BOTTLES/$1/drive_c/windows/held" \
+  RDY="$RDY" perl -e '$SIG{TERM} = "IGNORE"; open(my $f, "<", $ARGV[0]) or die; open(my $r, ">", $ENV{RDY}) and close $r; sleep 60' "$BOTTLES/$1/drive_c/windows/held" \
     'C:\windows\system32\winedevice.exe' &
-  LEFT=$!; PIDS="$PIDS $LEFT"; sleep 1
+  LEFT=$!; PIDS="$PIDS $LEFT"; fake_ready
 }
 fake_watch() { # $1 = bottle, $2 = the bottle path it names: watch-server as the Revit app starts it (perl, its folder in
   # the bottle), naming a bottle called wineserver
   mkdir -p "$BOTTLES/$1/revit-macos"; touch "$BOTTLES/$1/revit-macos/watch-server.pl"
-  (cd "$BOTTLES/$1/revit-macos" && exec perl -e 'sleep 60' "$BOTTLES/$1/revit-macos/watch-server.pl" "$CXF" "$2") &
-  PIDS="$PIDS $!"; sleep 1
+  (cd "$BOTTLES/$1/revit-macos" && exec env RDY="$RDY" perl -e 'open(my $r, ">", $ENV{RDY}) and close $r; sleep 60' "$BOTTLES/$1/revit-macos/watch-server.pl" "$CXF" "$2") &
+  PIDS="$PIDS $!"; fake_ready
 }
 fake_lock() { # $1 = owner text: a process that holds the repo's lock as a running script would
   mkdir -p "$H/Library/Application Support/revit-macos"
-  perl -MFcntl=:flock -e 'open(my $f, ">>", $ARGV[0]) or die; flock($f, LOCK_EX) or die;
-    open(my $o, ">", "$ARGV[0].owner") or die; print $o "$ARGV[1]\n"; close $o; sleep 60' "$H/Library/Application Support/revit-macos/lock" "$1" &
-  PIDS="$PIDS $!"; sleep 1
+  RDY="$RDY" perl -MFcntl=:flock -e 'open(my $f, ">>", $ARGV[0]) or die; flock($f, LOCK_EX) or die;
+    open(my $o, ">", "$ARGV[0].owner") or die; print $o "$ARGV[1]\n"; close $o; open(my $r, ">", $ENV{RDY}) and close $r; sleep 60' "$H/Library/Application Support/revit-macos/lock" "$1" &
+  PIDS="$PIDS $!"; fake_ready
 }
 run() { # $1 = what to type at the prompt; rest = ./revit arguments. Sets OUT and RC.
   local input="$1"; shift; : > "$CALLS"
@@ -164,6 +169,11 @@ check() { local name="$1"; shift; if "$@"; then ok "$name"; else fail "$name" "f
 called()     { grep -qF -- "$1" "$CALLS"; }
 not_called() { ! grep -qF -- "$1" "$CALLS"; }
 
+# TEST_PART=1 runs the tests up to ./revit mcp --server pyrevit, TEST_PART=2 the rest (CI runs the halves side by side);
+# unset: all of them
+case "${TEST_PART:-}" in ""|1|2) ;; *) echo "TEST_PART is 1, 2 or unset, not ${TEST_PART}" >&2; exit 2 ;; esac
+part() { [ -z "${TEST_PART:-}" ] || [ "$TEST_PART" = "$1" ]; }
+if part 1; then
 # ---- arguments ----
 reset; run "";                       expect "no arguments print the help" 0 "Usage: ./revit <command> <year> [bottle]"
 reset; run "" frobnicate 2024;       expect "unknown command" 1 "Unknown command: frobnicate"
@@ -883,6 +893,7 @@ check "clone: cache: its unpacked folder that bottle was installed from is kept"
 run_in "$AD" "" cache clear --yes
 check "app: cache clear --yes frees its own, the clone's stays" \
   eval '[ "$RC" = 0 ] && [ ! -e "$AD/installers/extracted/revit2025" ] && [ -f "$R/installers/extracted/revit2025/setup.xml" ]'
+fi
 # ---- ./revit mcp (scripts/mcp-launch.sh) ----
 MCPW="Revit 2027 MCP Server Write-Tools Technical Preview"; MCPE="Revit 2027 MCP Server Experimental-Tools Technical Preview"
 mcp_install() { # $1 = bottle, $2 = variant folder: a complete MCP Server install (fixture files, our shims from build/)
@@ -949,6 +960,7 @@ revit_alive() { sandboxed 'Revit 2027.Revit.exe'; }   # the fake Revit (it holds
 lock_is_free() { perl -MFcntl=:flock -e 'open(my $f, ">>", $ARGV[0]) or exit 0; flock($f, LOCK_EX | LOCK_NB) or exit 1' "$H/Library/Application Support/revit-macos/lock"; }
 mcp_stdout_empty() { [ -z "$OUT" ]; }
 
+if part 1; then
 reset; run_mcp mcp 2027; check "mcp: no bottle → refused, stdout empty" eval '[ "$RC" != 0 ] && grep -q "There is no bottle rvt2027-a" <<<"$ERR" && mcp_stdout_empty'
 reset; bottle rvt2027-a 2027 2027; mcp_install rvt2027-a "$MCPW"; mcp_cx; run_mcp mcp 2027
 check "mcp: no Revit → open Revit first" eval '[ "$RC" != 0 ] && grep -qx "Open Revit 2027 with a model first." <<<"$ERR" && mcp_stdout_empty'
@@ -1027,6 +1039,8 @@ reset; bottle rvt2027-a 2027 2027; run "" addins 2027 --only revitmcp
 check "addins --only revitmcp without consent: the notice, nothing runs" eval '[ "$RC" = 1 ] && grep -qF "turns ADP on in this bottle. To accept, add --accept-eula revitmcp: ./revit addins 2027 --only revitmcp --accept-eula revitmcp" <<<"$OUT" && ! grep -q run-steps "$CALLS"'
 reset; bottle rvt2027-a 2027 2027; run "" addins 2027 --only revitmcp --accept-eula revitmcp
 check "addins --only revitmcp with consent: the step runs with it" eval '[ "$RC" = 0 ] && called "run-steps.sh 2027 rvt2027-a revitmcp check |"'
+fi
+if part 2; then
 # ---- ./revit mcp --server pyrevit (pyRevit's agent through mcphost --plain) ----
 PYEXE='C:\users\crossover\AppData\Roaming\pyRevit-Master\bin\pyrevit.exe'; PLAINH='C:\ProgramData\revit-macos\mcphost\mcphost.exe'
 PYA="$BOTTLES/rvt2027-a/drive_c/users/crossover/AppData/Roaming"; PYH="$BOTTLES/rvt2027-a/drive_c/ProgramData/revit-macos/mcphost/mcphost.exe"
@@ -1163,9 +1177,9 @@ EOF
 pm_routes() { # $1 = bottle, $2 = address (127.0.0.1 | 0.0.0.0), $3 = exe ($SRV: a wineserver of the bottle): a fake
   # pyRevit Routes on $PMPORT; $T/routes-mode: 200 (default) | 401 | 503 | 404 | hang | garbage
   touch "$BOTTLES/$1/drive_c/routes.tmp"
-  "${3:-$SRV}" -MIO::Socket::INET -e '
+  RDY="$RDY" "${3:-$SRV}" -MIO::Socket::INET -e '
     open(my $f, "<", $ARGV[0]) or die; my $s = IO::Socket::INET->new(LocalAddr => $ARGV[1], LocalPort => $ARGV[2],
-      Listen => 5, ReuseAddr => 1) or die; while (my $c = $s->accept) { my $h = ""; while (<$c>) { $h .= $_; last if /^\r?$/ }
+      Listen => 5, ReuseAddr => 1) or die; open(my $r, ">", $ENV{RDY}) and close $r; while (my $c = $s->accept) { my $h = ""; while (<$c>) { $h .= $_; last if /^\r?$/ }
       open(my $m, "<", $ARGV[3]); my $mode = $m ? <$m> : "200"; $mode = "200" unless defined $mode; chomp $mode;
       open(my $l, ">>", $ARGV[4]); print $l $h; close $l;
       if ($mode eq "hang") { sleep 30; next }
@@ -1173,7 +1187,7 @@ pm_routes() { # $1 = bottle, $2 = address (127.0.0.1 | 0.0.0.0), $3 = exe ($SRV:
       my $b = $mode eq "200" ? q({"status": "active", "health": "healthy", "api_name": "revit_mcp"}) : q({"error": "x"});
       print $c "HTTP/1.0 $mode X\r\nContent-Type: application/json\r\n\r\n$b"; close $c }' \
     "$BOTTLES/$1/drive_c/routes.tmp" "$2" "$PMPORT" "$T/routes-mode" "$T/routes-log" &
-  PIDS="$PIDS $!"; sleep 1
+  PIDS="$PIDS $!"; fake_ready
 }
 pm_world() { # $1 = bottle (rvt2020-a): installed add-in, Revit running, Routes answering, dpapi giving the token
   reset; bottle "${1:-rvt2020-a}" 2020 2020; pm_install "${1:-rvt2020-a}"; pm_cx; fake_revit "${1:-rvt2020-a}" 2020
@@ -1394,6 +1408,7 @@ for m in mac light dark junk; do
   want="$m"; [ "$m" = junk ] && want=""
   check "status: theme_mode $m" grep -qF "\"theme_mode\":\"$want\"}" <<<"$OUT"
 done
+fi
 
 # ---- end ----
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]
