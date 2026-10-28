@@ -1,0 +1,17 @@
+--- a/revit_mcp/views.py	2026-10-28 14:43:56
++++ b/revit_mcp/views.py	2026-10-28 14:43:56
+@@ -18,7 +18,14 @@
+     from urllib.parse import unquote
+ except ImportError:
+     from urllib import unquote
++import sys
++if sys.platform == "cli":
++    # IronPython 2.7's urllib.unquote recurses forever on a string with % (str is unicode there), which hangs Revit
++    from System import Uri
+ 
++    def unquote(s):
++        return Uri.UnescapeDataString(s)
++
+ from .utils import normalize_string, get_element_name, element_id_value
+ 
+ logger = logging.getLogger(__name__)

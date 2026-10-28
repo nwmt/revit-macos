@@ -1,0 +1,11 @@
+--- a/revit_mcp/pairing.py	2026-10-28 14:43:56
++++ b/revit_mcp/pairing.py	2026-10-28 14:43:56
+@@ -93,7 +93,7 @@
+         if len(token) != 64 or any(c not in "0123456789abcdef" for c in token):
+             raise ValueError("Invalid pairing data")
+         return token
+-    except (OSError, ValueError, PairingError):
++    except (IOError, OSError, ValueError, PairingError):
+         raise PairingError("Use Revit's MCP > Bridge > Connect button to consent and pair this Windows user.")
+ 
+ 

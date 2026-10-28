@@ -1,0 +1,36 @@
+--- a/startup.py	2026-10-28 14:43:56
++++ b/startup.py	2026-10-28 14:43:56
+@@ -52,5 +52,31 @@
+         raise
+ 
+ 
+-# Register all routes when the extension loads
+-register_routes()
++def _startup_error_path():
++    import os
++    return os.path.join(os.environ.get("LOCALAPPDATA", ""), "RevitMCPPython", "startup-error.txt")
++
++
++# Register all routes when the extension loads. A failure is written to startup-error.txt instead of raised: raising
++# ends pyRevit's load before its Routes server starts, and pyRevit 4.8 cannot show the error (its output window fails
++# under Wine). A successful load removes the file.
++try:
++    register_routes()
++except Exception:
++    import os
++    import traceback
++    try:
++        path = _startup_error_path()
++        if not os.path.isdir(os.path.dirname(path)):
++            os.makedirs(os.path.dirname(path))
++        with open(path, "w") as stream:
++            stream.write(traceback.format_exc())
++    except Exception:
++        pass
++else:
++    try:
++        import os
++        if os.path.isfile(_startup_error_path()):
++            os.remove(_startup_error_path())
++    except Exception:
++        pass
