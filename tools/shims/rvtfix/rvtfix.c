@@ -61,6 +61,15 @@
  *    Only in Revit.exe. The first show of an already maximized window comes before the hook: not fixed.
  *    RVTFIX_MAXPOS set and empty disables.
  *
+ * 8. Web panels go blank (Project Browser 2027: one row left in an empty panel, all of it back when the mouse passes):
+ *    Revit puts the WebView2 host window (Chrome_WidgetWin_0) into a Static with WS_EX_TRANSPARENT. Wine does not clip
+ *    such a child out of its parent's drawing (WS_CLIPCHILDREN skips it), so when the WPF pane or the docking windows
+ *    above it repaint (a theme change does), they paint over the browser's area. The browser window belongs to another
+ *    process and gets no WM_PAINT; CrossOver shows only what the browser draws again by itself.
+ *    Fix: when a Chrome_WidgetWin_* window of ours is created, shown or gets a new parent (WinEvent hook in its thread),
+ *    clear WS_EX_TRANSPARENT on its ancestors of this process. WindowFromPoint still finds the browser's window.
+ *    RVTFIX_WV2_OPAQUE set and empty disables.
+ *
  * 4 and 5 run when the DLL loads (LdrRegisterDllNotification), or at once if it is already loaded.
  *
  * Diagnostics: OutputDebugString with the "[rvtfix]" prefix (CX_DEBUGMSG=+debugstr).
@@ -430,6 +439,43 @@ static void fix_maxpos(HINSTANCE inst)
         trace("maximize: no WinEvent hook (%lu)\n", GetLastError());
 }
 
+/* --- 8. WebView2 host window: no WS_EX_TRANSPARENT above it --- */
+static int opaque_traces;
+
+static void CALLBACK opaque_on_event(HWINEVENTHOOK hook, DWORD ev, HWND hwnd, LONG obj, LONG child, DWORD tid, DWORD time)
+{
+    char cls[32];
+    HWND p, desk = GetDesktopWindow();
+    int depth = 0;
+    if (obj != OBJID_WINDOW || child != CHILDID_SELF || !hwnd || foreign(hwnd)) return;
+    if (!GetClassNameA(hwnd, cls, sizeof(cls))) return;
+    cls[17] = 0;   /* the prefix: "Chrome_WidgetWin_" is 17 characters */
+    if (lstrcmpA(cls, "Chrome_WidgetWin_")) return;
+    for (p = GetAncestor(hwnd, GA_PARENT); p && p != desk && depth++ < 32 && !foreign(p); p = GetAncestor(p, GA_PARENT)) {
+        LONG_PTR ex = GetWindowLongPtrW(p, GWL_EXSTYLE);
+        if (!(ex & WS_EX_TRANSPARENT)) continue;
+        SetWindowLongPtrW(p, GWL_EXSTYLE, ex & ~WS_EX_TRANSPARENT);
+        if (opaque_traces++ < 16) trace("WebView2 host %p: WS_EX_TRANSPARENT cleared on its ancestor %p\n", hwnd, p);
+    }
+}
+
+static void fix_opaque(HINSTANCE inst)
+{
+    WCHAR env[8];
+    SetLastError(0);   /* an empty variable leaves the last error as it was */
+    if (!GetEnvironmentVariableW(L"RVTFIX_WV2_OPAQUE", env, 8) && GetLastError() != ERROR_ENVVAR_NOT_FOUND) {
+        trace("WebView2 host: disabled (RVTFIX_WV2_OPAQUE is empty)\n");
+        return;
+    }
+    if (SetWinEventHook(EVENT_OBJECT_CREATE, EVENT_OBJECT_SHOW, inst, opaque_on_event, GetCurrentProcessId(), 0,
+                        WINEVENT_INCONTEXT) &&
+        SetWinEventHook(EVENT_OBJECT_PARENTCHANGE, EVENT_OBJECT_PARENTCHANGE, inst, opaque_on_event, GetCurrentProcessId(), 0,
+                        WINEVENT_INCONTEXT))
+        trace("WebView2 host: no WS_EX_TRANSPARENT above it\n");
+    else
+        trace("WebView2 host: no WinEvent hook (%lu)\n", GetLastError());
+}
+
 static void fix_dragdrop(void)
 {
     HMODULE ole = LoadLibraryW(L"ole32.dll");
@@ -455,6 +501,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
         fix_cef();
         fix_autodesk();
         fix_maxpos(inst);
+        fix_opaque(inst);
         watch_dlls(); /* under the loader lock: no DLL loads between the checks above and this */
     }
     return TRUE;
