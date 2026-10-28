@@ -569,5 +569,69 @@ class PyrevitIni(Tmp):
         self.assertEqual(run("pyrevit_ini", "set", self.path("none.ini"), "routes", "port", "1").returncode, 1)
 
 
+class PythonMcpRun(Tmp):
+    """tools/python_mcp_run.py: runs upstream main.py with a fixed endpoint and the pairing token from a pipe."""
+    TOKEN = "0123456789abcdef" * 4
+    MAIN = (
+        "import os, sys, json\n"
+        "import revit_mcp.pairing as p\n"
+        "lock = int(os.environ.get('TEST_LOCK_FD', '-1'))\n"
+        "try:\n    os.fstat(lock); closed = False\nexcept OSError:\n    closed = True\n"
+        "sys.stderr.write(json.dumps({'host': os.environ.get('REVIT_HOST'), 'port': os.environ.get('REVIT_PORT'),\n"
+        "    'token': p.get_token(), 'argv': sys.argv, 'environ': dict(os.environ), 'lock_closed': closed}) + '\\n')\n"
+        "print(json.dumps({'jsonrpc': '2.0'}))\n")
+
+    def setUp(self):
+        super().setUp()
+        os.makedirs(self.path("src/revit_mcp"))
+        open(self.path("src/revit_mcp/__init__.py"), "w").close()
+        with open(self.path("src/revit_mcp/pairing.py"), "w") as f:
+            f.write("def get_token():\n    raise RuntimeError('DPAPI')\n")
+        with open(self.path("src/main.py"), "w") as f:
+            f.write(self.MAIN)
+
+    def wrap(self, token=None, env=None):
+        r, w = os.pipe()
+        os.write(w, ((self.TOKEN if token is None else token) + "\n").encode())
+        os.close(w)
+        lock = os.open(self.path("lock"), os.O_CREAT | os.O_RDWR)
+        e = dict(os.environ, HOME=self.path("home"), TEST_LOCK_FD=str(lock), **(env or {}))
+        try:
+            p = subprocess.run([sys.executable, "-I", os.path.join(TOOLS, "python_mcp_run.py"), "revit-macos-python-mcp",
+                                "/x/rvt2020-a", self.path("src"), "--token-fd", str(r), "--lock-fd", str(lock)],
+                               capture_output=True, text=True, pass_fds=(r, lock), env=e, timeout=30)
+        finally:
+            os.close(r)
+            os.close(lock)
+        info = None
+        for line in p.stderr.splitlines():
+            if line.startswith("{"):
+                info = json.loads(line)
+        return p, info
+
+    def test_endpoint_fixed_despite_env(self):
+        p, info = self.wrap(env={"REVIT_HOST": "localhost", "REVIT_PORT": "1"})
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual((info["host"], info["port"]), ("127.0.0.1", "48884"))
+
+    def test_token_not_in_argv_or_environ(self):
+        p, info = self.wrap()
+        self.assertEqual(info["token"], self.TOKEN)
+        self.assertNotIn(self.TOKEN, json.dumps(info["argv"]) + json.dumps(info["environ"]))
+
+    def test_bad_token_exit_2_stdout_empty(self):
+        for bad in ("", "xyz", self.TOKEN.upper()):
+            p, info = self.wrap(token=bad)
+            self.assertEqual((p.returncode, p.stdout, info), (2, "", None), bad)
+
+    def test_lock_fd_closed_before_main(self):
+        p, info = self.wrap()
+        self.assertTrue(info["lock_closed"])
+
+    def test_stdout_only_from_main(self):
+        p, info = self.wrap()
+        self.assertEqual(p.stdout, '{"jsonrpc": "2.0"}\n')
+
+
 if __name__ == "__main__":
     unittest.main()
