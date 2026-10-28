@@ -749,6 +749,21 @@ expect "revitlookup 2027 without its installer says where it goes" 1 "revitlooku
 check "revitlookup 2027: the log names its file" grep -q "RevitLookup-2027.0.4-SingleUser.msi" "$RUN/revitlookup.log"
 reset; mkbottle rvt2024-t 2024 2024; run_steps 2024 rvt2024-t enscape
 expect "enscape: not set up for 2024" 1 "enscape"
+pyrevit_bottle() { # $1 = year, $2 = installer under installers/addins/: bottle rvt<year>-t whose fake installer leaves
+  # the admin config in ProgramData, as pyRevit 4.8's does. Sets PYU (the user config) and PYA (the admin config)
+  local pd="$BOTTLES/rvt$1-t/drive_c/ProgramData/pyRevit"
+  mkbottle "rvt$1-t" "$1" "$1"; mkdir -p "$R/installers/addins/$(dirname "$2")"; touch "$R/installers/addins/$2"
+  rule "pyRevit-setup.exe" 0 "mkdir -p '$pd' && echo admin > '$pd/pyRevit_config.ini'"
+  PYA="$pd/pyRevit_config.ini"; PYU="$BOTTLES/rvt$1-t/drive_c/users/crossover/AppData/Roaming/pyRevit/pyRevit_config.ini"
+}
+reset; pyrevit_bottle 2020 pyrevit48/pyRevit_4.8.12.22247_signed.exe; run_steps 2020 rvt2020-t pyrevit
+expect "pyrevit 2020 installs" 0 "pyrevit"; check "pyrevit 2020: attached to Revit 2020" called "[attach] [master] [277] [2020]"
+check "pyrevit 2020: the admin config is copied to the user's" cmp -s "$PYA" "$PYU"
+reset; pyrevit_bottle 2020 pyrevit48/pyRevit_4.8.12.22247_signed.exe; mkdir -p "$(dirname "$PYU")"; echo mine > "$PYU"
+run_steps 2020 rvt2020-t pyrevit; expect "pyrevit 2020 with a user config installs" 0 "pyrevit"
+check "pyrevit 2020: an existing user config is kept" grep -qx mine "$PYU"
+reset; pyrevit_bottle 2024 pyrevit7/pyRevit_7.0.0.26278_signed.exe; run_steps 2024 rvt2024-t pyrevit
+expect "pyrevit 2024 installs" 0 "pyrevit"; check "pyrevit 7: no user config made" test ! -e "$PYU"
 
 # ---- add-in catalog ----
 reset; in_repo '. "$ROOT/scripts/lib/addins.sh"; echo "${ADDIN_IDS[*]}"'; expect "the catalog lists its add-ins" 0 "enscape pdfprinter pyrevit revitlookup"

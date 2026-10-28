@@ -765,6 +765,36 @@ class PyrevitAgent(Sandbox):
         self.assertNotIn("doctor.internal", [c.id for c in cs])
         self.assertEqual(sorted(self.mcp(cs)), ["mcp.pyrevit.ready", "mcp.ready"])
 
+
+class PyrevitConfig(Sandbox):
+    """addins.pyrevit.config: pyRevit 4.8 with its clone and no user config warns; anything else says nothing."""
+    profile = dict(PROFILE, PYREVIT="pyrevit48/pyRevit_4.8.12.22247_signed.exe")
+
+    def pyrevit(self, config):
+        os.makedirs(os.path.join(self.b, dr.PYREVIT_CLONE_REL, "bin"), exist_ok=True)
+        if config:
+            self.write(os.path.join(self.b, dr.PYREVIT_CONFIG_REL), "[core]\r\n")
+
+    def config(self):
+        return [c for c in self.checks() if c.id == "addins.pyrevit.config"]
+
+    def test_no_user_config_warns(self):
+        self.pyrevit(config=False)
+        cs = self.config()
+        self.assertEqual([(c.status, c.fix) for c in cs], [("warn", "./revit addins %d --only pyrevit" % self.year)])
+
+    def test_nothing_with_a_user_config_or_without_pyrevit(self):
+        self.pyrevit(config=True)
+        self.assertEqual(self.config(), [])
+        self.tearDown(); self.setUp()
+        self.assertEqual(self.config(), [])
+
+    def test_nothing_for_pyrevit_7(self):
+        self.profile = dict(PROFILE, PYREVIT="pyrevit7/pyRevit_7.0.0.26278_signed.exe")
+        self.pyrevit(config=False)
+        self.assertEqual(self.config(), [])
+
+
 class Theme(Sandbox):
     """bottle.theme: the step theme's mode file and the Revit app's script, where the profile has the step."""
     profile = dict(PROFILE, STEPS=STEPS + ["theme"])

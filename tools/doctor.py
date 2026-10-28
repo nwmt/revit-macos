@@ -1531,10 +1531,12 @@ def pyrevit_agent_enabled(text):
 
 
 def collect_pyrevit_agent(p):
-    """pyRevit in bottle p: its clone, the agent runtime (pyRevit 7 and newer) and whether the agent is turned on."""
+    """pyRevit in bottle p: its clone, the agent runtime (pyRevit 7 and newer), the user's config and whether the agent
+    is turned on."""
     j = os.path.join
     a = {"clone": os.path.isdir(j(p, PYREVIT_CLONE_REL)),
-         "runtime": os.path.isfile(j(p, PYREVIT_CLONE_REL, "pyrevitlib/pyrevit/agent/_runner.py")), "enabled": False}
+         "runtime": os.path.isfile(j(p, PYREVIT_CLONE_REL, "pyrevitlib/pyrevit/agent/_runner.py")),
+         "config": os.path.isfile(j(p, PYREVIT_CONFIG_REL)), "enabled": False}
     try:
         with open(j(p, PYREVIT_CONFIG_REL), encoding="utf-8-sig", errors="replace") as fh:
             a["enabled"] = pyrevit_agent_enabled(fh.read())
@@ -1548,6 +1550,15 @@ def pyrevit_agent_checks(f, b):
     a = b.get("pyrevit_agent") or {}
     if a.get("clone") and a.get("runtime") and a.get("enabled"):
         return [Check("mcp.pyrevit.ready", "ok", f"pyRevit's agent is on: ./revit mcp {f['year']}{f['sfx']} --server pyrevit")]
+    return []
+
+
+def pyrevit_config_checks(f, b):
+    """pyRevit 4.8 (2020) without the user's config: its settings are not saved (the pyrevit step copies it)."""
+    a = b.get("pyrevit_agent") or {}
+    if (f["profile"].get("PYREVIT") or "").startswith("pyrevit48/") and a.get("clone") and not a.get("config"):
+        return [Check("addins.pyrevit.config", "warn", "pyRevit forgets its settings: it has no user config",
+                      fix=f"./revit addins {f['year']}{f['sfx']} --only pyrevit")]
     return []
 
 
@@ -1724,7 +1735,7 @@ def bottle_checks(f):
     out += app_checks(f, b)
     out += install_checks(f, b) + since_install(f, b)
     if b.get("revit_exe"):
-        out += fixes_checks(f, b) + settings_checks(f, b) + theme_checks(f, b) + wineserver_checks(f, b) + addin_checks(f) + mcp_checks(f, b) + pyrevit_agent_checks(f, b)
+        out += fixes_checks(f, b) + settings_checks(f, b) + theme_checks(f, b) + wineserver_checks(f, b) + addin_checks(f) + pyrevit_config_checks(f, b) + mcp_checks(f, b) + pyrevit_agent_checks(f, b)
     return out + logs_checks(f, b)
 
 
