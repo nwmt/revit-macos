@@ -1507,6 +1507,23 @@ reset; pymcp_world; PYMCP_ENV=(FAKE_PIP_FAIL=1); pymcp 'pymcp_venv_ensure'
 expect "pymcp_venv_ensure: a failing pip is a refusal" 1 "the Python packages could not be installed"
 check "pymcp_venv_ensure: no half venv left" test ! -e "$D/mcp/python-mcp/6ca46b3ea96a8f7cce9894cf865d8f19ca2c549d/venv"
 
+# ---- python-mcp: who listens on the Routes port (pymcp_listener), under pipefail as scripts/mcp-launch.sh runs it ----
+pm_lsof() { # $1 = address: a fake lsof (a wineserver of bottle rvt2020-t with as many open files as a real one) and ps
+  mkdir -p "$T/lsofbin"; cat > "$T/lsofbin/lsof" <<EOF
+#!/bin/bash
+case "\$*" in
+  *-iTCP*) printf 'p4242\nf1435\nn%s\n' "$1" ;;
+  *"-p 4242"*) for i in \$(seq 1 20000); do echo "n$BOTTLES/rvt2020-t/drive_c/windows/f\$i"; done ;;
+esac
+EOF
+  printf '#!/bin/bash\necho /Applications/CrossOver.app/Contents/SharedSupport/CrossOver/lib/wine/../../bin/wineserver\n' > "$T/lsofbin/ps"
+  chmod +x "$T/lsofbin/lsof" "$T/lsofbin/ps"
+}
+reset; mkbottle rvt2020-t 2020 2020; pm_lsof 127.0.0.1:48884
+OUT="$(cd / && "${SANDBOX_ENV[@]}" PATH="$T/lsofbin:$PATH" ROOT="$R" /bin/bash -c 'set -o pipefail; . "$ROOT/scripts/lib/common.sh"; . "$ROOT/scripts/lib/pymcp.sh"; B="$(bottle_path rvt2020-t)"; pymcp_listener 48884' 2>&1)"; RC=$?
+expect "pymcp_listener: a real wineserver's long lsof output under pipefail is ok" 0 "ok"
+check "pymcp_listener: not foreign" test "$OUT" = ok
+
 # ---- python-mcp: the add-in and its step (scripts/addins/python-mcp.sh, step_pythonmcp) ----
 PMC=6ca46b3ea96a8f7cce9894cf865d8f19ca2c549d
 PMSRV="$(bash "$REPO/tests/fixtures.sh" "https://raw.githubusercontent.com/pyrevitlabs/pyRevit/v4.8.12.22247%2B0031/pyrevitlib/pyrevit/routes/server/server.py" 3ac12d53d4b6935f75fbdd2466774076cc8bfa379340034958ac398ac4454f9a pyrevit48-server.py)"; PMRC=$?
