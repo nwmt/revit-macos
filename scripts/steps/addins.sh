@@ -25,6 +25,12 @@ step_pyrevit() { # pyRevit 4.8.12 for 2020 (its IPY277 engine runs on .NET 4.7; 
   mv "$B/drive_c/pyrevit-setup.log" "$RUN_DIR/" 2>/dev/null
   accept_codes "$rc" 0 || { echo "the pyRevit installer returned $rc"; return 1; }
   [ -z "$PYREVIT_ATTACH" ] || w "$pyr" attach master "$PYREVIT_ATTACH" "$YEAR" || return 1
+  # 4.8 leaves only the admin config in ProgramData and copies it to the user's on Revit start; under Wine that copy
+  # does not happen and every setting lives in memory only (lost on Reload). The copy is made here, an existing one kept
+  local adm="$B/drive_c/ProgramData/pyRevit/pyRevit_config.ini" usr="$B/$PYREVIT_CONFIG_REL"
+  case "$PYREVIT" in pyrevit48/*)
+    [ -e "$usr" ] || [ ! -f "$adm" ] || { mkdir -p "$(dirname "$usr")" && cp "$adm" "$usr"; } || return 1 ;;
+  esac
   w "$pyr" attached | tr -d '\r'
   detail "$(basename "$PYREVIT")"
 }
