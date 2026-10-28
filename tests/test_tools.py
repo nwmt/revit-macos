@@ -496,8 +496,11 @@ wheels = [{ url = "https://x/pytest.whl", hash = "sha256:44" }]
 
 
 class PythonMcpRequirements(Tmp):
-    """tools/gen_python_mcp_requirements.py: the pinned packages for python-build-standalone 3.14 on macOS arm64."""
+    """tools/gen_python_mcp_requirements.py: the pinned packages for python-build-standalone 3.14 on macOS arm64. A
+    maintainer's tool for a new pin, run with Python 3.11 or newer (tomllib): skipped under the system 3.9."""
     def gen(self):
+        if sys.version_info < (3, 11):
+            self.skipTest("tomllib needs Python 3.11")
         open(self.path("uv.lock"), "w").write(LOCK)
         return run("gen_python_mcp_requirements", self.path("uv.lock"))
 

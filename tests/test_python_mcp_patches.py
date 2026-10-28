@@ -36,8 +36,11 @@ class Patches(unittest.TestCase):
         if r.returncode != 0:
             raise AssertionError(r.stdout + r.stderr)
         cls.tmp = tempfile.mkdtemp()
-        with tarfile.open(r.stdout.strip()) as t:
-            t.extractall(cls.tmp, filter="data")
+        with tarfile.open(r.stdout.strip()) as t:   # the pinned archive (sha256 checked by fixtures.sh)
+            try:
+                t.extractall(cls.tmp, filter="data")
+            except TypeError:   # Python before 3.12 (the system 3.9 in CI) has no filter
+                t.extractall(cls.tmp)
         cls.src = os.path.join(cls.tmp, "mcp-server-for-revit-python-" + COMMIT)
 
     @classmethod

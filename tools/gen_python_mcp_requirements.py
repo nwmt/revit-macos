@@ -6,7 +6,7 @@ select for the one interpreter we install them into: python-build-standalone 3.1
 Prints one line per package, sorted: `name==version --hash=sha256:<sdist> --hash=sha256:<wheel>…` (every file hash
 the lock lists; pip takes the one it downloads).
 
-Usage: python3 -I tools/gen_python_mcp_requirements.py <uv.lock>  > tools/python-mcp-requirements.txt
+Usage (Python 3.11 or newer, for tomllib): python3 -I tools/gen_python_mcp_requirements.py <uv.lock>  > tools/python-mcp-requirements.txt
 """
 import re
 import sys
