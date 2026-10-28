@@ -767,7 +767,7 @@ reset; pyrevit_bottle 2024 pyrevit7/pyRevit_7.0.0.26278_signed.exe; run_steps 20
 expect "pyrevit 2024 installs" 0 "pyrevit"; check "pyrevit 7: no user config made" test ! -e "$PYU"
 
 # ---- add-in catalog ----
-reset; in_repo '. "$ROOT/scripts/lib/addins.sh"; echo "${ADDIN_IDS[*]}"'; expect "the catalog lists its add-ins" 0 "enscape pdfprinter pyrevit revitlookup"
+reset; in_repo '. "$ROOT/scripts/lib/addins.sh"; echo "${ADDIN_IDS[*]}"'; expect "the catalog lists its add-ins" 0 "enscape pdfprinter pyrevit python-mcp revitlookup"
 reset; in_repo '. "$ROOT/scripts/lib/addins.sh"; for id in "${ADDIN_IDS[@]}"; do addin_load "$id" || echo "bad $id"
     [ -n "$ADDIN_NAME" ] && [ -n "$ADDIN_STEP" ] || echo "fields $id"; declare -F "addin_files" >/dev/null || echo "files $id"
     for y in "${REVIT_SUPPORTED[@]}"; do addin_files "$y" | while IFS=$'"'"'\t'"'"' read -r s f u h; do
@@ -1504,5 +1504,68 @@ check "pymcp_venv_ensure: changed requirements, pip again" called "-m pip instal
 reset; pymcp_world; PYMCP_ENV=(FAKE_PIP_FAIL=1); pymcp 'pymcp_venv_ensure'
 expect "pymcp_venv_ensure: a failing pip is a refusal" 1 "the Python packages could not be installed"
 check "pymcp_venv_ensure: no half venv left" test ! -e "$D/mcp/python-mcp/6ca46b3ea96a8f7cce9894cf865d8f19ca2c549d/venv"
+
+# ---- python-mcp: the add-in and its step (scripts/addins/python-mcp.sh, step_pythonmcp) ----
+PMC=6ca46b3ea96a8f7cce9894cf865d8f19ca2c549d
+PMSRV="$(bash "$REPO/tests/fixtures.sh" "https://raw.githubusercontent.com/pyrevitlabs/pyRevit/v4.8.12.22247%2B0031/pyrevitlib/pyrevit/routes/server/server.py" 3ac12d53d4b6935f75fbdd2466774076cc8bfa379340034958ac398ac4454f9a pyrevit48-server.py)"; PMRC=$?
+PMTAR="$(bash "$REPO/tests/fixtures.sh" "https://github.com/mcp-servers-for-revit/mcp-server-for-revit-python/archive/$PMC.tar.gz" 6406be6574efe9519b34110ccf04d1499bb47f0e3fc36ba902a30b9575e1f0f6 python-mcp-6ca46b3.tar.gz)" || PMRC=$?
+if [ "$PMRC" = 77 ]; then echo "SKIP python-mcp step cases: no network for the fixtures"
+else
+pm_world() { # $1 = year: bottle rvt<year>-t with pyRevit (4.8 for 2020: the reference server.py with CRLF, user config);
+  # a curl that serves the pinned archive and the fake Python of pymcp_world. Sets PB (bottle), PS (server.py), PC
+  # (config), PE (extension folder), PP (pairing folder), PD (the Mac side's folder)
+  pymcp_world; srv_curl; cp "$PMTAR" "$T/srv/$PMC.tar.gz"
+  mkbottle "rvt$1-t" "$1" "$1"; PB="$BOTTLES/rvt$1-t"
+  PS="$PB/drive_c/users/crossover/AppData/Roaming/pyRevit-Master/pyrevitlib/pyrevit/routes/server/server.py"
+  PC="$PB/drive_c/users/crossover/AppData/Roaming/pyRevit/pyRevit_config.ini"
+  PE="$PB/drive_c/users/crossover/AppData/Roaming/pyRevit/Extensions/revit-mcp-python.extension"
+  PP="$PB/drive_c/users/crossover/AppData/Local/RevitMCPPython"; PD="$D/mcp/python-mcp/$PMC"
+  mkdir -p "$(dirname "$PS")" "$(dirname "$PC")"
+  perl -pe 's/\n/\r\n/' "$PMSRV" > "$PS"
+  printf '[core]\nbincache = true\n\n[routes]\nEnabled = True\nport = 9999\n' > "$PC"
+}
+pm_snap() { # what the add-in installs, as one checksum list (the runner's own logs left out)
+  (cd "$PB" && find drive_c/users/crossover/AppData -type f 2>/dev/null | sort | while IFS= read -r f; do shasum -a 256 "$f"; done
+   [ -d "$D/mcp" ] && find "$D/mcp" -type f | sort | while IFS= read -r f; do shasum -a 256 "$f"; done) 2>/dev/null
+}
+pm_run() { # run-steps.sh with the data folder $D; RUN = its run folder there
+  STEP_ENV=(PATH="$T:$PATH" REVIT_DATA="$D" ${PM_ENV[@]+"${PM_ENV[@]}"}); PM_ENV=(); run_steps "$@"
+  RUN="$(ls -td "$D/logs/$2"/*/ 2>/dev/null | head -1)"; RUN="${RUN%/}"; }
+PM_ENV=()
+reset; pm_world 2020; before="$(pm_snap)"; pm_run 2020 rvt2020-t pythonmcp
+expect "pythonmcp without consent: refused" 1 "pythonmcp"; check "pythonmcp without consent: refused: the reason" grep -qF -- "--accept-eula python-mcp" "$RUN/pythonmcp.log"
+check "pythonmcp without consent changes nothing" test "$(pm_snap)" = "$before"
+check "pythonmcp without consent: nothing downloaded" not_called "$PMC"
+reset; pm_world 2027; before="$(pm_snap)"; PM_ENV=(REVIT_ACCEPT_EULA=python-mcp); pm_run 2027 rvt2027-t pythonmcp
+expect "pythonmcp on 2027: the year refusal" 1 "pythonmcp"; check "pythonmcp on 2027: the year refusal: the reason" grep -qF -- "MCP server for Revit (Python) is for Revit 2020 here." "$RUN/pythonmcp.log"
+check "pythonmcp on 2027 changes nothing" test "$(pm_snap)" = "$before"
+reset; pm_world 2020; rm -rf "$PB/drive_c/users/crossover/AppData/Roaming/pyRevit-Master"; PM_ENV=(REVIT_ACCEPT_EULA=python-mcp)
+pm_run 2020 rvt2020-t pythonmcp; expect "pythonmcp without pyRevit" 1 "pythonmcp"; check "pythonmcp without pyRevit: the reason" grep -qF -- "install pyRevit first: ./revit addins 2020 rvt2020-t --only pyrevit" "$RUN/pythonmcp.log"
+reset; pm_world 2020; rm "$PC"; PM_ENV=(REVIT_ACCEPT_EULA=python-mcp); pm_run 2020 rvt2020-t pythonmcp
+expect "pythonmcp without user config" 1 "pythonmcp"; check "pythonmcp without user config: the reason" grep -qF -- "install pyRevit first: ./revit addins 2020 rvt2020-t --only pyrevit" "$RUN/pythonmcp.log"
+reset; pm_world 2020; mkdir -p "$PP"; echo blob > "$PP/pairing.dpapi"; PM_ENV=(REVIT_ACCEPT_EULA=python-mcp); pm_run 2020 rvt2020-t pythonmcp
+expect "pythonmcp installs" 0 "python-mcp 6ca46b3"
+check "pythonmcp: the extension folder, without tests, docs, images" eval '[ -f "$PE/startup.py" ] && [ -d "$PE/MCP.tab" ] && [ ! -e "$PE/tests" ] && [ ! -e "$PE/docs" ] && [ ! -e "$PE/images" ] && [ ! -e "$PE/.github" ]'
+check "pythonmcp: the extension patches are applied" eval 'grep -q "startup-error.txt" "$PE/startup.py" && grep -q "_printer(captured_output)" "$PE/revit_mcp/code_execution.py"'
+check "pythonmcp: our module beside server.py" cmp -s "$R/tools/pyrevit48/revitmacos_serial.py" "$(dirname "$PS")/revitmacos_serial.py"
+check "pythonmcp: server.py patched, CRLF" eval 'grep -q "revitmacos_serial.dispatch" "$PS" && [ "$(tr -d "\r" < "$PS" | wc -c)" -lt "$(wc -c < "$PS")" ] && perl -ne "exit 1 unless /\r\n\z/" "$PS"'
+check "pythonmcp: routes keys" eval '[ "$(python3 -I "$R/tools/pyrevit_ini.py" get "$PC" routes enabled)" = true ] && [ "$(python3 -I "$R/tools/pyrevit_ini.py" get "$PC" routes host)" = "\"127.0.0.1\"" ]'
+check "pythonmcp: user port becomes 48884" test "$(python3 -I "$R/tools/pyrevit_ini.py" get "$PC" routes port)" = 48884
+check "pythonmcp: the extension is enabled" test "$(python3 -I "$R/tools/pyrevit_ini.py" get "$PC" revit-mcp-python.extension disabled)" = false
+check "pythonmcp: Enabled = True replaced, not doubled" test "$(grep -ci '^enabled' "$PC")" = 1
+check "pythonmcp: the venv and the sources" eval '[ -x "$PD/venv/bin/python3" ] && [ -f "$PD/src/main.py" ] && grep -q "Uri.UnescapeDataString" "$PD/src/revit_mcp/views.py"'
+check "pythonmcp keeps the pairing" test "$(cat "$PP/pairing.dpapi")" = blob
+before="$(pm_snap)"; : > "$CALLS"; PM_ENV=(REVIT_ACCEPT_EULA=python-mcp); pm_run 2020 rvt2020-t pythonmcp
+expect "pythonmcp again" 0 "python-mcp 6ca46b3"
+check "pythonmcp again is a no-op for server.py" test "$(pm_snap)" = "$before"
+echo "old module" > "$(dirname "$PS")/revitmacos_serial.py"; PM_ENV=(REVIT_ACCEPT_EULA=python-mcp); pm_run 2020 rvt2020-t pythonmcp
+expect "pythonmcp stale module" 0 "python-mcp 6ca46b3"
+check "pythonmcp stale module is replaced" cmp -s "$R/tools/pyrevit48/revitmacos_serial.py" "$(dirname "$PS")/revitmacos_serial.py"
+reset; pm_world 2020; printf 'foreign\r\n' > "$PS"; PM_ENV=(REVIT_ACCEPT_EULA=python-mcp); pm_run 2020 rvt2020-t pythonmcp
+expect "pythonmcp foreign server.py refuses" 1 "pythonmcp"; check "pythonmcp foreign server.py refuses: the reason" grep -qF -- "server.py is not the one of pyRevit 4.8.12" "$RUN/pythonmcp.log"
+check "pythonmcp foreign server.py: no module written" test ! -e "$(dirname "$PS")/revitmacos_serial.py"
+reset; in_repo '. "$ROOT/scripts/lib/addins.sh"; YEAR=2027; addin_load python-mcp; addin_available && echo yes || echo no'
+expect "addins: python-mcp is not offered for 2027" 0 "no"
+fi
 
 echo; echo "$((n - fails))/$n passed"; [ "$fails" -eq 0 ]

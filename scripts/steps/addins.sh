@@ -254,3 +254,44 @@ step_enscape-on() { # Enscape loads again
   [ -f "$ad/0_Enscape.addin" ] || { echo "no 0_Enscape.addin in $ad"; return 1; }
   detail "0_Enscape.addin back in $(basename "$ad")"
 }
+
+step_pythonmcp() { # The MCP server for Revit (Python), add-in python-mcp (scripts/addins/python-mcp.sh): the patched
+  # upstream extension in pyRevit's Extensions folder; pyRevit 4.8's Routes patch and our module beside it (the module
+  # first: a server.py that imports it without it stops pyRevit loading); the Routes keys; the Mac side's venv and
+  # sources (scripts/lib/pymcp.sh). The pairing (%LOCALAPPDATA%\RevitMCPPython) is never touched
+  local sfx srv cfg st a tmp top p ext mod out ini="$ROOT/tools/pyrevit_ini.py"
+  sfx="$(bottle_sfx "$NAME" "$YEAR")"
+  { addin_load python-mcp && addin_available; } || { echo "MCP server for Revit (Python) is for Revit 2020 here."; return 1; }
+  eula_ok python-mcp || { echo "$ADDIN_NOTICE To accept: add --accept-eula python-mcp (./revit addins $YEAR$sfx --only python-mcp --accept-eula python-mcp)"; return 1; }
+  srv="$(pymcp_server_py)"; cfg="$B/$PYREVIT_CONFIG_REL"
+  [ -d "$B/$PYREVIT_CLONE_REL" ] && [ -f "$cfg" ] || { echo "install pyRevit first: ./revit addins $YEAR$sfx --only pyrevit"; return 1; }
+  st="$(pymcp_server_state "$srv")"
+  [ "$st" != foreign ] || { echo "server.py is not the one of pyRevit 4.8.12 ($srv): install pyRevit again (./revit addins $YEAR$sfx --only pyrevit)"; return 1; }
+  addin_fetch python-mcp || return 1
+  a="$DATA/installers/addins/python-mcp/$PYMCP_COMMIT.tar.gz"; tmp="$RUN_DIR/python-mcp.unpacked"
+  rm -rf "$tmp" && mkdir -p "$tmp" && tar xzf "$a" -C "$tmp" || { echo "cannot unpack $a"; return 1; }
+  top="$tmp/mcp-server-for-revit-python-$PYMCP_COMMIT"
+  for p in "$ROOT"/tools/patches/python-mcp/*.patch; do
+    patch -p1 -s --forward -d "$top" -i "$p" >>"$RUN_DIR/pythonmcp-patch.log" 2>&1 \
+      || { echo "the MCP extension changed upstream; this project's patches do not fit it ($(basename "$p"))"; return 1; }
+  done
+  rm -rf "$top/tests" "$top/docs" "$top/images" "$top/.github"
+  ext="$B/$PYMCP_EXT_REL"
+  mkdir -p "$(dirname "$ext")" && rm -rf "$ext.new" && cp -R "$top" "$ext.new" && rm -rf "$ext" && mv "$ext.new" "$ext" \
+    || { echo "cannot write $ext"; return 1; }
+  mod="$(dirname "$srv")/revitmacos_serial.py"
+  cmp -s "$ROOT/tools/pyrevit48/revitmacos_serial.py" "$mod" \
+    || { cp "$ROOT/tools/pyrevit48/revitmacos_serial.py" "$mod.new" && mv -f "$mod.new" "$mod"; } || { echo "cannot write $mod"; return 1; }
+  if [ "$st" = original ]; then
+    patch --binary -s -o "$srv.new" "$srv" "$ROOT/tools/patches/pyrevit48/server.py.patch" >>"$RUN_DIR/pythonmcp-patch.log" 2>&1 \
+      && mv -f "$srv.new" "$srv" || { rm -f "$srv.new"; echo "cannot patch $srv"; return 1; }
+  fi
+  python3 -I "$ini" set "$cfg" routes enabled true && python3 -I "$ini" set "$cfg" routes host '"127.0.0.1"' \
+    && python3 -I "$ini" set "$cfg" routes port 48884 && python3 -I "$ini" set "$cfg" revit-mcp-python.extension disabled false \
+    || { echo "cannot write $cfg"; return 1; }
+  out="$(pymcp_venv_ensure)" || { echo "$out"; return 1; }
+  p="$(pymcp_dir)/src"
+  rm -rf "$p.new" && cp -R "$top" "$p.new" && rm -rf "$p" && mv "$p.new" "$p" || { echo "cannot write $p"; return 1; }
+  rm -rf "$tmp"
+  detail "python-mcp ${PYMCP_COMMIT:0:7}"
+}

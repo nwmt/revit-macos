@@ -3,6 +3,10 @@
 # Sourced after common.sh. Functions that can fail print the reason on stdout and return 1.
 PYMCP_COMMIT=6ca46b3ea96a8f7cce9894cf865d8f19ca2c549d
 
+PYREVIT48_SERVER_SHA=6a1e0903edfcc69005813da00934ce7a7da06bd89abd4f3b294f3e1ae569f911   # routes/server/server.py of 4.8.12
+PYMCP_EXT_REL="drive_c/users/crossover/AppData/Roaming/pyRevit/Extensions/revit-mcp-python.extension"
+PYMCP_LOCAL_REL="drive_c/users/crossover/AppData/Local/RevitMCPPython"   # the extension's pairing and startup error
+
 pymcp_dir() { echo "$DATA/mcp/python-mcp/$PYMCP_COMMIT"; }   # venv/ and src/ (the patched upstream sources)
 pymcp_venv_python() { echo "$(pymcp_dir)/venv/bin/python3"; }
 
@@ -37,4 +41,12 @@ pymcp_venv_ensure() { # $(pymcp_dir)/venv with the pinned packages; rebuilt only
   out="$("$v.new/bin/python3" -m pip install -q --disable-pip-version-check --require-hashes --no-deps -r "$req" 2>&1)" \
     || { rm -rf "$v.new"; echo "the Python packages could not be installed: $(tail -1 <<<"$out")"; return 1; }
   echo "$sha" > "$v.new/.req-sha" && rm -rf "$v" && mv "$v.new" "$v" || { echo "cannot write $v"; return 1; }
+}
+
+pymcp_server_py() { echo "$B/$PYREVIT_CLONE_REL/pyrevitlib/pyrevit/routes/server/server.py"; }   # pyRevit 4.8's Routes
+pymcp_server_state() { # $1 = server.py: original (pyRevit 4.8.12 as installed), patched (ours applied) or foreign
+  [ -f "$1" ] || { echo foreign; return 0; }
+  if [ "$(shasum -a 256 "$1" | cut -d' ' -f1)" = "$PYREVIT48_SERVER_SHA" ]; then echo original
+  elif patch --binary -s -f -R --dry-run "$1" "$ROOT/tools/patches/pyrevit48/server.py.patch" >/dev/null 2>&1; then echo patched
+  else echo foreign; fi
 }

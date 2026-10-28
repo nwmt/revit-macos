@@ -524,5 +524,50 @@ class PythonMcpRequirements(Tmp):
         self.assertTrue(all("--hash=sha256:" in l for l in pins))
 
 
+class PyrevitIni(Tmp):
+    """tools/pyrevit_ini.py: one key of pyRevit's pyRevit_config.ini, everything else byte for byte."""
+    INI = "[core]\nbincache = true\n\n[routes]\nEnabled = True\ncore_api = false\n\n[telemetry]\nactive = false\n"
+
+    def ini(self, text=None, crlf=False):
+        t = self.INI if text is None else text
+        with open(self.path("c.ini"), "wb") as f:
+            f.write((t.replace("\n", "\r\n") if crlf else t).encode())
+        return self.path("c.ini")
+
+    def text(self):
+        with open(self.path("c.ini"), "rb") as f:
+            return f.read().decode()
+
+    def test_replaces_a_key_in_any_case(self):
+        p = self.ini()
+        self.assertEqual(run("pyrevit_ini", "set", p, "routes", "enabled", "true").returncode, 0)
+        self.assertEqual(self.text(), self.INI.replace("Enabled = True", "enabled = true"))
+
+    def test_adds_a_key_at_the_end_of_its_section(self):
+        p = self.ini()
+        run("pyrevit_ini", "set", p, "routes", "host", '"127.0.0.1"')
+        self.assertEqual(self.text(), self.INI.replace("core_api = false\n", 'core_api = false\nhost = "127.0.0.1"\n'))
+
+    def test_adds_a_section(self):
+        p = self.ini()
+        run("pyrevit_ini", "set", p, "revit-mcp-python.extension", "disabled", "false")
+        self.assertEqual(self.text(), self.INI + "\n[revit-mcp-python.extension]\ndisabled = false\n")
+
+    def test_crlf_stays_crlf(self):
+        p = self.ini(crlf=True)
+        run("pyrevit_ini", "set", p, "routes", "port", "48884")
+        self.assertNotIn("\n", self.text().replace("\r\n", ""))
+        self.assertIn("port = 48884\r\n", self.text())
+
+    def test_get(self):
+        p = self.ini()
+        r = run("pyrevit_ini", "get", p, "ROUTES", "enabled")
+        self.assertEqual((r.returncode, r.stdout), (0, "True\n"))
+        self.assertEqual(run("pyrevit_ini", "get", p, "routes", "host").returncode, 1)
+
+    def test_missing_file(self):
+        self.assertEqual(run("pyrevit_ini", "set", self.path("none.ini"), "routes", "port", "1").returncode, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

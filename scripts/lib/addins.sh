@@ -2,6 +2,7 @@
 # Source after common.sh. ./revit addins --only and the app take the add-ins from here; the steps that install them
 # stay in scripts/steps/addins.sh and scripts/steps/fixes.sh.
 . "$ROOT/scripts/lib/mcp.sh"   # the Revit MCP Server's variants (scripts/addins/revitmcp*.sh)
+. "$ROOT/scripts/lib/pymcp.sh"   # the MCP server for Revit (Python): its Mac side (scripts/addins/python-mcp.sh)
 ADDIN_IDS=(); for _f in "$ROOT"/scripts/addins/*.sh; do [ -f "$_f" ] && ADDIN_IDS+=("$(basename "$_f" .sh)"); done; unset _f
 
 addin_dirs() { # the user's Addins folder, then the two all-users ones (the second since 2027); uses $B and $YEAR
