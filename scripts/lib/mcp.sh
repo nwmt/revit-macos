@@ -68,11 +68,13 @@ pyrevit_agent_enabled() { # $1 = pyRevit_config.ini: 0 when its [agent] section 
     END { exit !on }'
 }
 pyrevit_mcp_missing() { # $1 = year: the first missing piece, nothing when ready: not-offered (this project has no
-  # pyRevit for the year), not-installed, no-agent-runtime (pyRevit before 7), agent-off, not-registered (the agent has
-  # no instance file: not running in Revit). An instance file left by an ended Revit passes; pyrevit.exe has the last
-  # word then (its tools answer no_revit)
+  # pyRevit for the year), no-agent-runtime (the year's or the installed pyRevit is before 7), not-installed, agent-off,
+  # not-registered (the agent has no instance file: not running in Revit). An instance file left by an ended Revit
+  # passes; pyrevit.exe has the last word then (its tools answer no_revit)
   addin_load pyrevit
+  local v; v="$(pyrevit_version_offered "$1")"
   if [ -z "$(addin_files "$1")" ]; then echo not-offered
+  elif [ "${v%%.*}" -lt 7 ] 2>/dev/null; then echo no-agent-runtime   # the year's pyRevit has none: no use installing it
   elif [ ! -d "$B/$PYREVIT_CLONE_REL" ]; then echo not-installed
   elif [ ! -f "$B/$PYREVIT_CLONE_REL/pyrevitlib/pyrevit/agent/_runner.py" ]; then echo no-agent-runtime
   elif ! pyrevit_agent_enabled "$B/$PYREVIT_CONFIG_REL"; then echo agent-off

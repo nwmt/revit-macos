@@ -23,6 +23,7 @@ HANDOFF_S="${MCP_HANDOFF_S:-30}"   # how long the launcher may take to confirm (
 checks() { # the bottle, a running Revit, a complete MCP Server install (sets ID, its variant) or pyRevit's agent
   bottle_guard running_ok "$YEAR" "$NAME"
   [ "$SERVER" = autodesk ] || { checks_pyrevit; return; }
+  addin_load revitmcp; addin_available || die "Autodesk's Revit MCP Server is for Revit ${ADDIN_TESTED[*]} only."
   revit_running "$B" "$YEAR" || die "Open Revit $YEAR with a model first."
   ID="$(mcp_installed_variant)"
   [ -n "$ID" ] || die "The Revit MCP Server is not installed in $NAME. Install it: ./revit addins $YEAR$SFX --only revitmcp --accept-eula revitmcp"

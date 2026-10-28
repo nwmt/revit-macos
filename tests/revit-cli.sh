@@ -952,6 +952,10 @@ reset; run_mcp mcp 2027; check "mcp: no bottle → refused, stdout empty" eval '
 reset; bottle rvt2027-a 2027 2027; mcp_install rvt2027-a "$MCPW"; mcp_cx; run_mcp mcp 2027
 check "mcp: no Revit → open Revit first" eval '[ "$RC" != 0 ] && grep -qx "Open Revit 2027 with a model first." <<<"$ERR" && mcp_stdout_empty'
 check "mcp: no Revit → wine never started" test ! -e "$T/mcp-argv"
+reset; bottle rvt2020-a 2020 2020; mcp_cx; fake_revit rvt2020-a 2020; run_mcp mcp 2020
+check "mcp on 2020 → Autodesk's server is for 2027 only" eval '[ "$RC" != 0 ] && grep -qx "Autodesk'"'"'s Revit MCP Server is for Revit 2027 only." <<<"$ERR" && mcp_stdout_empty'
+reset; bottle rvt2020-a 2020 2020; mcp_cx; run_mcp mcp 2020
+check "mcp on 2020 without Revit → for 2027 only, not open Revit" eval 'grep -qx "Autodesk'"'"'s Revit MCP Server is for Revit 2027 only." <<<"$ERR"'
 reset; bottle rvt2027-a 2027 2027; mcp_cx; fake_revit rvt2027-a 2027; run_mcp mcp 2027
 check "mcp: not installed → the install command" eval '[ "$RC" != 0 ] && grep -qF "Install it: ./revit addins 2027 --only revitmcp --accept-eula revitmcp" <<<"$ERR" && mcp_stdout_empty'
 reset; bottle rvt2027-a 2027 2027; run_mcp status --write; check "--write on another command" eval '[ "$RC" != 0 ] && grep -qx "Unknown option: --write" <<<"$ERR"'
@@ -1048,6 +1052,8 @@ pyrevit_world; rm -rf "$PYA/pyRevit-Master"; run_mcp mcp 2027 --server pyrevit
 check "pyrevit not installed → the install command" refused "pyRevit is not installed in rvt2027-a. Install it: ./revit addins 2027 --only pyrevit"
 pyrevit_world 2020; rm "$BOTTLES/rvt2020-a/drive_c/users/crossover/AppData/Roaming/pyRevit-Master/pyrevitlib/pyrevit/agent/_runner.py"
 run_mcp mcp 2020 --server pyrevit; check "pyRevit 4.8 (2020) → needs pyRevit 7" refused "pyRevit's agent needs pyRevit 7; Revit 2020 gets pyRevit 4.8 here."
+pyrevit_world 2020; rm -rf "$BOTTLES/rvt2020-a/drive_c/users/crossover/AppData/Roaming/pyRevit-Master"; run_mcp mcp 2020 --server pyrevit
+check "pyRevit not installed on 2020 → needs pyRevit 7, not an install" refused "pyRevit's agent needs pyRevit 7; Revit 2020 gets pyRevit 4.8 here."
 for ini in '[agent]\r\nenabled = false\r\n' '[agent]\r\npolicy = "auto"\r\n' '[core]\r\nenabled = true\r\n[agent]\r\npolicy = "ask"\r\n' '' none; do
   pyrevit_world; if [ "$ini" = none ]; then rm "$PYA/pyRevit/pyRevit_config.ini"; else printf "$ini" > "$PYA/pyRevit/pyRevit_config.ini"; fi
   run_mcp mcp 2027 --server pyrevit; check "pyrevit config parsing: agent off ($ini) → how to turn it on" refused "$AGENT_OFF"
