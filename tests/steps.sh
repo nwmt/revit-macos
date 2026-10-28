@@ -39,7 +39,7 @@ reset() { # a fresh sandbox: the repo's scripts and tools, fake prebuilt shims, 
   mkdir -p "$R" "$H/Applications" "$BOTTLES" "$CXF/bin" "$T/cxtmp" "$CXF/lib/dxvk/x86_64-windows" "$CXF/lib/wine/x86_64-windows" \
     || { echo "sandbox setup failed"; exit 1; }
   cp -R "$REPO/scripts" "$REPO/tools" "$R/"
-  local f; for f in d3dwp/d3dwp.dll hittest/hittest.exe mcphost/mcphost.exe mcppipes/mcppipes.dll ncryptshim/ncrypt.dll pdfprinter/add_printer.exe rvtfix/rvtfix.dll \
+  local f; for f in d3dwp/d3dwp.dll dpapi/dpapi.exe hittest/hittest.exe mcphost/mcphost.exe mcppipes/mcppipes.dll ncryptshim/ncrypt.dll pdfprinter/add_printer.exe rvtfix/rvtfix.dll \
     svcshim/svcshim.exe themeset/themeset.exe tlbpin/msls31.dll vkshim/vulkan-1.dll wbemshim/wbemshim.dll wv2fix/version.dll; do
     mkdir -p "$R/build/$(dirname "$f")"; echo "fake $f" > "$R/build/$f"
   done
