@@ -10,11 +10,11 @@ struct Fake {
     let dir = tempDir()
     var count: URL { dir.appending(path: "count") }
     var starts: Int { ((try? String(contentsOf: count, encoding: .utf8)) ?? "").split(separator: "\n").count }
-    func client(_ mode: String, scale: Int? = 2) -> HittestClient {
+    func client(_ mode: String, scale: Int? = 2, reply: Double = 0.15) -> HittestClient {
         let env = ["PATH": "/usr/bin:/bin", "FAKE_HIT_MODE": mode, "FAKE_HIT_COUNT": count.path]
         return HittestClient(engine: fixture("fake-revit-hittest.sh"), year: 2027, bottle: "rvt2027-t", environment: env,
                              log: TrackpadLog(url: dir.appending(path: "trackpad.log")),
-                             scale: { _ in scale }, timing: ClientTiming(hello: 1, reply: 0.15, restart: 0.2, termGrace: 0.3))
+                             scale: { _ in scale }, timing: ClientTiming(hello: 1, reply: reply, restart: 0.2, termGrace: 0.3))
     }
 }
 
@@ -81,10 +81,10 @@ func ready(_ c: HittestClient) -> Bool { eventually { if case .ready = c.status 
 }
 
 @Test func queryDuringStopReturnsSoon() {
-    let f = Fake(), c = f.client("slow"); c.start()
+    let f = Fake(), c = f.client("slow", reply: 5); c.start()   // only the stop can end this query before 5 s
     #expect(ready(c))
     DispatchQueue.global().asyncAfter(deadline: .now() + 0.05) { c.stop() }
-    let t = Date(); #expect(c.query(WinePoint(x: 1, y: 1)) == nil); #expect(Date().timeIntervalSince(t) < 0.2)
+    let t = Date(); #expect(c.query(WinePoint(x: 1, y: 1)) == nil); #expect(Date().timeIntervalSince(t) < 2)
     c.shutdown()
 }
 
