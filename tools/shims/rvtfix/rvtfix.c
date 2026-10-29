@@ -86,6 +86,16 @@
  *    numbers only) is kept per path for 2 s, and the caller gets a new copy from the allocator the function itself
  *    uses (it deletes the result through the vtable). Only in Revit.exe. RVTFIX_IMGCACHE set and empty disables.
  *
+ * 11. Dialogs drag in jumps (2027 on macOS 27): winemac makes a window with an owner a child window of its owner's Cocoa
+ *    window (addChildWindow), and macOS 27 moves a child window dragged by its title bar about once a second; the
+ *    same window without a parent moves smoothly. Wine takes the Cocoa parent from the window's owner at every
+ *    SetWindowPos. Fix: our window procedure in front of each top-level window with a title bar (WinEvent hook, as
+ *    in 7); on WM_ENTERSIZEMOVE (a drag begins) a posted message drops the owner (GWLP_HWNDPARENT = 0) and lets
+ *    winemac see it; on WM_EXITSIZEMOVE (the mouse is released) it goes back. It also goes back when the window or
+ *    its owner is hidden or destroyed; a window hidden while detached (EndDialog read no owner, so it did not
+ *    enable it) also enables an owner that was disabled when the drag began. Only owners of the same thread that
+ *    have our procedure too. Only in Revit.exe. RVTFIX_DRAGOWNER set and empty disables.
+ *
  * 4, 5 and 10 run when the DLL loads (LdrRegisterDllNotification), or at once if it is already loaded.
  *
  * Diagnostics: OutputDebugString with the "[rvtfix]" prefix (CX_DEBUGMSG=+debugstr).
@@ -678,6 +688,292 @@ static void fix_statusbar(void)
     trace("status bar: DrawThemeBackground hooked (%d resolved slots in comctl32 replaced)\n", n);
 }
 
+/* --- 11. dialogs drag in jumps (macOS 27 child windows) --- */
+#define DRAG_PROP L"rvtfix.dragowner"   /* our struct drag: the original procedure and the state of a drag */
+enum { DRAG_NONE, DRAG_ENTERED, DRAG_DETACHED, DRAG_ENDED, DRAG_RESTORING };   /* see struct drag */
+enum { DRAG_GONE, DRAG_DONE, DRAG_FAILED };
+struct drag {
+    WNDPROC orig;
+    BOOL unicode;
+    int state;      /* ENTERED: a drag began, owner still set; DETACHED: no owner while dragged; ENDED: waits for attach */
+    int depth;      /* frames of our procedure (and holds) using this struct: it is freed when the last one ends */
+    int gen;        /* number of the drag, carried by the posted messages: a stale one is skipped */
+    BOOL pending;   /* detach came inside another message of this window: post it again when that one ends */
+    BOOL refresh;   /* Cocoa still has to see the owner again: done when the owner is shown */
+    BOOL disabled;  /* the owner was disabled when its owned window was detached (a modal dialog) */
+    BOOL dead;      /* WM_NCDESTROY seen */
+    HWND owner;
+};
+static UINT drag_detach_msg, drag_attach_msg;
+static int drag_installs;
+static LRESULT CALLBACK drag_proc_w(HWND, UINT, WPARAM, LPARAM);
+static LRESULT CALLBACK drag_proc_a(HWND, UINT, WPARAM, LPARAM);
+
+static struct drag *drag_get(HWND hwnd) { return (struct drag *)GetPropW(hwnd, DRAG_PROP); }
+
+/* after a call that may run the application's code: is this still the same window, struct and drag? */
+static BOOL drag_alive(HWND hwnd, struct drag *d, int gen)
+{
+    return !d->dead && IsWindow(hwnd) && drag_get(hwnd) == d && d->gen == gen;
+}
+
+static void drag_hold(struct drag *d) { d->depth++; }
+
+static void drag_release(HWND hwnd, struct drag *d)
+{
+    if (--d->depth) return;
+    if (d->dead) {
+        trace("drag %p: freed\n", hwnd);
+        HeapFree(GetProcessHeap(), 0, d);
+        return;
+    }
+    if (d->pending && d->state == DRAG_ENTERED) {
+        d->pending = FALSE;
+        if (!PostMessageW(hwnd, drag_detach_msg, d->gen, 0)) d->state = DRAG_NONE;
+    }
+}
+
+/* ours is the top procedure, or fix 7's is and ours is right under it */
+static BOOL drag_ours(HWND hwnd, struct drag *d)
+{
+    WNDPROC cur = (WNDPROC)(d->unicode ? GetWindowLongPtrW(hwnd, GWLP_WNDPROC) : GetWindowLongPtrA(hwnd, GWLP_WNDPROC));
+    WNDPROC ours = d->unicode ? drag_proc_w : drag_proc_a;
+    if (cur == ours) return TRUE;
+    return (cur == maxpos_proc_w || cur == maxpos_proc_a) && (WNDPROC)GetPropW(hwnd, MAXPOS_PROP) == ours;
+}
+
+static HWND drag_eligible(HWND hwnd, struct drag *d, const char **why)
+{
+    HWND desk = GetDesktopWindow(), owner;
+    if (GetAncestor(hwnd, GA_PARENT) != desk) { *why = "not top-level"; return NULL; }
+    if (IsZoomed(hwnd)) { *why = "maximized"; return NULL; }
+    if (!drag_ours(hwnd, d)) { *why = "another procedure on top"; return NULL; }
+    if (!(owner = GetWindow(hwnd, GW_OWNER))) { *why = "no owner"; return NULL; }
+    if (GetWindowThreadProcessId(owner, NULL) != GetCurrentThreadId()) { *why = "owner in another thread"; return NULL; }
+    if (GetAncestor(owner, GA_PARENT) != desk) { *why = "owner not top-level"; return NULL; }
+    if (!IsWindowVisible(owner)) { *why = "owner hidden"; return NULL; }
+    if (!drag_get(owner)) { *why = "owner without our procedure"; return NULL; }
+    return owner;
+}
+
+/* the owner goes back; path "hidden" (the window is hidden: EndDialog, which read no owner, did not enable it) also
+ * enables an owner that was disabled when the window was detached. The caller holds d. */
+static int drag_reattach(HWND hwnd, struct drag *d, const char *path)
+{
+    int gen = d->gen;
+    HWND owner = d->owner;
+    BOOL ok;
+    d->state = DRAG_RESTORING;
+    if (GetAncestor(hwnd, GA_PARENT) != GetDesktopWindow() || GetWindow(hwnd, GW_OWNER) || !IsWindow(owner) ||
+        GetWindowThreadProcessId(owner, NULL) != GetCurrentThreadId()) { /* changed meanwhile: left as it is */
+        trace("drag %p: owner %p not put back (%s): the window or its owner changed\n", hwnd, owner, path);
+        d->state = DRAG_NONE;
+        d->pending = FALSE;
+        return DRAG_DONE;
+    }
+    SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, (LONG_PTR)owner);
+    if (!drag_alive(hwnd, d, gen)) return DRAG_GONE;
+    if (GetWindow(hwnd, GW_OWNER) != owner) {
+        trace("drag %p: owner %p could not be put back (%s)\n", hwnd, owner, path);
+        d->state = DRAG_ENDED;
+        return DRAG_FAILED;
+    }
+    if (!lstrcmpA(path, "hidden") && d->disabled && !IsWindowEnabled(owner)) {
+        EnableWindow(owner, TRUE);
+        if (!drag_alive(hwnd, d, gen)) return DRAG_GONE;
+    }
+    if (!lstrcmpA(path, "attach")) { /* the window stays: winemac makes it a child window again */
+        ok = SetWindowPos(hwnd, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        if (!drag_alive(hwnd, d, gen)) return DRAG_GONE;
+        if (!ok) d->refresh = TRUE;
+    }
+    d->state = DRAG_NONE;
+    d->pending = FALSE;
+    trace("drag %p: owner %p back (%s)\n", hwnd, owner, path);
+    return DRAG_DONE;
+}
+
+struct drag_owner_ev { HWND owner; BOOL hide; };
+
+static BOOL CALLBACK drag_owner_enum(HWND hwnd, LPARAM lp)
+{
+    struct drag_owner_ev *e = (struct drag_owner_ev *)lp;
+    struct drag *d = drag_get(hwnd);
+    int gen;
+    BOOL ok;
+    if (!d || d->dead || hwnd == e->owner) return TRUE;
+    drag_hold(d);
+    gen = d->gen;
+    if (e->hide) {
+        if (d->state == DRAG_ENTERED && GetWindow(hwnd, GW_OWNER) == e->owner)
+            d->state = DRAG_NONE;   /* its pending detach is skipped */
+        else if ((d->state == DRAG_DETACHED || d->state == DRAG_ENDED) && d->owner == e->owner &&
+                 drag_reattach(hwnd, d, "owner hidden") != DRAG_GONE && IsWindowVisible(hwnd))
+            d->refresh = TRUE;      /* a hidden owner is no Cocoa parent: done when it is shown */
+    } else if (d->refresh && GetWindow(hwnd, GW_OWNER) == e->owner) {
+        d->refresh = FALSE;
+        ok = SetWindowPos(hwnd, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        trace("drag %p: refresh after owner %p shown (gen %d, ok %d)\n", hwnd, e->owner, gen, ok);
+    }
+    drag_release(hwnd, d);
+    return TRUE;
+}
+
+static void drag_owner_event(HWND owner, BOOL hide)
+{
+    struct drag_owner_ev e = { owner, hide };
+    EnumThreadWindows(GetCurrentThreadId(), drag_owner_enum, (LPARAM)&e);
+}
+
+static void drag_enter(HWND hwnd, struct drag *d)
+{
+    const char *why = "";
+    char cls[64] = "";
+    HWND owner;
+    if (d->state == DRAG_ENDED) { /* a new drag before the attach of the last one: that attach is skipped */
+        d->gen++;
+        d->state = DRAG_DETACHED;
+        return;
+    }
+    if (d->state != DRAG_NONE) return;
+    GetClassNameA(hwnd, cls, sizeof(cls));
+    if (!(owner = drag_eligible(hwnd, d, &why))) {
+        trace("drag %p (%s): enter, kept (%s)\n", hwnd, cls, why);
+        return;
+    }
+    d->gen++;
+    d->state = DRAG_ENTERED;
+    d->pending = FALSE;
+    if (!PostMessageW(hwnd, drag_detach_msg, d->gen, 0)) d->state = DRAG_NONE;
+    trace("drag %p (%s): enter, owner %p\n", hwnd, cls, owner);
+}
+
+static void drag_detach(HWND hwnd, struct drag *d, int gen)
+{
+    const char *why = "";
+    HWND owner;
+    if (d->gen != gen || d->state != DRAG_ENTERED) return;
+    if (d->depth > 1) { d->pending = TRUE; return; }   /* inside another message of this window: after it */
+    if (!(owner = drag_eligible(hwnd, d, &why))) {
+        d->state = DRAG_NONE;
+        trace("drag %p: owner kept (%s)\n", hwnd, why);
+        return;
+    }
+    d->owner = owner;
+    d->disabled = !IsWindowEnabled(owner);
+    d->state = DRAG_DETACHED;
+    SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, 0);
+    if (!drag_alive(hwnd, d, gen)) return;
+    if (GetWindow(hwnd, GW_OWNER)) {
+        d->state = DRAG_NONE;
+        trace("drag %p: owner %p could not be dropped\n", hwnd, owner);
+        return;
+    }
+    if (d->state == DRAG_NONE) return;   /* the owner was hidden meanwhile and put back */
+    SetWindowPos(hwnd, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    if (!drag_alive(hwnd, d, gen)) return;
+    trace("drag %p: owner %p dropped%s\n", hwnd, owner, d->disabled ? " (disabled)" : "");
+}
+
+static LRESULT drag_common(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, BOOL unicode)
+{
+    struct drag *d = drag_get(hwnd);
+    WNDPROC ours = unicode ? drag_proc_w : drag_proc_a;
+    UINT flags = 0;
+    LRESULT r = 0;
+    if (!d) return unicode ? DefWindowProcW(hwnd, msg, wp, lp) : DefWindowProcA(hwnd, msg, wp, lp);
+    drag_hold(d);   /* every frame holds d, so it outlives a WM_NCDESTROY inside the original */
+    if (msg == drag_detach_msg) {
+        drag_detach(hwnd, d, (int)wp);
+        goto done;
+    }
+    if (msg == drag_attach_msg) {
+        if ((int)wp == d->gen && d->state == DRAG_ENDED) drag_reattach(hwnd, d, "attach");
+        goto done;
+    }
+    if (msg == WM_EXITSIZEMOVE) { /* before the original: a message loop inside it must not see the drag going on */
+        if (d->state == DRAG_ENTERED) d->state = DRAG_NONE;
+        else if (d->state == DRAG_DETACHED) {
+            d->state = DRAG_ENDED;
+            if (!PostMessageW(hwnd, drag_attach_msg, d->gen, 0)) trace("drag %p: attach not posted\n", hwnd);
+        }
+    }
+    if (msg == WM_DESTROY && (d->state == DRAG_DETACHED || d->state == DRAG_ENDED)) drag_reattach(hwnd, d, "destroy");
+    if (msg == WM_NCDESTROY) { /* the original goes back first, as in fix 7; d is freed when the last frame ends */
+        RemovePropW(hwnd, DRAG_PROP);
+        d->dead = TRUE;
+        if (unicode && (WNDPROC)GetWindowLongPtrW(hwnd, GWLP_WNDPROC) == ours) SetWindowLongPtrW(hwnd, GWLP_WNDPROC, (LONG_PTR)d->orig);
+        if (!unicode && (WNDPROC)GetWindowLongPtrA(hwnd, GWLP_WNDPROC) == ours) SetWindowLongPtrA(hwnd, GWLP_WNDPROC, (LONG_PTR)d->orig);
+    }
+    if (msg == WM_WINDOWPOSCHANGED && lp) flags = ((WINDOWPOS *)lp)->flags;
+    r = unicode ? CallWindowProcW(d->orig, hwnd, msg, wp, lp) : CallWindowProcA(d->orig, hwnd, msg, wp, lp);
+    if (d->dead || drag_get(hwnd) != d) goto done;
+    if (msg == WM_ENTERSIZEMOVE) drag_enter(hwnd, d);
+    else if (msg == WM_WINDOWPOSCHANGED) {
+        if ((flags & SWP_HIDEWINDOW) && (d->state == DRAG_DETACHED || d->state == DRAG_ENDED))
+            drag_reattach(hwnd, d, "hidden");
+        if (flags & SWP_HIDEWINDOW) drag_owner_event(hwnd, TRUE);
+        if (flags & SWP_SHOWWINDOW) drag_owner_event(hwnd, FALSE);
+    }
+done:
+    drag_release(hwnd, d);
+    return r;
+}
+static LRESULT CALLBACK drag_proc_w(HWND h, UINT m, WPARAM w, LPARAM l) { return drag_common(h, m, w, l, TRUE); }
+static LRESULT CALLBACK drag_proc_a(HWND h, UINT m, WPARAM w, LPARAM l) { return drag_common(h, m, w, l, FALSE); }
+
+/* a top-level window with a title bar is shown (in its own thread); as in fix 7 */
+static void CALLBACK drag_on_show(HWINEVENTHOOK hook, DWORD ev, HWND hwnd, LONG obj, LONG child, DWORD tid, DWORD time)
+{
+    struct drag *d;
+    WNDPROC orig;
+    BOOL unicode;
+    char cls[64] = "";
+    if (obj != OBJID_WINDOW || child != CHILDID_SELF || !hwnd || GetPropW(hwnd, DRAG_PROP)) return;
+    if (GetAncestor(hwnd, GA_PARENT) != GetDesktopWindow() || (GetWindowLongW(hwnd, GWL_STYLE) & WS_CAPTION) != WS_CAPTION)
+        return;
+    if (GetWindowThreadProcessId(hwnd, NULL) != GetCurrentThreadId()) return;
+    unicode = IsWindowUnicode(hwnd);
+    orig = (WNDPROC)(unicode ? GetWindowLongPtrW(hwnd, GWLP_WNDPROC) : GetWindowLongPtrA(hwnd, GWLP_WNDPROC));
+    if (!orig || orig == drag_proc_w || orig == drag_proc_a) return;
+    if (!(d = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*d)))) return;
+    d->orig = orig;
+    d->unicode = unicode;
+    if (!SetPropW(hwnd, DRAG_PROP, d)) { HeapFree(GetProcessHeap(), 0, d); return; }
+    SetLastError(0);
+    if (!(unicode ? SetWindowLongPtrW(hwnd, GWLP_WNDPROC, (LONG_PTR)drag_proc_w)
+                  : SetWindowLongPtrA(hwnd, GWLP_WNDPROC, (LONG_PTR)drag_proc_a)) && GetLastError()) {
+        RemovePropW(hwnd, DRAG_PROP);   /* refused: the window stays as it was, the next show tries again */
+        HeapFree(GetProcessHeap(), 0, d);
+        return;
+    }
+    if (drag_installs++ < 64) {
+        GetClassNameA(hwnd, cls, sizeof(cls));
+        trace("drag %p (%s): procedure installed\n", hwnd, cls);
+    }
+}
+
+static void fix_dragowner(HINSTANCE inst)
+{
+    WCHAR path[MAX_PATH], *slash, env[8];
+    if (!GetModuleFileNameW(NULL, path, MAX_PATH) || !(slash = wcsrchr(path, L'\\')) || lstrcmpiW(slash + 1, L"Revit.exe"))
+        return;
+    SetLastError(0);   /* an empty variable leaves the last error as it was */
+    if (!GetEnvironmentVariableW(L"RVTFIX_DRAGOWNER", env, 8) && GetLastError() != ERROR_ENVVAR_NOT_FOUND) {
+        trace("drag: disabled (RVTFIX_DRAGOWNER is empty)\n");
+        return;
+    }
+    if (!(drag_detach_msg = RegisterWindowMessageW(L"rvtfix.drag.detach")) ||
+        !(drag_attach_msg = RegisterWindowMessageW(L"rvtfix.drag.attach"))) {
+        trace("drag: no window messages (%lu)\n", GetLastError());
+        return;
+    }
+    if (SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_SHOW, inst, drag_on_show, GetCurrentProcessId(), 0, WINEVENT_INCONTEXT))
+        trace("drag: owned windows have no owner while dragged\n");
+    else
+        trace("drag: no WinEvent hook (%lu)\n", GetLastError());
+}
+
 static void fix_dragdrop(void)
 {
     HMODULE ole = LoadLibraryW(L"ole32.dll");
@@ -705,6 +1001,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
         fix_maxpos(inst);
         fix_opaque(inst);
         fix_statusbar();
+        fix_dragowner(inst);
         watch_dlls(); /* under the loader lock: no DLL loads between the checks above and this */
     }
     return TRUE;
