@@ -6,7 +6,7 @@ PRODKEY=829M1
 SIGNIN=adsso
 LICENSING_OK="64"                  # AdskLicensing 10.2: takeown and `sc sdshow` fail under Wine (LIC-INST-ERROR-320)
 STEPS=(netfx vc fonts licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim richedit d3d9dxvk warpshim
-  gdoff rvtfix tlbpin dynamo wpfsw samples)
+  gdoff rvtfix tlbpin dynamo wpfsw samples gdrive)
 # core ODIS packages (names from manifest/app.RVT.xml): no FormIt, MEP Fabrication, other languages
 PKGS="RCLC|RCLCRVT|CM2021|CMILB2021|PrismBaseImageLibrary2021|PrismLowImageLibrary2021|UNITSCHEMAS|RCLEENU|RET|GenerativeDesign"
 REVITINI=()

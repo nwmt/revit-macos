@@ -231,3 +231,21 @@ step_pdfprinter() { # "Revit PDF": Wine's PostScript driver + tools/shims/pdfpri
   command -v gs >/dev/null || [ -x /opt/homebrew/bin/gs ] || note=" (no Ghostscript: .ps instead of .pdf; brew install ghostscript)"
   detail "Revit PDF → REVITPDF: → $(tilde "$port")$note"
 }
+
+step_gdrive() { # Projects from Windows link files by absolute paths on Google Drive's G: (G:\Shared drives\…), which the
+  # bottle does not have. tools/gdrive.py gives it G:: drive_g/ with a link per folder name (My Drive, Shared drives,
+  # Other computers, and second names such as the ru preset's) into ~/Library/CloudStorage/GoogleDrive-<account>.
+  # A new bottle gets G: in new-bottle.sh, before Wine first starts: Wine lists a drive only if it was there when its
+  # wineserver started. Here, under install.sh, the step only reports; from ./revit set it sets G: up or removes it.
+  # REVIT_GDRIVE=auto|off|again|<email>, REVIT_GDRIVE_NAMES (spec: internal/docs/specs/2026-10-29-gdrive-letter.md).
+  # gdrive.py prints no email and no path of an account folder
+  local args=() rc=0 adv where="$YEAR$(bottle_sfx "$NAME" "$YEAR")"
+  if [ -z "${INSTALL_PARENT:-}" ]; then
+    [ -n "${REVIT_GDRIVE:-}" ] && args+=(--mode "$REVIT_GDRIVE")
+    [ -n "${REVIT_GDRIVE_NAMES+x}" ] && args+=(--names "$REVIT_GDRIVE_NAMES")
+    python3 -I "$ROOT/tools/gdrive.py" apply "$B" ${args[@]+"${args[@]}"}; rc=$?
+  fi
+  adv="$(python3 -I "$ROOT/tools/gdrive.py" advice "$B" "$where")" || return 1
+  echo "$adv"; detail "${adv#*$'\t'}"
+  return $rc
+}

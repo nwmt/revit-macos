@@ -5,7 +5,7 @@ PRODKEY=829O1
 SIGNIN=adsso
 LICENSING_OK="84"                  # its service cannot start under Wine before the svcshim step
 STEPS=(vc fonts netfx licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim d3d9dxvk richedit tlbpin
-  warpshim gdoff rvtfix dynamo)
+  warpshim gdoff rvtfix dynamo gdrive)
 # core ODIS packages (names from manifest/app.RVT.xml): no Dynamo, Twinmotion, other languages; materials CM2023/…2023
 PKGS="RCLC|RCLCRVT|RVTCPSTLCON|REX Framework|REX Revit|RSA CommonData|RSA COM|RSA Interop|RSA RoReinf|CM2023|CMILB2023|PrismBaseImageLibrary2023|PrismLowImageLibrary2023|PrismMediumImageLibrary2023|UNITSCHEMAS|RCLEENU|RET|GenerativeDesign"
 REVITINI=()

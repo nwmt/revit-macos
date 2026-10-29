@@ -5,7 +5,7 @@ PRODKEY=829R1
 SIGNIN=idmgr
 LICENSING_OK="84"
 STEPS=(vc fonts dotnet licensing svcshim idmgr rvt pkgs asc revitini register ncryptshim webview2 d3d9dxvk richedit
-  tlbpin warpshim gdoff rvtfix wv2fix downloads)
+  tlbpin warpshim gdoff rvtfix wv2fix downloads gdrive)
 PKGS="RCLC|RCLCRVT|RVTCPSTLCON|HIVE|DWGSHARED|REX Framework|REX Revit|RSA CommonData|RSA COM|RSA RoReinf|CM4|CMILB4|PrismBaseImageLibrary4|PrismLowImageLibrary4|PrismMediumImageLibrary4|UNITSCHEMAS|RCLEENU|ATF|CORE|CLOUD|SHARED|RVTONLY|RET|OpenUSD|GenerativeDesign"
 REVITINI=(Language.Select=ENU)
 THEME=1

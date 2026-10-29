@@ -382,6 +382,15 @@ class Bottle(Sandbox):
         self.record(requested=list(STEPS))
         self.assertEqual(self.by_id(self.checks())["install.steps"].status, "ok")
 
+    def test_gdrive_the_bottle_never_ran_or_failed_is_no_reason_to_rebuild(self):
+        self.profile = dict(self.profile, STEPS=STEPS + ["gdrive"])
+        self.records_clear()
+        self.record(requested=list(STEPS))
+        self.assertEqual(self.by_id(self.checks())["install.steps"].status, "ok")
+        self.records_clear()
+        self.record(requested=STEPS + ["gdrive"], result="partial", failed=["gdrive"])
+        self.assertEqual(self.by_id(self.checks())["install.last"].status, "ok")
+
     def test_install_log_of_an_old_bottle(self):
         self.records_clear()
         d = os.path.join(self.data, "logs", self.name, "20261001-100000-install")
@@ -1010,6 +1019,10 @@ class Settings(Sandbox):
         self.assertEqual(self.group()["settings.display"].title, "Retina on (192 DPI); Cmd works as Ctrl")
         self.regs(mac=dict(self.ON, LeftCommandIsCtrl="dword:00000079"), hkcu="dword:000000c0")
         self.assertEqual(sorted(self.group()), ["settings.keys"])
+
+    def test_gdrive_does_not_turn_on_the_display_and_keys_checks(self):
+        self.regs()
+        self.assertEqual(self.group(profile=dict(PROFILE, STEPS=list(PROFILE["STEPS"]) + ["gdrive"])), {})
 
     def test_no_settings_group_without_the_steps_or_the_registry(self):
         self.regs()

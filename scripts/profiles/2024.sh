@@ -6,7 +6,7 @@ PRODKEY=829P1
 SIGNIN=idmgr
 LICENSING_OK="84"
 STEPS=(vc fonts netfx licensing svcshim idmgr rvt pkgs revitini register ncryptshim webview2 wbemshim d3d9dxvk richedit
-  tlbpin warpshim gdoff rvtfix wv2fix dynamo)
+  tlbpin warpshim gdoff rvtfix wv2fix dynamo gdrive)
 # the rest of Revit (CefSharp, ATF, shared and cloud parts with Dynamo) is in the MSM_* ADIX packages
 PKGS="RCLC|RCLCRVT|RVTCPSTLCON|HIVE|DWGSHARED|REX Framework|REX Revit|RSA CommonData|RSA COM|RSA Interop|RSA RoReinf|CM4|CMILB4|PrismBaseImageLibrary4|PrismLowImageLibrary4|PrismMediumImageLibrary4|UNITSCHEMAS|RCLEENU|MSM_CEFSHARP|MSM_ATF|MSM_EXT|MSM_CLOUD|RET|GenerativeDesign"
 # RealDWG: Revit finds it through the HIVE host, which asks ODIS's install database; it reads this cached path first

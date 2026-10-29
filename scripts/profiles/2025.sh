@@ -5,7 +5,7 @@ PRODKEY=829Q1
 SIGNIN=idmgr
 LICENSING_OK="84"
 STEPS=(vc fonts dotnet licensing svcshim idmgr rvt pkgs asc revitini register ncryptshim webview2 d3d9dxvk richedit
-  tlbpin warpshim gdoff rvtfix wv2fix dynamo)
+  tlbpin warpshim gdoff rvtfix wv2fix dynamo gdrive)
 # like 2026 without OpenUSD; adds RSA Interop and CEFSHARP (CefSharp, as in 2023); no ASC package; Dynamo 3.3 (ADIX)
 PKGS="RCLC|RCLCRVT|RVTCPSTLCON|HIVE|DWGSHARED|REX Framework|REX Revit|RSA CommonData|RSA COM|RSA Interop|RSA RoReinf|CM4|CMILB4|PrismBaseImageLibrary4|PrismLowImageLibrary4|PrismMediumImageLibrary4|UNITSCHEMAS|RCLEENU|ATF|CORE|CLOUD|SHARED|RVTONLY|CEFSHARP|RET|GenerativeDesign|DYNAMO_CORE|DYNAMO_DOCS"
 REVITINI=(Language.Select=ENU 'Interoperability.RealDWGInstalledLocation=C:\Program Files\Autodesk\RealDWG Shared 2025\')

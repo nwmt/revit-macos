@@ -5,6 +5,6 @@ Plan:
   4. scripts/new-bottle.sh 2023 rvt2023-a
   5. scripts/run-steps.sh 2023 rvt2023-a
   6. scripts/make-apps.sh 2023 rvt2023-a
-Steps: vc fonts netfx licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim d3d9dxvk richedit tlbpin warpshim gdoff rvtfix dynamo
+Steps: vc fonts netfx licensing svcshim adsso rvt pkgs register ncryptshim ssoenv wbemshim d3d9dxvk richedit tlbpin warpshim gdoff rvtfix dynamo gdrive
 
 Fix the items marked ✗ and run ./revit install 2023 again.

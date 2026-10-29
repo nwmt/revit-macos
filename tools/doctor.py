@@ -57,6 +57,8 @@ NDP_KEY = "Software\\Microsoft\\NET Framework Setup\\NDP\\v4\\Full"
 # settings group and bottle.theme say what to do. Wine reads RetinaMode from MAC_DRIVER, the
 # keys from Revit.exe's AppDefaults first, LogPixels from DESKTOP_KEY (user.reg), then FONTS_HKLM (system.reg), then 96
 SETTING_STEPS = ("retina", "mackeys", "theme")
+# steps whose absence or failure ./revit set mends, not a rebuild (SETTING_STEPS also turns on the display and keys checks)
+NOT_REBUILD_STEPS = SETTING_STEPS + ("gdrive",)
 MAC_DRIVER = "Software\\Wine\\Mac Driver"
 MAC_DRIVER_APP = "Software\\Wine\\AppDefaults\\Revit.exe\\Mac Driver"
 DESKTOP_KEY = "Control Panel\\Desktop"
@@ -201,6 +203,7 @@ FIXES = {
     "mackeys": _fix("Cmd works as Alt: Cmd+S opens a ribbon tab", why="the settings group reads the registry"),
     "theme": _fix("Revit keeps the theme it got at install when the Mac turns light or dark",
                   why="the theme check reads the bottle's theme file"),
+    "gdrive": _fix("links to files on Google Drive's G: do not open", why="the G: check reads the bottle"),
     "revitlookup": _fix("RevitLookup", why="the add-ins checks list it"),
     "pyrevit": _fix("pyRevit", why="the add-ins checks list it"),
     "trust": _fix("Revit asks about signed add-ins on every start"),
@@ -1219,7 +1222,7 @@ def install_checks(f, b):
         date = str(last.get("time", ""))[:10]
         later = recs[recs.index(last) + 1:]
         fixed = {s for r in later for s in r.get("done") or []}
-        left = [s for s in last.get("failed") or [] if s not in fixed and s not in SETTING_STEPS]
+        left = [s for s in last.get("failed") or [] if s not in fixed and s not in NOT_REBUILD_STEPS]
         res = last.get("result")
         if res == "ok" or (res == "partial" and not left):
             out.append(Check("install.last", "ok", f"the last install ({date}) finished"))
@@ -1236,7 +1239,7 @@ def install_checks(f, b):
                              detail=f"failed{at}" if at else "", fix=rebuild(f), doc=DOC["start-over"]))
     elif b.get("summary"):
         s = b["summary"]
-        sf = [x for x in s["failed"] if x not in SETTING_STEPS]   # settings: the settings group says what to do
+        sf = [x for x in s["failed"] if x not in NOT_REBUILD_STEPS]   # settings: the settings group says what to do
         if sf:
             out.append(Check("install.last", "warn", f"the last install ({s['date']}) left fixes undone: " +
                              "; ".join(FIXES.get(x, {}).get("symptom", x) for x in sf),
@@ -1250,7 +1253,7 @@ def install_checks(f, b):
     ran = ran_steps(b)
     steps = [s for s in f["profile"].get("STEPS") or []]
     if ran is not None:
-        miss = [s for s in steps if s not in ran and s not in SETTING_STEPS]
+        miss = [s for s in steps if s not in ran and s not in NOT_REBUILD_STEPS]
         if miss:
             out.append(Check("install.steps", "warn", f"this bottle lacks fixes this project has now ({len(miss)}): " +
                              "; ".join(FIXES.get(s, {}).get("symptom", s) for s in miss),

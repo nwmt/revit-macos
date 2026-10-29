@@ -25,6 +25,23 @@ fi
 echo ">> creating $NAME ($TEMPLATE), log: $(tilde "$LOG")"
 "$CX/bin/cxbottle" --bottle "$NAME" --create --template "$TEMPLATE" --description "Revit $YEAR" >>"$LOG" 2>&1 </dev/null 7>&- 9>&- \
   || die "CrossOver could not create bottle $NAME (log: $(tilde "$LOG"))."
+# G: from Google Drive now, before this script starts Wine: Wine lists a drive only if it was there when its wineserver
+# started (the step gdrive at the end of the install only reports). CrossOver's template ran Wine: wait until it is done.
+# G: is never a reason to stop the install
+gdrive_early() {
+  local i=0 act adv rc where="$YEAR$(bottle_sfx "$NAME" "$YEAR")" args=()
+  while act="$(bottle_activity "$B")"; [ "$act" != stopped ] && [ $i -lt 30 ]; do sleep 1; i=$((i + 1)); done
+  if [ "$act" != stopped ]; then
+    echo ">> G: is not set up (Wine was still running in the new bottle): ./revit set $where gdrive=auto"; return 0
+  fi
+  [ -n "${REVIT_GDRIVE:-}" ] && args+=(--mode "$REVIT_GDRIVE")
+  [ -n "${REVIT_GDRIVE_NAMES+x}" ] && args+=(--names "$REVIT_GDRIVE_NAMES")
+  python3 -I "$ROOT/tools/gdrive.py" apply "$B" ${args[@]+"${args[@]}"} >>"$LOG" 2>&1; rc=$?
+  adv="$(python3 -I "$ROOT/tools/gdrive.py" advice "$B" "$where" 2>>"$LOG")" || return 0
+  [ $rc = 0 ] || echo "G: failed (gdrive.py $rc), see above" >>"$LOG"
+  echo ">> ${adv#*$'\t'}"
+}
+gdrive_early
 w wineboot -u >>"$LOG" 2>&1   # its code says nothing; the next command shows whether the bottle runs programs
 w cmd /c ver 2>>"$LOG" | tr -d '\r' || die "The new bottle $NAME does not run Windows programs (log: $(tilde "$LOG"))."
 echo ">> done: $(tilde "$B")"

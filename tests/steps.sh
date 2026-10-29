@@ -82,7 +82,7 @@ hold_lock() { # $1 = owner text: a background process that holds the lock like a
 # ---- versions.sh and profiles ----
 reset; in_repo 'echo "${REVIT_SUPPORTED[*]}"'; expect "supported years come from the profiles" 0 "2020 2021 2023 2024 2025 2026 2027"
 reset; in_repo 'load_profile 2024 && echo "$YEAR $PRODKEY ${#STEPS[@]} ${REVITINI[1]}"'
-expect "a profile loads" 0 '2024 829P1 21 Interoperability.RealDWGInstalledLocation=C:\Program Files\Autodesk\RealDWG Shared 2024\'
+expect "a profile loads" 0 '2024 829P1 22 Interoperability.RealDWGInstalledLocation=C:\Program Files\Autodesk\RealDWG Shared 2024\'
 # a version page lists Dynamo under Works only for a year whose install has the dynamo step
 reset; in_repo 'for y in "${REVIT_SUPPORTED[@]}"; do load_profile "$y"; in_list dynamo "${STEPS[@]}" && continue
   awk "/^## Works/{f=1; next} /^## /{f=0} f" "'"$REPO"'/versions/$y.md" | grep -qi dynamo && echo "$y lists Dynamo"; done; echo checked'
@@ -104,12 +104,12 @@ reset; in_repo 'load_profile 2020; profile_json; load_profile 2027; profile_json
 check "profile_json: one JSON object per profile, with its lists" eval '/usr/bin/perl -MJSON::PP -ne '"'"'my $j = decode_json($_);
   exit 1 unless ref $j->{STEPS} eq "ARRAY" && ref $j->{PKGS} eq "ARRAY" && ref $j->{RICHEDIT} eq "ARRAY"; print "$j->{YEAR} ",
   scalar @{$j->{STEPS}}, " $j->{STEPS}[0] ", scalar @{$j->{PKGS}}, " $j->{DOTNET} [$j->{ENSCAPE}] $j->{RVTFIX_ENV}[0]\n"'"'"' <<<"$OUT" |
-  tr "\n" "|" | grep -qxF "2020 23 netfx 0 netfx47 [3] RVTFIX_CEF_ARGS=|2027 25 vc 32 net10 [4] |"'
+  tr "\n" "|" | grep -qxF "2020 24 netfx 0 netfx47 [3] RVTFIX_CEF_ARGS=|2027 26 vc 32 net10 [4] |"'
 reset; mkdir -p "$T/real"; ln -s "$T/real" "$T/link"; ln -s "$T/nowhere" "$T/dangling"
 in_repo 'for p in "$HOME/not/there/yet" "'"$T"'/link/sub" "'"$T"'/dangling"; do free_gb "$p"; volume_id "$p"; done'
 check "free_gb and volume_id: a number for a path that is not there, a link, a link to nothing" \
   eval '[ "$(grep -cE "^[0-9]+$" <<<"$OUT")" = 6 ] && [ "$(sed -n 2p <<<"$OUT")" = "$(stat -f %d "$T")" ]'
-reset; in_repo 'load_profile 2020 && echo "${#STEPS[@]} ${STEPS[0]} ${STEPS[22]}"'; expect "the 2020 profile has its 23 steps" 0 "23 netfx mackeys"
+reset; in_repo 'load_profile 2020 && echo "${#STEPS[@]} ${STEPS[0]} ${STEPS[23]}"'; expect "the 2020 profile has its 24 steps" 0 "24 netfx gdrive"
 reset; in_repo 'for y in "${REVIT_SUPPORTED[@]}"; do load_profile "$y"; in_list pdfprinter "${STEPS[@]}" && echo "$y"; done; echo checked'
 expect "no year installs the PDF printer by default" 0 "checked"; check "pdfprinter in no STEPS" test "$OUT" = checked
 
@@ -160,7 +160,7 @@ reset; hold_lock holder; mkdir -p "$T/ctx"; in_repo 'REVIT_RUN_CTX="'"$T"'/ctx";
 
 # ---- bottle_guard ----
 mkbottle() { # $1 = name, $2 = year in the description ("" = none), $3 = year of the Revit folder ("" = none)
-  local b="$BOTTLES/$1"; mkdir -p "$b/drive_c/windows/system32/wbem" "$b/drive_c/users/crossover"
+  local b="$BOTTLES/$1"; mkdir -p "$b/drive_c/windows/system32/wbem" "$b/drive_c/users/crossover" "$b/dosdevices"
   printf '[Bottle]\n%s\n[EnvironmentVariables]\n' "${2:+\"Description\" = \"Revit $2\"}" > "$b/cxbottle.conf"
   [ -z "$3" ] || mkdir -p "$b/drive_c/Program Files/Autodesk/Revit $3"
   local d; for d in d3d9 version vulkan-1 riched20 usp10 msls31 msftedit; do builtin_dll "$b/drive_c/windows/system32/$d.dll"; done
@@ -659,6 +659,29 @@ check "revitini 2027: anti-aliasing off, the theme left to the step theme" eval 
 reset; mkbottle rvt2024-t 2024 2024; run_steps 2024 rvt2024-t pdfprinter
 expect "pdfprinter" 0 "pdfprinter"
 check "pdfprinter: the port path is quoted for /bin/sh (the sandbox path has a space)" called "|'$R/scripts/ps2pdf-port.sh'"
+# gdrive: G: from Google Drive (tools/gdrive.py has the unit tests); here the step in run-steps.sh, on a fake account
+GD="$H/Library/CloudStorage/GoogleDrive-someone@example.com"; GB="$BOTTLES/rvt2027-t"
+gd_world() { reset; mkbottle rvt2027-t 2027 2027; mkdir -p "$GD/My Drive" "$GD/Shared drives" "$GD/Other computers"; }
+gd_clean() { # $1 = name of the check: no email anywhere a run leaves text
+  check "$1: no email in the output, the logs, the events or the run record" eval '! grep -q "example.com" <<<"$OUT" &&
+    ! grep -rq "example.com" "$R/logs" && ! grep -rq "example.com" "$GB/revit-macos" 2>/dev/null'
+}
+gd_world; run_steps 2027 rvt2027-t gdrive; expect "gdrive: one account" 0 "G: → Google Drive"
+check "gdrive: G: and its links" eval '[ "$(readlink "$GB/dosdevices/g:")" = ../drive_g ] && [ -L "$GB/drive_g/Shared drives" ]'
+check "gdrive: the line is the step's detail" grep -qE '^   gdrive +exit=0 .*G: → Google Drive' "$RUN/summary.txt"
+gd_clean "gdrive"
+gd_world; STEP_ENV=(REVIT_GDRIVE_NAMES=ru); run_steps 2027 rvt2027-t gdrive; expect "gdrive: ru names" 0 "3 more folder names"
+gd_world; mkdir -p "$H/Library/CloudStorage/GoogleDrive-other@example.com"; run_steps 2027 rvt2027-t gdrive
+expect "gdrive: two accounts, no choice made" 0 "gdrive=<email>"; check "gdrive: two accounts, no G:" test ! -e "$GB/dosdevices/g:"
+gd_world; ln -s /Volumes/x "$GB/dosdevices/g:"; run_steps 2027 rvt2027-t gdrive
+expect "gdrive: G: of something else" 1 "something else"; check "gdrive: the other G: stays" test "$(readlink "$GB/dosdevices/g:")" = /Volumes/x
+gd_clean "gdrive failed"
+gd_world; STEP_ENV=(REVIT_GDRIVE_NAMES="My Drive=nobody@example.com"); run_steps 2027 rvt2027-t gdrive
+expect "gdrive: a name with an email is refused" 1 "gdrive"
+check "gdrive: the refused name is nowhere" eval '! grep -q "nobody@" <<<"$OUT" && ! grep -rq "nobody@" "$R/logs"'
+gd_world; STEP_ENV=(INSTALL_PARENT=1 RUN_DIR="$R/logs/rvt2027-t/install"); mkdir -p "$R/logs/rvt2027-t/install"
+run_steps 2027 rvt2027-t gdrive; expect "gdrive under install.sh only reports" 0 "gdrive=auto"
+check "gdrive under install.sh: the bottle is not changed" eval '[ ! -e "$GB/dosdevices/g:" ] && [ ! -e "$GB/drive_c/Program Files/revit-macos/gdrive" ]'
 reset; mkbottle rvt2024-t 2024 2024; P="$BOTTLES/rvt2024-t/drive_c/ProgramData/Autodesk/RVT 2024/UserDataCache"; mkdir -p "$P"
 python3 -I -c 'import sys; open(sys.argv[1], "wb").write(b"\xff\xfe" + "[Language]\r\nSelect=en-US\r\n".encode("utf-16-le"))' "$P/Revit.ini"
 STEP_ENV=(REVIT_THEME=dark); run_steps 2024 rvt2024-t revitini; expect "revitini" 0 "revitini"
@@ -933,17 +956,27 @@ reset; cat > "$CXF/bin/cxbottle" <<EOF
 echo "cxbottle \$*" >> "$CALLS"
 b=""; while [ \$# -gt 0 ]; do case "\$1" in --bottle) b="\$2"; shift ;; --description) d="\$2"; shift ;; --create) c=1 ;; --delete) x=1 ;; esac; shift; done
 [ -n "\${x:-}" ] && rm -rf "$BOTTLES/\$b"
-[ -n "\${c:-}" ] && { mkdir -p "$BOTTLES/\$b/drive_c"; printf '[Bottle]\n"Description" = "%s"\n' "\$d" > "$BOTTLES/\$b/cxbottle.conf"; }
+[ -n "\${c:-}" ] && { mkdir -p "$BOTTLES/\$b/drive_c" "$BOTTLES/\$b/dosdevices"; printf '[Bottle]\n"Description" = "%s"\n' "\$d" > "$BOTTLES/\$b/cxbottle.conf"; }
 exit 0
 EOF
 chmod +x "$CXF/bin/cxbottle"
 OUT="$(cd / && "${SANDBOX_ENV[@]}" /bin/bash "$R/scripts/new-bottle.sh" 2024 rvt2024-t 2>&1)"; RC=$?
 expect "new-bottle creates the bottle" 0 "done"
 check "new-bottle describes it as Revit <year>" grep -q '"Description" = "Revit 2024"' "$BOTTLES/rvt2024-t/cxbottle.conf"
+check "new-bottle without Google Drive: no G:, one line, the install goes on" eval 'grep -q "Google Drive not found: no G: drive" <<<"$OUT" && [ ! -e "$BOTTLES/rvt2024-t/dosdevices/g:" ]'
 OUT="$(cd / && "${SANDBOX_ENV[@]}" /bin/bash "$R/scripts/new-bottle.sh" 2024 rvt2024-t 2>&1)"; RC=$?
 expect "new-bottle refuses an existing bottle" 1 "already exists"
 OUT="$(cd / && "${SANDBOX_ENV[@]}" CX_RECREATE=1 /bin/bash "$R/scripts/new-bottle.sh" 2025 rvt2024-t 2>&1)"; RC=$?
 expect "new-bottle: CX_RECREATE checks the year first" 1 "is for Revit 2024, not 2025"
+# G: before Wine starts: the order of the calls (wineserver must be stopped first; the fake has no Wine processes)
+gd_account() { mkdir -p "$H/Library/CloudStorage/GoogleDrive-$1/My Drive" "$H/Library/CloudStorage/GoogleDrive-$1/Shared drives"; }
+rm -rf "$BOTTLES/rvt2024-t"; : > "$CALLS"; gd_account someone@example.com
+OUT="$(cd / && "${SANDBOX_ENV[@]}" /bin/bash "$R/scripts/new-bottle.sh" 2024 rvt2024-t 2>&1)"; RC=$?
+expect "new-bottle with Google Drive" 0 "G: → Google Drive"
+check "new-bottle: G: is in place before wineboot" eval '[ "$(readlink "$BOTTLES/rvt2024-t/dosdevices/g:")" = ../drive_g ] &&
+  grep -n -e "cxbottle.*--create" -e "\[wineboot\]" "$CALLS" | head -1 | grep -q cxbottle'
+check "new-bottle: no email on screen or in the bottle log" eval '! grep -q "example.com" <<<"$OUT" && ! grep -rq "example.com" "$R/logs"'
+rm -rf "$BOTTLES/rvt2024-t" "$H/Library/CloudStorage"
 # the fake "Revit" is the fake wine itself: Revit.exe in its arguments and the bottle's drive_c as its folder, so
 # revit_running sees it, as it sees the real one
 reset; mkbottle rvt2024-t 2024 2024; rule "Revit.exe" 0 "sleep 4"
