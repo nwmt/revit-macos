@@ -78,7 +78,15 @@
  *    instead. The size grip and every other window are drawn as before. Only in Revit.exe. RVTFIX_STATUSBAR set and
  *    empty disables.
  *
- * 4 and 5 run when the DLL loads (LdrRegisterDllNotification), or at once if it is already loaded.
+ * 10. Orbiting in the Textures visual style (2027): for every textured material, on every frame, Revit asks
+ *    OGS::Devices::OIIOImageHandler::GetImageDesc (OGSOIIOIntegration.dll) for the texture's size and format, and
+ *    OpenImageIO opens the image file to read its header. Under Wine each open, stat and read costs much more than on
+ *    Windows: about a fifth of the orbit time on the Snowdon Towers sample. Fix: a jump at the start of the function
+ *    (12 bytes of prologue, checked before the patch) to a cache: the 0x30-byte ImageDesc it returns (a vtable,
+ *    numbers only) is kept per path for 2 s, and the caller gets a new copy from the allocator the function itself
+ *    uses (it deletes the result through the vtable). Only in Revit.exe. RVTFIX_IMGCACHE set and empty disables.
+ *
+ * 4, 5 and 10 run when the DLL loads (LdrRegisterDllNotification), or at once if it is already loaded.
  *
  * Diagnostics: OutputDebugString with the "[rvtfix]" prefix (CX_DEBUGMSG=+debugstr).
  */
@@ -290,12 +298,95 @@ static void patch_mfc(BYTE *base)
     trace("DesktopMFC.dll: USER32!%s: %s\n", from, how);
 }
 
+/* --- 10. Textures: cache of OIIOImageHandler::GetImageDesc --- */
+#define IMGDESC_SIZE 0x30
+#define IMGDESC_TTL 2000   /* ms: a texture file changed on disk is read again after this */
+#define IMGDESC_SLOTS 4096
+typedef void *(*get_image_desc_fn)(void *self, const void *path);
+typedef const WCHAR *(*kstring_wcs_fn)(const void *str);
+typedef void *(*heap_new_fn)(size_t);
+static BOOL imgcache_on;
+static get_image_desc_fn orig_get_image_desc;   /* the moved prologue, then a jump back */
+static kstring_wcs_fn kstring_wcs;              /* OGSObjects!KString::operator const wchar_t * */
+static heap_new_fn *imgdesc_new_slot;           /* the import slot of the function's own operator new */
+static SRWLOCK imgdesc_lock = SRWLOCK_INIT;
+static struct { WCHAR *path; ULONGLONG time; BOOL none; BYTE desc[IMGDESC_SIZE]; } imgdesc[IMGDESC_SLOTS];
+
+static unsigned imgdesc_hash(const WCHAR *s)
+{
+    unsigned h = 2166136261u;
+    for (; *s; s++) h = (h ^ (*s | 0x20)) * 16777619u;   /* paths compare without case */
+    return h;
+}
+
+static void *hook_get_image_desc(void *self, const void *str)
+{
+    const WCHAR *path = kstring_wcs(str);
+    ULONGLONG now = GetTickCount64();
+    unsigned h, i;
+    void *desc;
+    if (!path || !*path) return orig_get_image_desc(self, str);
+    h = imgdesc_hash(path);
+    AcquireSRWLockShared(&imgdesc_lock);
+    for (i = 0; i < 8; i++) {
+        unsigned k = (h + i) % IMGDESC_SLOTS;
+        if (!imgdesc[k].path || now - imgdesc[k].time >= IMGDESC_TTL || lstrcmpiW(imgdesc[k].path, path)) continue;
+        if (imgdesc[k].none) { ReleaseSRWLockShared(&imgdesc_lock); return NULL; }
+        if ((desc = (*imgdesc_new_slot)(IMGDESC_SIZE))) CopyMemory(desc, imgdesc[k].desc, IMGDESC_SIZE);
+        ReleaseSRWLockShared(&imgdesc_lock);
+        return desc ? desc : orig_get_image_desc(self, str);
+    }
+    ReleaseSRWLockShared(&imgdesc_lock);
+    desc = orig_get_image_desc(self, str);
+    AcquireSRWLockExclusive(&imgdesc_lock);
+    for (i = 0; i < 8; i++) {   /* a free, stale or same-path slot; all 8 fresh: not cached */
+        unsigned k = (h + i) % IMGDESC_SLOTS;
+        if (imgdesc[k].path && now - imgdesc[k].time < IMGDESC_TTL && lstrcmpiW(imgdesc[k].path, path)) continue;
+        SIZE_T n = (lstrlenW(path) + 1) * sizeof(WCHAR);
+        WCHAR *copy = HeapAlloc(GetProcessHeap(), 0, n);
+        if (!copy) break;
+        CopyMemory(copy, path, n);
+        if (imgdesc[k].path) HeapFree(GetProcessHeap(), 0, imgdesc[k].path);
+        imgdesc[k].path = copy; imgdesc[k].time = now; imgdesc[k].none = !desc;
+        if (desc) CopyMemory(imgdesc[k].desc, desc, IMGDESC_SIZE);
+        break;
+    }
+    ReleaseSRWLockExclusive(&imgdesc_lock);
+    return desc;
+}
+
+static void patch_imagedesc(HMODULE mod)
+{
+    /* movq %rbx,0x18(%rsp); push rbp, rsi, rdi, r12, r13: whole instructions, nothing relative to rip */
+    static const BYTE prologue[12] = {0x48, 0x89, 0x5c, 0x24, 0x18, 0x55, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55};
+    HMODULE objects = GetModuleHandleW(L"OGSObjects.dll");   /* imported by OGSOIIOIntegration: already mapped */
+    BYTE *f = (BYTE *)GetProcAddress(mod, "?GetImageDesc@OIIOImageHandler@Devices@OGS@@UEAAPEAUImageDesc@23@AEBVKString@Objects@3@@Z");
+    BYTE *tramp, back[12] = {0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xe0};
+    if (objects) kstring_wcs = (kstring_wcs_fn)GetProcAddress(objects, "??BKString@Objects@OGS@@QEBAPEB_WXZ");
+    /* +0x3b: "mov ecx, 30h; call [rip+disp]": the ImageDesc's allocation, through OGSObjects!HeapOperators::operator new */
+    if (!f || !kstring_wcs || memcmp(f, prologue, sizeof(prologue)) || f[0x3b] != 0xb9 ||
+        *(DWORD *)(f + 0x3c) != IMGDESC_SIZE || f[0x40] != 0xff || f[0x41] != 0x15) {
+        trace("OGSOIIOIntegration.dll: GetImageDesc not as expected: no texture cache\n");
+        return;
+    }
+    imgdesc_new_slot = (heap_new_fn *)(f + 0x46 + *(INT32 *)(f + 0x42));   /* read at each call: bound by then */
+    if (!(tramp = alloc_near(f, 0x1000))) { trace("OGSOIIOIntegration.dll: no memory for the trampoline\n"); return; }
+    BYTE *cont = f + sizeof(prologue);
+    CopyMemory(tramp, prologue, sizeof(prologue));
+    CopyMemory(back + 2, &cont, sizeof(cont));   /* rax is free at a call's start: not an argument */
+    CopyMemory(tramp + sizeof(prologue), back, sizeof(back));
+    FlushInstructionCache(GetCurrentProcess(), tramp, sizeof(prologue) + sizeof(back));
+    orig_get_image_desc = (get_image_desc_fn)tramp;
+    if (write_jump(f, (void *)hook_get_image_desc)) trace("OGSOIIOIntegration.dll: GetImageDesc cached for %d ms\n", IMGDESC_TTL);
+}
+
 static void patch_autodesk(HMODULE mod, const WCHAR *name)
 {
     if (!lstrcmpiW(name, L"OGSDeviceDX11.dll")) {
         if (have_d3dwp) patch_ogs((BYTE *)mod);
         else trace("OGSDeviceDX11.dll: no d3dwp.dll next to Revit.exe, left as is\n");
     } else if (!lstrcmpiW(name, L"DesktopMFC.dll")) patch_mfc((BYTE *)mod);
+    else if (imgcache_on && !lstrcmpiW(name, L"OGSOIIOIntegration.dll")) patch_imagedesc(mod);
 }
 
 static void fix_autodesk(void)
@@ -303,14 +394,21 @@ static void fix_autodesk(void)
     WCHAR path[MAX_PATH], *slash;
     HMODULE m;
     if (GetModuleFileNameW(NULL, path, MAX_PATH) && (slash = wcsrchr(path, L'\\'))) {
+        WCHAR env[2];
+        imgcache_on = !lstrcmpiW(slash + 1, L"Revit.exe");
+        if (imgcache_on && !GetEnvironmentVariableW(L"RVTFIX_IMGCACHE", env, 2) && GetLastError() != ERROR_ENVVAR_NOT_FOUND) {
+            imgcache_on = FALSE;
+            trace("texture cache: disabled (RVTFIX_IMGCACHE is empty)\n");
+        }
         lstrcpyW(slash + 1, L"d3dwp.dll");
         have_d3dwp = GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES;
     }
     if ((m = GetModuleHandleW(L"OGSDeviceDX11.dll"))) patch_autodesk(m, L"OGSDeviceDX11.dll");
     if ((m = GetModuleHandleW(L"DesktopMFC.dll"))) patch_autodesk(m, L"DesktopMFC.dll");
+    if ((m = GetModuleHandleW(L"OGSOIIOIntegration.dll"))) patch_autodesk(m, L"OGSOIIOIntegration.dll");
 }
 
-/* DLLs loaded later: WebView2Loader.dll (2), OGSDeviceDX11.dll and DesktopMFC.dll (4, 5). */
+/* DLLs loaded later: WebView2Loader.dll (2), OGSDeviceDX11.dll, DesktopMFC.dll and OGSOIIOIntegration.dll (4, 5, 10). */
 static void watch_dlls(void)
 {
     ldr_register_fn reg = (ldr_register_fn)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "LdrRegisterDllNotification");

@@ -62,4 +62,6 @@ Windows laptop, done over remote desktop, which lowers its graphics score.
   Textures 75.7 s (3.6). A second run was within 10–25%. One CPU thread of Revit's drawing limits the speed, not the
   GPU: the styles with edges draw 3–6 times as many lines, and in Textures Revit reads its texture files again for
   every frame (about 6 MB per frame). The benchmark's graphics set does not show this: it redraws a small model without
-  orbiting.
+  orbiting. Since `tools/shims/rvtfix` keeps the texture descriptions Revit asks for on every frame (fix 10), Textures
+  takes 46.0 s instead of 57.1 s (−19%; 3 runs each, a copy of the bottle, Textures and Shaded only); Shaded is
+  unchanged. The view looks the same, pixel for pixel.
