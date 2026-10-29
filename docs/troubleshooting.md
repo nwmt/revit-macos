@@ -268,7 +268,8 @@ drives` and `Other computers` as a Russian Windows names them), or your own, for
 Wine looks inside every subfolder the dialog shows, and Google Drive fetches the list of a folder this Mac has not
 opened yet from the internet, about half a second each. A folder with hundreds of such subfolders takes minutes the
 first time. List them once, ahead: `./revit gdrive warm 2025 "G:\Shared drives\Team\Projects"`. It reads only the
-folders, not the files, and can run while Revit is open.
+folders, not the files, and can run while Revit is open. If it says Google Drive does not answer, start Google Drive for
+desktop (it has to run for G: to work at all) and run it again.
 
 ## Trackpad (menu bar app)
 

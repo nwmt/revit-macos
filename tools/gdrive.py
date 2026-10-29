@@ -20,6 +20,7 @@ The bottle keeps it in drive_g/ (a marker file and one link per name) and dosdev
 is in drive_c/Program Files/revit-macos/gdrive (mode=auto|off|<email>, names=<value>). Nothing here writes to Google
 Drive. Output never carries an account's email or the path of its folder. Run with python3 -I.
 """
+import errno
 import json
 import os
 import time
@@ -493,6 +494,7 @@ def apply(b, mode=None, names=None):
 
 SKIP = {".Trash", ".shortcut-targets-by-id"}
 SF_DATALESS = 0x40000000   # sys/stat.h: the folder's list is not on this Mac yet
+TIMEOUTS = 5               # listings in a row that time out: Google Drive does not answer (not running, offline)
 
 
 def warm_roots(b, folder, where="<year>"):
@@ -526,7 +528,7 @@ def warm_roots(b, folder, where="<year>"):
 
 def warm(b, folder, where="<year>", out=sys.stdout, every=5.0):
     roots = warm_roots(b, folder, where)
-    listed = cloud_only = failed = 0
+    listed = cloud_only = failed = timeouts = 0
     last = time.monotonic()
     queue = [start for _, start in roots]
     try:
@@ -540,8 +542,14 @@ def warm(b, folder, where="<year>", out=sys.stdout, every=5.0):
                         if e.name not in SKIP and e.is_dir(follow_symlinks=False):
                             queue.append(e.path)
                 listed += 1
-            except OSError:
+                timeouts = 0
+            except OSError as e:
                 failed += 1
+                timeouts = timeouts + 1 if e.errno == errno.ETIMEDOUT else 0
+                if timeouts >= TIMEOUTS:
+                    print(f"{listed} folders listed; Google Drive does not answer: is Google Drive for desktop "
+                          "running and online? Then run this again", file=out)
+                    return 1
             if time.monotonic() - last >= every:
                 last = time.monotonic()
                 print(f"{listed} folders listed, {cloud_only} were cloud-only", file=out, flush=True)

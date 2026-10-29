@@ -555,6 +555,30 @@ class Warm(Fake):
         self.assertEqual(r.returncode, 1)
         self.assertIn("G: off", r.stderr)
 
+    def test_stops_when_google_drive_does_not_answer(self):
+        real = g.os.scandir
+        calls = []
+        acc = os.path.realpath(self.a)
+        for i in range(g.TIMEOUTS + 2):
+            os.makedirs(os.path.join(self.a, "Shared drives", "Team", "Work", "more%d" % i))
+
+        def fake(p):   # the bottle's own folders as they are; Google Drive answers once, then times out
+            if not str(p).startswith(acc):
+                return real(p)
+            calls.append(p)
+            if len(calls) > 1:
+                raise TimeoutError(60, "Operation timed out")
+            return real(p)
+        g.os.scandir = fake
+        out = io.StringIO()
+        try:
+            code = g.warm(self.b, "G:\\Shared drives\\Team\\Work", "2027", out=out)
+        finally:
+            g.os.scandir = real
+        self.assertEqual(code, 1)
+        self.assertIn("does not answer", out.getvalue())
+        self.assertEqual(len(calls), 1 + g.TIMEOUTS)
+
     def test_counts_cloud_only_and_errors(self):
         out = io.StringIO()
         real = os.lstat
