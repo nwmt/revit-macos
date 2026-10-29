@@ -96,8 +96,8 @@ DRIVE = r"(?:(?<![A-Za-z])[A-Za-z]:)?"                # Z: and the like, not the
 _NOSEP = r"(?!%2[Ff]|%5[Cc])"
 
 # a path on G: (Google Drive, step gdrive): its folders are the company's projects and its people. The rest of the line
-# up to a quote, | < > or a tab goes: a path on G: has spaces, so there is no surer end
-GDRIVE_RX = re.compile(r"(?<![A-Za-z0-9])([gG]:)(?:[\\/]|%2[Ff]|%5[Cc])+(?!<GDRIVE-PATH>)[^\"'|<>\t\r\n]+")
+# up to " | < > or a control character goes (characters a Windows name cannot have; ' and spaces it can)
+GDRIVE_RX = re.compile(r"(?<![A-Za-z0-9])([gG]:)(?:[\\/]|%2[Ff]|%5[Cc])+(?!<GDRIVE-PATH>)[^\"|<>\x00-\x1f]+")
 TMPDIR_RX = re.compile(DRIVE + r"(?:" + SEP + r"private)?" + SEP + r"var" + SEP + r"folders" + SEP +
                        r"[^\\/\s%]{1,4}" + SEP + r"[^\\/\s%]{4,40}" + SEP + r"[TC](?!\w)", re.I)
 JWT_RX = re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}")
@@ -997,7 +997,8 @@ GATE_RULES = (   # (rule, value class, a regex over the folded text or a functio
     ("callback", "token", re.compile(r"adskidmgr:[^\s]*code=")),
     ("secret", "token", re.compile(r"\b(?:access_token|refresh_token|id_token|client_secret|code_verifier|password|"
                                    r"passwd)[\"']?\s{0,2}[=:]\s{0,2}[\"']?(?!<)[^\s\"'&,;<>]{6,}")),
-    ("gdrive-path", "path", re.compile(r"(?<![a-z0-9])g:/+(?!<gdrive-path>)[^\s\"'|<>]")),
+    # a path on G: not replaced, or text of a path left after the placeholder
+    ("gdrive-path", "path", re.compile(r"(?<![a-z0-9])g:/+(?:(?!<gdrive-path>)[^\s\"|<>]|<gdrive-path>[^\s\"|<>])")),
     ("mac-address", "address", re.compile(r"(?<![0-9a-f:-])(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}(?![0-9a-f:-])")),
     ("ip-address", "address", _ip_spans),   # the same network contexts as the redaction, on the unfolded text
     ("serial", "serial", re.compile(r"(?:serial|csn)\W{1,4}(?!000-00000000)\d{3}-\d{8}")),

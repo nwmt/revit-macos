@@ -286,7 +286,8 @@ class GdrivePaths(unittest.TestCase):
     """Paths on G: (Google Drive in the bottle, step gdrive): the company's projects and people."""
     FORMS = ["C:\\x> open G:\\Shared drives\\Client Cobalt\\Survey\\notes.txt now",
              "g:/my drive/Bids 2026/A.rvt", "G:\\\\Shared drives\\\\Team\\\\B.rvt",
-             '{"path": "G:\\\\\u041c\u043e\u0439 \u0434\u0438\u0441\u043a\\\\\u0421\u043c\u0435\u0442\u044b\\\\c.xlsx"}', "G:%5CShared drives%5CTeam", "G:\\Other computers\\Lab PC"]
+             '{"path": "G:\\\\\u041c\u043e\u0439 \u0434\u0438\u0441\u043a\\\\\u0421\u043c\u0435\u0442\u044b\\\\c.xlsx"}', "G:%5CShared drives%5CTeam", "G:\\Other computers\\Lab PC",
+             "G:\\Shared drives\\O'Brien Cobalt\\x.rvt"]
 
     def setUp(self):
         self.ident = rp.learn_identity(base_facts())
@@ -304,6 +305,11 @@ class GdrivePaths(unittest.TestCase):
     def test_gate_catches_what_is_left(self):
         for f in self.FORMS:
             self.assertTrue([h for h in rp.gate(f, self.ident, "f.txt") if h["rule"] == "gdrive-path"], f)
+
+    def test_gate_catches_a_path_left_after_the_placeholder(self):
+        self.assertTrue([h for h in rp.gate("G:\\<GDRIVE-PATH>Brien\\x.rvt", self.ident, "f.txt")
+                         if h["rule"] == "gdrive-path"])
+        self.assertEqual(rp.gate("G:\\<GDRIVE-PATH> (error 3)", self.ident, "f.txt"), [])
 
     def test_not_a_path(self):
         for f in ("G: \\u2192 Google Drive", "MSG:/x", "LOG:\\y", "G: off"):
