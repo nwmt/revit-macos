@@ -233,6 +233,25 @@ class State(Fake):
         self.assertNotIn("example.com", r.stdout + r.stderr)
 
 
+class SettingsThroughLinks(Fake):
+    def test_a_linked_folder_is_not_read(self):
+        out = os.path.join(self.tmp.name, "outside", "revit-macos")
+        os.makedirs(out)
+        with open(os.path.join(out, "gdrive"), "w") as f:
+            f.write("mode=off\nnames=ru\n")
+        pf = os.path.join(self.b, "drive_c", "Program Files")
+        os.symlink(os.path.dirname(out), pf)
+        self.assertIsNone(g.read_settings(self.b))
+        os.unlink(pf)
+        os.makedirs(pf)
+        os.symlink(out, os.path.join(pf, "revit-macos"))
+        self.assertIsNone(g.read_settings(self.b))
+        os.unlink(os.path.join(pf, "revit-macos"))
+        os.makedirs(os.path.join(pf, "revit-macos"))
+        os.symlink(os.path.join(out, "gdrive"), os.path.join(pf, "revit-macos", "gdrive"))
+        self.assertIsNone(g.read_settings(self.b))
+
+
 class Advice(Fake):
     def adv(self, **kw):
         s = dict({"mode": "auto", "mapping": "none", "accounts": "one", "names": 0, "settings": False}, **kw)
@@ -435,40 +454,77 @@ class Apply(Fake):
         open(os.path.join(self.b, "drive_c", "Program Files", "revit-macos"), "w").close()
         self.assertEqual(self.apply().returncode, 1)
 
+    # Each scenario makes the state its points need, runs apply, and lists the points that run reaches, in order.
+    def fresh(self):
+        self.account()
+        return (), ["mkdir Program Files", "mkdir revit-macos", "settings tmp", "settings", "mkdir new", "mark", "link",
+                    "publish", "g link"]
+
+    def change(self):
+        self.account()
+        self.apply()
+        return ("--names", RU), ["settings tmp", "settings", "mkdir new", "mark", "link", "old aside", "publish",
+                                 "unlink link", "unlink mark", "rmdir drive_g.old"]
+
+    def restore(self):   # cut short after the old G: was set aside: the next run puts it back
+        self.account()
+        self.apply()
+        self.assertEqual(self.apply("--names", RU, env={"GDRIVE_TEST_STOP": "old aside"}).returncode, 9)
+        return ("--mode", "again"), ["settings tmp", "settings", "restore old", "unlink link", "unlink mark",
+                                     "rmdir drive_g.new"]
+
+    def off(self):
+        self.account()
+        self.apply()
+        return ("--mode", "off"), ["settings tmp", "settings", "unlink g", "off rename", "unlink link", "unlink mark",
+                                   "rmdir drive_g.old"]
+
+    def check_after(self, args, points, p):
+        r = self.apply("--mode", "again")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        # the setting is saved first: cut short before it is in place, "again" still means the one before
+        saved = points.index(p) >= points.index("settings")
+        want = "none" if args == ("--mode", "off") and saved else "ok"
+        self.assertEqual(self.st()["mapping"], want)
+        for left in ("drive_g.new", "drive_g.old"):
+            self.assertFalse(os.path.lexists(os.path.join(self.b, left)), left)
+        if want == "none":
+            self.assertEqual(self.apply("--mode", "auto").returncode, 0)
+            self.assertEqual(self.st()["mapping"], "ok")
+
+    def test_every_point_is_reached(self):
+        seen = set()
+        for scenario in (self.fresh, self.change, self.restore, self.off):
+            self.reset()
+            seen.update(scenario()[1])
+        self.assertEqual(seen, set(POINTS))
+
     def test_interrupted_at_every_point(self):
-        for mode_args in ((), ("--names", RU), ("--mode", "off")):
-            for p in POINTS:
-                with self.subTest(args=mode_args, point=p):
+        for scenario in (self.fresh, self.change, self.restore, self.off):
+            self.reset()
+            n = len(scenario()[1])
+            for k in range(n):
+                with self.subTest(scenario=scenario.__name__, k=k):
                     self.reset()
-                    a = self.account()
-                    self.apply()              # a G: to change or to remove
-                    if mode_args == ():
-                        self.apply("--names", RU)
-                    cut = self.apply(*mode_args, env={"GDRIVE_TEST_STOP": p})
-                    self.assertIn(cut.returncode, (0, 9), cut.stderr)
-                    r = self.apply("--mode", "again")
-                    self.assertEqual(r.returncode, 0, r.stderr)
-                    # the setting is saved first: cut short before it is in place, "again" still means the old one
-                    saved = cut.returncode == 0 or POINTS.index(p) >= POINTS.index("settings")   # 0: point not reached
-                    want = "none" if mode_args == ("--mode", "off") and saved else "ok"
-                    self.assertEqual(self.st()["mapping"], want)
-                    for left in ("drive_g.new", "drive_g.old"):
-                        self.assertFalse(os.path.lexists(os.path.join(self.b, left)), left)
-                    if want == "none":
-                        self.assertEqual(self.apply("--mode", "auto").returncode, 0)
-                        self.assertEqual(self.st()["mapping"], "ok")
+                    args, points = scenario()
+                    p = points[k]
+                    cut = self.apply(*args, env={"GDRIVE_TEST_STOP": p})
+                    self.assertEqual(cut.returncode, 9, f"{p} was not reached: {cut.stderr}")
+                    self.check_after(args, points, p)
 
     def test_failure_at_every_point(self):
-        for p in POINTS:
-            with self.subTest(point=p):
-                self.reset()
-                self.account()
-                self.apply()
-                r = self.apply("--names", RU, env={"GDRIVE_TEST_FAIL": p})
-                self.assertIn(r.returncode, (0, 1), r.stderr)
-                self.assertNotIn("Traceback", r.stderr)
-                self.assertEqual(self.apply("--mode", "again").returncode, 0)
-                self.assertEqual(self.st()["mapping"], "ok")
+        for scenario in (self.fresh, self.change, self.restore, self.off):
+            self.reset()
+            n = len(scenario()[1])
+            for k in range(n):
+                with self.subTest(scenario=scenario.__name__, k=k):
+                    self.reset()
+                    args, points = scenario()
+                    p = points[k]
+                    r = self.apply(*args, env={"GDRIVE_TEST_FAIL": p})
+                    self.assertEqual(r.returncode, 1, f"{p}: {r.stderr}")
+                    self.assertNotIn("Traceback", r.stderr)
+                    self.check_after(args, points, p)
 
     def test_swap_a_checked_folder_for_a_link(self):
         self.account()
@@ -499,9 +555,14 @@ class Apply(Fake):
         gl = os.path.join(self.b, "dosdevices", "g:")
         if os.path.lexists(gl):
             os.unlink(gl)
-        sp = os.path.join(self.b, *g.SETTINGS)
-        if os.path.exists(sp):
-            os.unlink(sp)
+        pf = os.path.join(self.b, "drive_c", "Program Files")   # the setting and its folders, with any leftovers
+        if os.path.isdir(pf) and not os.path.islink(pf):
+            for dp, dns, fns in os.walk(pf, topdown=False):
+                for x in fns:
+                    os.unlink(os.path.join(dp, x))
+                for x in dns:
+                    os.rmdir(os.path.join(dp, x))
+            os.rmdir(pf)
 
 
 class Warm(Fake):
@@ -537,6 +598,15 @@ class Warm(Fake):
         r = self.warm("G:\\")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.count(r), 9)   # My Drive, x, Shared drives, Team, Work and its 4; no .Trash, no link
+
+    def test_a_role_that_is_a_link_is_not_walked(self):
+        outside = os.path.join(self.tmp.name, "outside")
+        os.makedirs(os.path.join(outside, "a", "b"))
+        os.rmdir(os.path.join(self.a, "Other computers"))
+        os.symlink(outside, os.path.join(self.a, "Other computers"))
+        r = self.warm("G:\\")
+        self.assertEqual((r.returncode, self.count(r)), (0, 9), r.stderr)   # as without Other computers
+        self.assertEqual(self.warm("G:\\Other computers").returncode, 1)
 
     def test_mac_path(self):
         r = self.warm(os.path.join(self.a, "Shared drives", "Team"))

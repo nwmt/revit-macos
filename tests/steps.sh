@@ -970,11 +970,12 @@ OUT="$(cd / && "${SANDBOX_ENV[@]}" CX_RECREATE=1 /bin/bash "$R/scripts/new-bottl
 expect "new-bottle: CX_RECREATE checks the year first" 1 "is for Revit 2024, not 2025"
 # G: before Wine starts: the order of the calls (wineserver must be stopped first; the fake has no Wine processes)
 gd_account() { mkdir -p "$H/Library/CloudStorage/GoogleDrive-$1/My Drive" "$H/Library/CloudStorage/GoogleDrive-$1/Shared drives"; }
-rm -rf "$BOTTLES/rvt2024-t"; : > "$CALLS"; gd_account someone@example.com
+rm -rf "$BOTTLES/rvt2024-t"; : > "$CALLS"; gd_account someone@example.com; rm -f "$T/g-at-wineboot"
+rule "wineboot" 0 "[ \"\$(readlink '$BOTTLES/rvt2024-t/dosdevices/g:')\" = ../drive_g ] && echo yes > '$T/g-at-wineboot'"
 OUT="$(cd / && "${SANDBOX_ENV[@]}" /bin/bash "$R/scripts/new-bottle.sh" 2024 rvt2024-t 2>&1)"; RC=$?
 expect "new-bottle with Google Drive" 0 "G: → Google Drive"
-check "new-bottle: G: is in place before wineboot" eval '[ "$(readlink "$BOTTLES/rvt2024-t/dosdevices/g:")" = ../drive_g ] &&
-  grep -n -e "cxbottle.*--create" -e "\[wineboot\]" "$CALLS" | head -1 | grep -q cxbottle'
+check "new-bottle: G: is there when wineboot starts" eval '[ "$(cat "$T/g-at-wineboot" 2>/dev/null)" = yes ]'
+: > "$RULES"
 check "new-bottle: no email on screen or in the bottle log" eval '! grep -q "example.com" <<<"$OUT" && ! grep -rq "example.com" "$R/logs"'
 rm -rf "$BOTTLES/rvt2024-t" "$H/Library/CloudStorage"
 # the fake "Revit" is the fake wine itself: Revit.exe in its arguments and the bottle's drive_c as its folder, so

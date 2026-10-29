@@ -122,19 +122,29 @@ def account_of(email):
 
 
 def read_settings(b):
-    p = os.path.join(b, *SETTINGS)
+    """The setting, read folder by folder without following a link (a linked folder could lead into Google Drive).
+    None: no setting, or something there that is not a plain file of the bottle."""
+    nofollow = os.O_RDONLY | os.O_NOFOLLOW
+    fds = []
     try:
-        st = os.lstat(p)
+        fds.append(os.open(b, nofollow | os.O_DIRECTORY))
+        for part in SETTINGS[:-1]:
+            fds.append(os.open(part, nofollow | os.O_DIRECTORY, dir_fd=fds[-1]))
+        f = os.open(SETTINGS[-1], nofollow, dir_fd=fds[-1])
     except OSError:
         return None
-    if not stat.S_ISREG(st.st_mode):
-        return None
+    finally:
+        for fd in fds:
+            os.close(fd)
+    with os.fdopen(f, "rb") as fh:
+        if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+            return None
+        text = fh.read(4096).decode("utf-8", "replace")
     out = {"mode": "auto", "names": "en"}
-    with open(p, encoding="utf-8", errors="replace") as f:
-        for line in f:
-            k, _, v = line.rstrip("\n").partition("=")
-            if k in out:
-                out[k] = v
+    for line in text.splitlines():
+        k, _, v = line.partition("=")
+        if k in out:
+            out[k] = v
     return out
 
 
@@ -508,8 +518,9 @@ def warm_roots(b, folder, where="<year>"):
     m = re.match(r"^[gG]:(?:[\\/]+(.*))?$", folder)
     if m:
         parts = [x for x in re.split(r"[\\/]+", m.group(1) or "") if x]
-        if not parts:   # G:\ itself: the role folders this account has
-            return [(os.path.join(acc, r), os.path.join(acc, r)) for r in ROLES if os.path.isdir(os.path.join(acc, r))]
+        if not parts:   # G:\ itself: the role folders this account has (a role that is a link is left out)
+            return [(os.path.join(acc, r), os.path.join(acc, r)) for r in ROLES
+                    if os.path.isdir(os.path.join(acc, r)) and not os.path.islink(os.path.join(acc, r))]
         role = names.get(key(parts[0]))
         if role is None:
             raise Refuse("not a folder of G:")
