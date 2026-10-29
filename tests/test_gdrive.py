@@ -260,8 +260,9 @@ class SettingsFile(Fake):
         self.assertIsNone(g.read_settings(self.b))
 
     def test_long_names_are_read_whole(self):
-        names = ";".join("My Drive=" + ("n%02d" % i) * 60 for i in range(20))
+        names = ";".join("My Drive=" + ("n%02d" % i) * 60 for i in range(30))
         self.settings("mode=auto\nnames=" + names + "\n")
+        self.assertGreater(os.path.getsize(os.path.join(self.b, *g.SETTINGS)), 4096)
         self.assertEqual(g.read_settings(self.b)["names"], names)
 
 
