@@ -8,7 +8,7 @@ set -uo pipefail
 CLEAN_ENV=(-u REVIT_DATA -u REVIT_LOCK_DIR -u SHIMS_DIR -u REVIT_BUNDLED -u REVIT_EVENTS_FD -u REVIT_RUN_ID -u REVIT_RUN_CTX
   -u REVIT_ACCEPT_EULA -u REVIT_SOURCE_LIST -u REVIT_REUSE_EXTRACTED -u REVIT_REEXTRACT -u REVIT_UNPACK_AGAIN
   -u REVIT_FOR_BOTTLE -u INSTALL_PARENT -u W_CACHE -u SHIMS_FROM_SOURCE -u RUN_DIR -u RUN_KIND -u CX_RECREATE
-  -u INSTALL_DRYRUN -u REVIT_LANG -u ODIS_PKGS -u REVIT_THEME -u REVIT_DEFAULTS -u REVIT_YEAR -u SMOKE_TIMEOUT -u SMOKE_START_WAIT
+  -u INSTALL_DRYRUN -u REVIT_LANG -u ODIS_PKGS -u REVIT_THEME -u REVIT_GDRIVE -u REVIT_GDRIVE_NAMES -u REVIT_DEFAULTS -u REVIT_YEAR -u SMOKE_TIMEOUT -u SMOKE_START_WAIT
   -u SMOKE_STALL -u SMOKE_WORKER_WAIT -u SMOKE_POLL -u SMOKE_PREP_TIMEOUT -u REVIT_CX_TMP -u REVIT_WATCH_IDLE -u REVIT_WATCH_LOCK_WAIT -u REVIT_WATCH_LSOF -u MCP_TEST_HOLD -u MCP_HANDOFF_S
   -u REVIT_RETINA -u REVIT_KEYS -u SETTINGS_SAVE_WAIT
   -u PYMCP_ROUTES_PORT -u PYMCP_DPAPI_S -u PYMCP_STATUS_S -u PYMCP_EXEC_HOLD -u PYMCP_TEST_HOLD -u REVIT_HOST -u REVIT_PORT)
@@ -36,7 +36,7 @@ stub() { # a script that only records how it was called
   mkdir -p "$(dirname "$1")"
   cat > "$1" <<EOF
 #!/bin/bash
-echo "\$(basename "\$0") \$* | REVIT_YEAR=\${REVIT_YEAR:-} INSTALL_DRYRUN=\${INSTALL_DRYRUN:-} CX_RECREATE=\${CX_RECREATE:-} WINEPREFIX=\${WINEPREFIX:-} RUN_KIND=\${RUN_KIND:-} EULA=\${REVIT_ACCEPT_EULA:-} REUSE=\${REVIT_REUSE_EXTRACTED:-} REEXTRACT=\${REVIT_REEXTRACT:-} RETINA=\${REVIT_RETINA:-} KEYS=\${REVIT_KEYS:-} THEME=\${REVIT_THEME:-}" >> "$CALLS"
+echo "\$(basename "\$0") \$* | REVIT_YEAR=\${REVIT_YEAR:-} INSTALL_DRYRUN=\${INSTALL_DRYRUN:-} CX_RECREATE=\${CX_RECREATE:-} WINEPREFIX=\${WINEPREFIX:-} RUN_KIND=\${RUN_KIND:-} EULA=\${REVIT_ACCEPT_EULA:-} REUSE=\${REVIT_REUSE_EXTRACTED:-} REEXTRACT=\${REVIT_REEXTRACT:-} RETINA=\${REVIT_RETINA:-} KEYS=\${REVIT_KEYS:-} THEME=\${REVIT_THEME:-} GDRIVE=\${REVIT_GDRIVE:-} GNAMES=\${REVIT_GDRIVE_NAMES-unset}" >> "$CALLS"
 EOF
   chmod +x "$1"
 }
@@ -597,7 +597,7 @@ reset; run "" link-installer 2024 "$T"; expect "link-installer refuses a folder 
 
 # ---- set: Retina and Mac keys (2027) ----
 reset; bottle rvt2027-a 2027 2027; run "" set 2027
-expect "set without settings: the usage and where to see the current ones" 1 "Usage: ./revit set 2027 retina=on|compact|off keys=mac|windows theme=mac|light|dark. ./revit doctor 2027 shows"
+expect "set without settings: the usage and where to see the current ones" 1 "Usage: ./revit set 2027 retina=on|compact|off keys=mac|windows theme=mac|light|dark gdrive=auto|off|again|<email> gdrive_names=ru. ./revit doctor 2027 shows"
 check "set without settings: nothing runs" not_called "run-steps.sh"
 reset; bottle rvt2027-a 2027 2027; run "" set 2027 retina=off
 expect "set retina=off" 0 "Revit 2027 (rvt2027-a): retina=off. Applies the next time Revit starts."
@@ -616,7 +616,7 @@ reset; bottle rvt2027-b 2027 2027; run "" set 2027 retina=on rvt2027-b
 check "set: the bottle after the settings" called "run-steps.sh 2027 rvt2027-b retina |"
 reset; bottle rvt2027-b 2027 2027; run "" set 2027 rvt2027-b rvt2027-c retina=on
 expect "set: two bottles" 1 "Too many arguments. Example: ./revit set 2027 [bottle] retina=off"
-reset; bottle rvt2027-a 2027 2027; run "" set 2027 colour=red; expect "set: an unknown setting" 1 "Unknown setting: colour. Settings: retina, keys"
+reset; bottle rvt2027-a 2027 2027; run "" set 2027 colour=red; expect "set: an unknown setting" 1 "Unknown setting: colour. Settings: retina, keys, theme, gdrive, gdrive_names"
 reset; bottle rvt2027-a 2027 2027; run "" set 2027 retina=big; expect "set: an unknown value" 1 "retina is on, compact or off"
 reset; bottle rvt2027-a 2027 2027; run "" set 2027 keys=pc; expect "set: an unknown keys value" 1 "keys is mac or windows"
 reset; bottle rvt2027-a 2027 2027; run "" set 2027 retina=on retina=off; expect "set: a setting twice" 1 "retina is given twice."
@@ -631,6 +631,30 @@ check "set retina and theme: both steps in one run" called "run-steps.sh 2027 rv
 reset; bottle rvt2027-a 2027 2027; run "" set 2027 theme=blue; expect "set: an unknown theme" 1 "theme is mac (follow the Mac), light or dark"
 reset; bottle rvt2026-a 2026 2026; run "" set 2026 theme=mac; expect "set theme: 2027 only" 1 "The theme setting is for Revit 2027 only."
 check "set theme 2026: nothing runs" not_called "run-steps.sh"
+# ---- set: G: from Google Drive (every year; the step gdrive and tools/gdrive.py have their own tests) ----
+reset; bottle rvt2027-a 2027 2027; run "" set 2027 gdrive=auto
+expect "set gdrive=auto" 0 "Revit 2027 (rvt2027-a): gdrive=auto. Applies the next time Revit starts."
+check "set gdrive=auto: the gdrive step with its value" eval 'called "run-steps.sh 2027 rvt2027-a gdrive |" && called "GDRIVE=auto GNAMES=unset"'
+reset; bottle rvt2026-a 2026 2026; run "" set 2026 gdrive=off; expect "set gdrive: every year" 0 "gdrive=off"
+reset; bottle rvt2027-a 2027 2027; run "" set 2027 gdrive=someone@example.com --events "$T/ev"
+expect "set gdrive=<email>: shown as account" 0 "Revit 2027 (rvt2027-a): gdrive=account. Applies"
+check "set gdrive=<email>: the email reaches the step and nothing else" eval 'called "GDRIVE=someone@example.com" &&
+  ! grep -q "example.com" <<<"$OUT" && ! grep -q "example.com" "$T/ev"'
+reset; bottle rvt2027-a 2027 2027; run "" set 2027 "gdrive_names=My Drive=Mein Drive;Shared drives=Geteilte Ablagen" gdrive=auto
+expect "set gdrive_names: shown as a count" 0 "Revit 2027 (rvt2027-a): gdrive_names=2 names gdrive=auto. Applies"
+check "set gdrive_names: the value after the first =, spaces kept, one gdrive step" eval 'called "run-steps.sh 2027 rvt2027-a gdrive |" &&
+  called "GNAMES=My Drive=Mein Drive;Shared drives=Geteilte Ablagen" && [ "$(grep -o " gdrive" "$CALLS" | wc -l | tr -d " ")" = 1 ]'
+reset; bottle rvt2027-a 2027 2027; run "" set 2027 retina=off gdrive=auto
+check "set retina and gdrive: gdrive first" called "run-steps.sh 2027 rvt2027-a gdrive retina |"
+reset; bottle rvt2027-a 2027 2027; run "" set 2027 gdrive=auto retina=off
+check "set gdrive and retina: gdrive first" called "run-steps.sh 2027 rvt2027-a gdrive retina |"
+reset; bottle rvt2027-a 2027 2027; run "" set 2027 "gdrive_names=My Drive=nobody@example.com"
+expect "set gdrive_names: a bad name, by its number" 1 "gdrive_names: name 1:"; check "set gdrive_names: the bad value is not shown" eval '! grep -q nobody <<<"$OUT"'
+check "set gdrive_names: nothing runs after a bad name" not_called "run-steps.sh"
+reset; bottle rvt2027-a 2027 2027; run "" set 2027 gdrive=again gdrive_names=ru; expect "set: again with names" 1 "gdrive=again keeps the folder names"
+reset; bottle rvt2027-a 2027 2027; run "" set 2027 gdrive=maybe; expect "set gdrive: an unknown value" 1 "gdrive is auto, off, again or the email"
+reset; bottle rvt2027-a 2027 2027; fake_revit rvt2027-a 2027; run "" set 2027 gdrive=auto
+expect "set gdrive refuses while Revit runs" 1 "running"; check "set gdrive: nothing runs while Revit runs" not_called "run-steps.sh"
 reset; run "" set 2027 retina=off; expect "set: no bottle" 1 "There is no bottle rvt2027-a"
 reset; bottle rvt2027-a 2027 2027; fake_revit rvt2027-a 2027; run "" set 2027 retina=off
 expect "set refuses while Revit runs" 1 "Revit 2027 is running in rvt2027-a"; check "set: nothing runs while Revit runs" not_called "run-steps.sh"
