@@ -42,7 +42,8 @@ func ready(_ c: HittestClient) -> Bool { eventually { if case .ready = c.status 
 @Test func slowAnswersTimeOutThenRestart() {
     let f = Fake(), c = f.client("slow"); c.start(); defer { c.shutdown() }
     #expect(ready(c))
-    let t = Date(); #expect(c.query(WinePoint(x: 1, y: 1)) == nil); #expect(Date().timeIntervalSince(t) < 0.25)
+    // nil: it gave up before the answer (0.3 s); the time only shows it does not hang (a slow CI runner took 0.35 s)
+    let t = Date(); #expect(c.query(WinePoint(x: 1, y: 1)) == nil); #expect(Date().timeIntervalSince(t) < 1)
     usleep(400_000)                                    // the late answer arrives: it is not taken by the next query
     #expect(c.query(WinePoint(x: 1, y: 1)) == nil)     // second miss in a row: transport failure
     #expect(eventually { f.starts >= 2 })
