@@ -247,6 +247,29 @@ Revit 2020, 2021, 2023, 2024, 2025, 2027
 Expected: it is turned off, because with it Dynamo draws black squares, lags or crashes. Graphs run and results show
 in Revit views.
 
+## Google Drive
+
+### Links to files on G: are missing
+
+`./revit doctor 2025` has a line for G:. What it says, and what to do:
+
+- **Google Drive not found:** install Google Drive for desktop, sign in, then `./revit set 2025 gdrive=auto`.
+- **Several Google Drive accounts:** choose the one your projects are in: `./revit set 2025 gdrive=<email>` (the address of that account).
+- **G: is not set up, or points to an account that is gone:** `./revit set 2025 gdrive=again` (or `gdrive=auto`).
+- **G: is used by something else in this bottle:** a drive you set up in CrossOver has the letter; G: is left to it.
+
+Quit Revit first: Wine shows a new drive only when it starts again. If your colleagues' Windows names the folders in
+another language, add those names; the English ones stay: `./revit set 2025 gdrive_names=ru` (`My Drive`, `Shared
+drives` and `Other computers` as a Russian Windows names them), or your own, for example
+`./revit set 2025 "gdrive_names=My Drive=Mein Drive;Shared drives=Geteilte Ablagen"`.
+
+### Opening a folder on G: hangs in Revit's Open dialog
+
+Wine looks inside every subfolder the dialog shows, and Google Drive fetches the list of a folder this Mac has not
+opened yet from the internet, about half a second each. A folder with hundreds of such subfolders takes minutes the
+first time. List them once, ahead: `./revit gdrive warm 2025 "G:\Shared drives\Team\Projects"`. It reads only the
+folders, not the files, and can run while Revit is open.
+
 ## Trackpad (menu bar app)
 
 ### Two-finger scrolling does not pan in Revit
