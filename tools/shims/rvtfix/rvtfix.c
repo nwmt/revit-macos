@@ -68,7 +68,7 @@
  *    process and gets no WM_PAINT; CrossOver shows only what the browser draws again by itself.
  *    Fix: when a Chrome_WidgetWin_* window of ours is created, shown or gets a new parent (WinEvent hook in its thread),
  *    clear WS_EX_TRANSPARENT on its ancestors of this process. WindowFromPoint still finds the browser's window.
- *    RVTFIX_WV2_OPAQUE set and empty disables.
+ *    Only in Revit.exe. RVTFIX_WV2_OPAQUE set and empty disables.
  * 9. Status bar in the dark theme (2027): Revit's status bar is a msctls_statusbar32 whose parts it draws itself
  *    (SBT_OWNERDRAW), text only, on a background it leaves to the control. Wine's comctl32 fills that background with
  *    the visual style (light.msstyles, class Status) in both themes -> a light text area and light gaps between the
@@ -456,7 +456,7 @@ static void CALLBACK opaque_on_event(HWINEVENTHOOK hook, DWORD ev, HWND hwnd, LO
     char cls[32];
     HWND p, desk = GetDesktopWindow();
     int depth = 0;
-    if (obj != OBJID_WINDOW || child != CHILDID_SELF || !hwnd || foreign(hwnd)) return;
+    if (ev == EVENT_OBJECT_DESTROY || obj != OBJID_WINDOW || child != CHILDID_SELF || !hwnd || foreign(hwnd)) return;
     if (!GetClassNameA(hwnd, cls, sizeof(cls))) return;
     cls[17] = 0;   /* the prefix: "Chrome_WidgetWin_" is 17 characters */
     if (lstrcmpA(cls, "Chrome_WidgetWin_")) return;
@@ -470,19 +470,28 @@ static void CALLBACK opaque_on_event(HWINEVENTHOOK hook, DWORD ev, HWND hwnd, LO
 
 static void fix_opaque(HINSTANCE inst)
 {
-    WCHAR env[8];
+    WCHAR path[MAX_PATH], *slash, env[8];
+    HWINEVENTHOOK shown;
+    if (!GetModuleFileNameW(NULL, path, MAX_PATH) || !(slash = wcsrchr(path, L'\\')) || lstrcmpiW(slash + 1, L"Revit.exe"))
+        return;
     SetLastError(0);   /* an empty variable leaves the last error as it was */
     if (!GetEnvironmentVariableW(L"RVTFIX_WV2_OPAQUE", env, 8) && GetLastError() != ERROR_ENVVAR_NOT_FOUND) {
         trace("WebView2 host: disabled (RVTFIX_WV2_OPAQUE is empty)\n");
         return;
     }
-    if (SetWinEventHook(EVENT_OBJECT_CREATE, EVENT_OBJECT_SHOW, inst, opaque_on_event, GetCurrentProcessId(), 0,
-                        WINEVENT_INCONTEXT) &&
-        SetWinEventHook(EVENT_OBJECT_PARENTCHANGE, EVENT_OBJECT_PARENTCHANGE, inst, opaque_on_event, GetCurrentProcessId(), 0,
-                        WINEVENT_INCONTEXT))
-        trace("WebView2 host: no WS_EX_TRANSPARENT above it\n");
-    else
+    /* both hooks or none: without the parent change a host moved under a new transparent ancestor goes blank again */
+    if (!(shown = SetWinEventHook(EVENT_OBJECT_CREATE, EVENT_OBJECT_SHOW, inst, opaque_on_event, GetCurrentProcessId(), 0,
+                                  WINEVENT_INCONTEXT))) {
         trace("WebView2 host: no WinEvent hook (%lu)\n", GetLastError());
+        return;
+    }
+    if (!SetWinEventHook(EVENT_OBJECT_PARENTCHANGE, EVENT_OBJECT_PARENTCHANGE, inst, opaque_on_event, GetCurrentProcessId(), 0,
+                         WINEVENT_INCONTEXT)) {
+        trace("WebView2 host: no WinEvent hook for parent changes (%lu)\n", GetLastError());
+        UnhookWinEvent(shown);
+        return;
+    }
+    trace("WebView2 host: no WS_EX_TRANSPARENT above it\n");
 }
 
 /* --- 9. status bar in the dark theme --- */
@@ -491,28 +500,18 @@ static draw_theme_bg_fn orig_draw_theme_bg;
 #define SB_DARK RGB(59, 68, 83)   /* Revit 2027's own status bar panes in the dark theme */
 #define SP_GRIPPER 3              /* vssym32.h: the size grip keeps its look */
 
-static BOOL bottle_dark(void) /* AppsUseLightTheme = 0, read again at most every 500 ms */
+static BOOL bottle_dark(void) /* AppsUseLightTheme = 0, read at every paint: a cached value could miss a theme change */
 {
-    static DWORD checked;
-    static BOOL dark;
-    DWORD now = GetTickCount(), v = 1, size = sizeof(v);
-    if (!checked || now - checked > 500) {
-        if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
-                         L"AppsUseLightTheme", RRF_RT_REG_DWORD, NULL, &v, &size)) v = 1;
-        dark = !v;
-        checked = now ? now : 1;
-    }
-    return dark;
+    DWORD v = 1, size = sizeof(v);
+    if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                     L"AppsUseLightTheme", RRF_RT_REG_DWORD, NULL, &v, &size)) v = 1;
+    return !v;
 }
 
 static BOOL is_statusbar(HWND hwnd)
 {
-    static HWND last;   /* the status bar paints often: one class lookup per window it was not */
     WCHAR cls[32];
-    if (hwnd == last) return TRUE;
-    if (!GetClassNameW(hwnd, cls, 32) || lstrcmpiW(cls, L"msctls_statusbar32")) return FALSE;
-    last = hwnd;
-    return TRUE;
+    return GetClassNameW(hwnd, cls, 32) && !lstrcmpiW(cls, L"msctls_statusbar32");
 }
 
 static HRESULT WINAPI hook_draw_theme_bg(HANDLE theme, HDC hdc, int part, int state, const RECT *rc, const RECT *clip)
