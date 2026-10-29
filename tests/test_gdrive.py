@@ -281,5 +281,228 @@ class Sanitize(Fake):
         self.assertNotIn("example.com", r.stdout)
 
 
+def tree(root):
+    """Every path under root with its kind and, for links, the target; for files, the content."""
+    out = {}
+    for dp, dns, fns in os.walk(root, followlinks=False):
+        for n in dns + fns:
+            p = os.path.join(dp, n)
+            rel = os.path.relpath(p, root)
+            if os.path.islink(p):
+                out[rel] = ("link", os.readlink(p))
+            elif os.path.isdir(p):
+                out[rel] = ("dir",)
+            else:
+                out[rel] = ("file", open(p, "rb").read())
+    return out
+
+
+POINTS = ["mkdir Program Files", "mkdir revit-macos", "settings tmp", "settings", "restore old", "mkdir new", "mark",
+          "link", "old aside", "publish", "g link", "unlink link", "unlink mark", "rmdir drive_g.old",
+          "rmdir drive_g.new", "unlink g", "off rename"]
+RU = "ru"
+
+
+class Apply(Fake):
+    def setUp(self):
+        super().setUp()
+        self.bait = os.path.join(self.tmp.name, "bait")
+        os.makedirs(os.path.join(self.bait, "sub"))
+        open(os.path.join(self.bait, "keep.txt"), "w").write("user file")
+        os.symlink("/", os.path.join(self.bait, "a link"))
+        self.bait_before = tree(self.bait)
+
+    def tearDown(self):
+        self.assertEqual(tree(self.bait), self.bait_before, "the bait folder changed")
+        super().tearDown()
+
+    def apply(self, *args, env=None):
+        return self.run_tool("apply", self.b, *args, env=env)
+
+    def st(self):
+        return g.state(self.b)
+
+    def test_states(self):
+        a = self.account()
+        r = self.apply()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.st()["mapping"], "ok")
+        self.assertEqual(os.readlink(os.path.join(self.b, "dosdevices", "g:")), "../drive_g")
+        self.assertEqual(os.readlink(os.path.join(self.b, "drive_g", "My Drive")), os.path.join(a, "My Drive"))
+        r = self.apply("--names", RU)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        s = self.st()
+        self.assertEqual((s["mapping"], s["names"]), ("ok", 3))
+        self.assertTrue(os.path.islink(os.path.join(self.b, "drive_g", "\u041e\u0431\u0449\u0438\u0435 \u0434\u0438\u0441\u043a\u0438")))
+        before = tree(self.b)
+        self.assertEqual(self.apply().returncode, 0)
+        self.assertEqual(tree(self.b), before, "a second run changed the bottle")
+        self.assertEqual(self.apply("--mode", "off").returncode, 0)
+        self.assertEqual(self.st()["mapping"], "none")
+        self.assertFalse(os.path.lexists(os.path.join(self.b, "drive_g")))
+        self.assertTrue(os.path.isdir(os.path.join(a, "My Drive")), "Google Drive changed")
+
+    def test_no_account_and_several_keep_g(self):
+        r = self.apply()
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(self.st()["mapping"], "none")
+        a = self.account()
+        self.apply()
+        self.account("other@example.com")
+        before = tree(self.b)
+        r = self.apply()
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("several", r.stdout)
+        self.assertEqual({k: v for k, v in tree(self.b).items() if "gdrive" not in k},
+                         {k: v for k, v in before.items() if "gdrive" not in k})
+
+    def test_chosen_account_and_again(self):
+        self.account()
+        b = self.account("other@example.com")
+        r = self.apply("--mode", "other@example.com", "--names", RU)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(os.readlink(os.path.join(self.b, "drive_g", "My Drive")), os.path.join(b, "My Drive"))
+        r = self.apply("--mode", "again")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(g.read_settings(self.b), {"mode": "other@example.com", "names": RU})
+        self.assertNotIn("example.com", r.stdout + r.stderr)
+        self.assertEqual(self.apply("--mode", "again", "--names", "en").returncode, 2)
+
+    def test_missing_account_changes_nothing(self):
+        self.account()
+        before = tree(self.b)
+        r = self.apply("--mode", "nobody@example.com")
+        self.assertEqual(r.returncode, 1)
+        self.assertEqual(tree(self.b), before)
+        self.assertNotIn("example.com", r.stdout + r.stderr)
+
+    def test_foreign_g_and_drive_g(self):
+        self.account()
+        os.symlink(self.bait, os.path.join(self.b, "dosdevices", "g:"))
+        before = tree(self.b)
+        self.assertEqual(self.apply().returncode, 1)
+        self.assertEqual(self.apply("--mode", "off").returncode, 1)
+        self.assertEqual(tree(self.b), before)
+
+    def test_foreign_drive_g_without_letter(self):
+        self.account()
+        d = os.path.join(self.b, "drive_g")
+        os.makedirs(d)
+        os.symlink(self.bait, os.path.join(d, "a link of the user"))
+        open(os.path.join(d, "notes.txt"), "w").write("x")
+        before = tree(self.b)
+        self.assertEqual(self.apply().returncode, 1)
+        self.assertEqual(tree(self.b), before)
+
+    def test_bait_links_in_place_of_our_paths(self):
+        self.account()
+        for name in ("drive_g", "drive_g.new", "drive_g.old"):
+            p = os.path.join(self.b, name)
+            os.symlink(self.bait, p)
+            self.assertEqual(self.apply().returncode, 1, name)
+            self.assertEqual(self.apply("--mode", "off").returncode, 1, name)
+            os.unlink(p)
+        pf = os.path.join(self.b, "drive_c", "Program Files")
+        os.symlink(self.bait, pf)
+        self.assertEqual(self.apply().returncode, 1)
+        os.unlink(pf)
+        os.makedirs(pf)
+        os.symlink(self.bait, os.path.join(pf, "revit-macos"))
+        self.assertEqual(self.apply().returncode, 1)
+        os.unlink(os.path.join(pf, "revit-macos"))
+        os.makedirs(os.path.join(pf, "revit-macos"))
+        os.symlink(os.path.join(self.bait, "keep.txt"), os.path.join(pf, "revit-macos", "gdrive"))
+        self.assertEqual(self.apply().returncode, 0)   # replaced: the link itself, not the file it points at
+        self.assertFalse(os.path.islink(os.path.join(pf, "revit-macos", "gdrive")))
+        d = os.path.join(self.b, "drive_g")
+        os.makedirs(d, exist_ok=True)
+
+    def test_a_mark_that_is_a_link_is_not_ours(self):
+        a = self.account()
+        self.apply()
+        m = os.path.join(self.b, "drive_g", g.MARK)
+        os.unlink(m)
+        os.symlink(os.path.join(self.bait, "keep.txt"), m)
+        self.assertEqual(self.apply("--mode", "off").returncode, 1)
+
+    def test_no_settings_folder(self):
+        self.account()
+        self.assertFalse(os.path.exists(os.path.join(self.b, "drive_c", "Program Files")))
+        self.assertEqual(self.apply().returncode, 0)
+        self.assertEqual(g.read_settings(self.b), {"mode": "auto", "names": "en"})
+        os.remove(os.path.join(self.b, *g.SETTINGS))
+        os.rmdir(os.path.join(self.b, "drive_c", "Program Files", "revit-macos"))
+        open(os.path.join(self.b, "drive_c", "Program Files", "revit-macos"), "w").close()
+        self.assertEqual(self.apply().returncode, 1)
+
+    def test_interrupted_at_every_point(self):
+        for mode_args in ((), ("--names", RU), ("--mode", "off")):
+            for p in POINTS:
+                with self.subTest(args=mode_args, point=p):
+                    self.reset()
+                    a = self.account()
+                    self.apply()              # a G: to change or to remove
+                    if mode_args == ():
+                        self.apply("--names", RU)
+                    cut = self.apply(*mode_args, env={"GDRIVE_TEST_STOP": p})
+                    self.assertIn(cut.returncode, (0, 9), cut.stderr)
+                    r = self.apply("--mode", "again")
+                    self.assertEqual(r.returncode, 0, r.stderr)
+                    # the setting is saved first: cut short before it is in place, "again" still means the old one
+                    saved = cut.returncode == 0 or POINTS.index(p) >= POINTS.index("settings")   # 0: point not reached
+                    want = "none" if mode_args == ("--mode", "off") and saved else "ok"
+                    self.assertEqual(self.st()["mapping"], want)
+                    for left in ("drive_g.new", "drive_g.old"):
+                        self.assertFalse(os.path.lexists(os.path.join(self.b, left)), left)
+                    if want == "none":
+                        self.assertEqual(self.apply("--mode", "auto").returncode, 0)
+                        self.assertEqual(self.st()["mapping"], "ok")
+
+    def test_failure_at_every_point(self):
+        for p in POINTS:
+            with self.subTest(point=p):
+                self.reset()
+                self.account()
+                self.apply()
+                r = self.apply("--names", RU, env={"GDRIVE_TEST_FAIL": p})
+                self.assertIn(r.returncode, (0, 1), r.stderr)
+                self.assertNotIn("Traceback", r.stderr)
+                self.assertEqual(self.apply("--mode", "again").returncode, 0)
+                self.assertEqual(self.st()["mapping"], "ok")
+
+    def test_swap_a_checked_folder_for_a_link(self):
+        self.account()
+        self.apply()
+        d = os.path.join(self.b, "drive_g")
+        cmd = f'mv "{d}.old" "{d}.moved" && ln -s "{self.bait}" "{d}.old"'
+        r = self.apply("--names", RU, env={"GDRIVE_TEST_SWAP": "unlink link", "GDRIVE_TEST_SWAP_CMD": cmd})
+        self.assertNotIn("Traceback", r.stderr)
+
+    def reset(self):
+        for n in os.listdir(self.cloud):
+            p = os.path.join(self.cloud, n)
+            for dp, dns, fns in os.walk(p, topdown=False):
+                for x in fns:
+                    os.unlink(os.path.join(dp, x))
+                for x in dns:
+                    q = os.path.join(dp, x)
+                    os.unlink(q) if os.path.islink(q) else os.rmdir(q)
+            os.rmdir(p)
+        for n in ("drive_g", "drive_g.new", "drive_g.old"):
+            p = os.path.join(self.b, n)
+            if os.path.islink(p):
+                os.unlink(p)
+            elif os.path.isdir(p):
+                for x in os.listdir(p):
+                    os.unlink(os.path.join(p, x))
+                os.rmdir(p)
+        gl = os.path.join(self.b, "dosdevices", "g:")
+        if os.path.lexists(gl):
+            os.unlink(gl)
+        sp = os.path.join(self.b, *g.SETTINGS)
+        if os.path.exists(sp):
+            os.unlink(sp)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,9 @@ the names a Russian Windows gives them).
   gdrive.py state <bottle>       prints the state as JSON: mode, mapping, accounts, names, settings
   gdrive.py advice <bottle> <year>   prints the level (ok, info, warn) and one line of advice
   gdrive.py sanitize <bottle>    copies stdin to stdout with Google Drive paths and email addresses hidden
+  gdrive.py apply <bottle> [--mode auto|off|again|<email>] [--names <value>]
+                                 saves the setting, then sets G: up or removes it to match (code 1: refused or failed,
+                                 nothing of the user's touched; 2: bad arguments)
 
 The bottle keeps it in drive_g/ (a marker file and one link per name) and dosdevices/g: -> ../drive_g; the setting
 is in drive_c/Program Files/revit-macos/gdrive (mode=auto|off|<email>, names=<value>). Nothing here writes to Google
@@ -16,7 +19,9 @@ Drive. Output never carries an account's email or the path of its folder. Run wi
 import json
 import os
 import re
+import secrets
 import stat
+import subprocess
 import sys
 import unicodedata
 
@@ -255,6 +260,227 @@ def sanitize(text, b=None):
     return EMAIL.sub("<account>", text)
 
 
+# --- apply: every change goes through descriptors of folders opened without following links, so a folder that was
+# checked cannot be swapped for a link into Google Drive before the change; nothing is removed recursively.
+
+class Refuse(Exception):
+    pass
+
+
+DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+
+
+def point(name):
+    """Test hooks: GDRIVE_TEST_STOP ends here as an interruption would, GDRIVE_TEST_FAIL fails here like an I/O error,
+    GDRIVE_TEST_SWAP runs GDRIVE_TEST_SWAP_CMD here (a test swaps a checked folder for a link)."""
+    if os.environ.get("GDRIVE_TEST_SWAP") == name:
+        subprocess.run(["/bin/sh", "-c", os.environ.get("GDRIVE_TEST_SWAP_CMD", ":")], check=False)
+    if os.environ.get("GDRIVE_TEST_FAIL") == name:
+        raise OSError(5, "test failure at " + name)
+    if os.environ.get("GDRIVE_TEST_STOP") == name:
+        os._exit(9)
+
+
+def lst(fd, name):
+    try:
+        return os.stat(name, dir_fd=fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+
+
+def open_dir(fd, name, create=False):
+    try:
+        return os.open(name, DIR_FLAGS, dir_fd=fd)
+    except FileNotFoundError:
+        if not create:
+            raise
+        os.mkdir(name, 0o755, dir_fd=fd)
+        point("mkdir " + name)
+        return os.open(name, DIR_FLAGS, dir_fd=fd)
+    except (NotADirectoryError, OSError) as e:
+        if isinstance(e, FileNotFoundError):
+            raise
+        raise Refuse(f"{name} is not a folder of the bottle") from None
+
+
+def owned_fd(fd, name, may_be_empty=False):
+    """Like owned_dir, on the entry name of the open folder fd. None: there is nothing there."""
+    st = lst(fd, name)
+    if st is None:
+        return None
+    if not stat.S_ISDIR(st.st_mode):
+        return False
+    d = os.open(name, DIR_FLAGS, dir_fd=fd)
+    try:
+        entries = list(os.scandir(d))
+    finally:
+        os.close(d)
+    if not entries:
+        return may_be_empty
+    marked = False
+    for e in entries:
+        if e.name == MARK:
+            if not e.is_file(follow_symlinks=False):
+                return False
+            marked = True
+        elif not e.is_symlink():
+            return False
+    return marked
+
+
+def clear(fd, name):
+    """Removes our folder fd/name: its links one by one, the marker last, then the folder. Anything else stops it."""
+    d = open_dir(fd, name)
+    try:
+        names = sorted(e.name for e in os.scandir(d))
+        for n in names:
+            if n == MARK:
+                continue
+            if not stat.S_ISLNK(os.stat(n, dir_fd=d, follow_symlinks=False).st_mode):
+                raise Refuse(f"{name} holds something that is not ours; it stays")
+            os.unlink(n, dir_fd=d)
+            point("unlink link")
+        if MARK in names:
+            if not stat.S_ISREG(os.stat(MARK, dir_fd=d, follow_symlinks=False).st_mode):
+                raise Refuse(f"{name} holds something that is not ours; it stays")
+            os.unlink(MARK, dir_fd=d)
+            point("unlink mark")
+    finally:
+        os.close(d)
+    os.rmdir(name, dir_fd=fd)
+    point("rmdir " + name)
+
+
+def write_settings(root, mode, names):
+    fd = root
+    opened = []
+    try:
+        for part in SETTINGS[:-1]:
+            fd = open_dir(fd, part, create=True)
+            opened.append(fd)
+        tmp = f"gdrive.{secrets.token_hex(6)}.tmp"
+        f = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=fd)
+        try:
+            os.write(f, f"mode={mode}\nnames={names}\n".encode("utf-8"))
+            os.fsync(f)
+        finally:
+            os.close(f)
+        point("settings tmp")
+        os.replace(tmp, SETTINGS[-1], src_dir_fd=fd, dst_dir_fd=fd)
+        point("settings")
+    finally:
+        for o in reversed(opened):
+            os.close(o)
+
+
+def links_of(acc, names):
+    out = {r: os.path.join(acc, r) for r in ROLES}
+    for r, ns in names.items():
+        for n in ns:
+            out[n] = os.path.join(acc, r)
+    return out
+
+
+def current_links(root):
+    if owned_fd(root, "drive_g") is not True:
+        return None
+    d = open_dir(root, "drive_g")
+    try:
+        return {e.name: os.readlink(e.name, dir_fd=d) for e in os.scandir(d) if e.name != MARK}
+    finally:
+        os.close(d)
+
+
+def apply(b, mode=None, names=None):
+    """Returns (code, lines). Order (spec): checks, setting, leftovers, then build, publish, clean up."""
+    s = read_settings(b)
+    if mode == "again":
+        if names is not None:
+            raise NamesError(0, "gdrive=again keeps the names; give gdrive_names without it")
+        mode = None
+    mode = mode or (s or {}).get("mode", "auto")
+    names_value = names if names is not None else (s or {}).get("names", "en")
+    parsed = parse_names(names_value)
+    if mode not in ("auto", "off") and account_of(mode) is None:
+        return 1, ["the chosen Google Drive account is not on this Mac: G: is not changed"]
+    root = os.open(b, DIR_FLAGS)
+    try:
+        dos = open_dir(root, "dosdevices")
+        try:
+            g = lst(dos, "g:")
+            if g is not None and (not stat.S_ISLNK(g.st_mode) or os.readlink("g:", dir_fd=dos) != "../drive_g"):
+                raise Refuse("G: is used by something else in this bottle; it is not changed")
+            if owned_fd(root, "drive_g") is False:
+                raise Refuse("drive_g in the bottle is not ours; it is not changed")
+            for left in ("drive_g.old", "drive_g.new"):
+                if owned_fd(root, left, may_be_empty=True) is False:
+                    raise Refuse(f"{left} in the bottle is not ours; it is not changed")
+            write_settings(root, mode, names_value)
+            # leftovers of a run that was cut short
+            if owned_fd(root, "drive_g.old", may_be_empty=True):
+                if owned_fd(root, "drive_g") is None and owned_fd(root, "drive_g.old") is True:
+                    os.rename("drive_g.old", "drive_g", src_dir_fd=root, dst_dir_fd=root)
+                    point("restore old")
+                else:
+                    clear(root, "drive_g.old")
+            if owned_fd(root, "drive_g.new", may_be_empty=True):
+                clear(root, "drive_g.new")
+            if mode == "off":
+                if lst(dos, "g:") is not None:
+                    os.unlink("g:", dir_fd=dos)
+                    point("unlink g")
+                if owned_fd(root, "drive_g"):
+                    os.rename("drive_g", "drive_g.old", src_dir_fd=root, dst_dir_fd=root)
+                    point("off rename")
+                    clear(root, "drive_g.old")
+                return 0, ["G: off"]
+            acc = account_of(mode) if mode != "auto" else None
+            if mode == "auto":
+                found = accounts()
+                if len(found) != 1:   # nothing to choose, or a choice to make: G: stays as it is
+                    return 0, ["Google Drive not found: G: is not changed" if not found else
+                               "several Google Drive accounts: G: is not changed (gdrive=<email> picks one)"]
+                acc = found[0]
+            want = links_of(acc, parsed)
+            if current_links(root) == want and lst(dos, "g:") is not None:
+                return 0, ["G: → Google Drive, unchanged"]
+            os.mkdir("drive_g.new", 0o755, dir_fd=root)
+            point("mkdir new")
+            new = open_dir(root, "drive_g.new")
+            try:
+                f = os.open(MARK, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=new)
+                os.write(f, b"1\n")
+                os.close(f)
+                point("mark")
+                for n, t in want.items():
+                    os.symlink(t, n, dir_fd=new)
+                    point("link")
+            finally:
+                os.close(new)
+            had = owned_fd(root, "drive_g") is True
+            if had:
+                os.rename("drive_g", "drive_g.old", src_dir_fd=root, dst_dir_fd=root)
+                point("old aside")
+            try:
+                os.rename("drive_g.new", "drive_g", src_dir_fd=root, dst_dir_fd=root)
+                point("publish")
+            except OSError:
+                if had:
+                    os.rename("drive_g.old", "drive_g", src_dir_fd=root, dst_dir_fd=root)
+                raise
+            if lst(dos, "g:") is None:
+                os.symlink("../drive_g", "g:", dir_fd=dos)
+                point("g link")
+            if had:
+                clear(root, "drive_g.old")
+            return 0, ["G: → Google Drive" + (f" ({sum(len(v) for v in parsed.values())} more folder names)"
+                                              if any(parsed.values()) else "")]
+        finally:
+            os.close(dos)
+    finally:
+        os.close(root)
+
+
 def main(argv):
     if len(argv) >= 2 and argv[0] == "names":
         try:
@@ -274,6 +500,26 @@ def main(argv):
         for line in sys.stdin:
             sys.stdout.write(sanitize(line, argv[1]))
         return 0
+    if len(argv) >= 2 and argv[0] == "apply":
+        opts, rest = {}, argv[2:]
+        while len(rest) >= 2 and rest[0] in ("--mode", "--names"):
+            opts[rest[0][2:]] = rest[1]
+            rest = rest[2:]
+        if rest:
+            print("gdrive.py apply: unknown arguments", file=sys.stderr)
+            return 2
+        try:
+            code, lines = apply(argv[1], opts.get("mode"), opts.get("names"))
+        except NamesError as e:
+            print(f"gdrive_names: {e}", file=sys.stderr)
+            return 2
+        except Refuse as e:
+            code, lines = 1, [str(e)]
+        except OSError as e:
+            code, lines = 1, [f"G: could not be set up: {e.strerror or e}"]
+        for line in lines:
+            print(sanitize(line), file=sys.stderr if code else sys.stdout)
+        return code
     print(__doc__.split("\n\n")[1], file=sys.stderr)
     return 2
 
