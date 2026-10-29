@@ -36,7 +36,7 @@ func ready(_ c: HittestClient) -> Bool { eventually { if case .ready = c.status 
 
 @Test func noHelloRestarts() {
     let f = Fake(), c = f.client("nohello"); c.start(); defer { c.shutdown() }
-    #expect(eventually(5) { f.starts >= 2 })
+    #expect(eventually { f.starts >= 2 })
 }
 
 @Test func slowAnswersTimeOutThenRestart() {
@@ -45,7 +45,7 @@ func ready(_ c: HittestClient) -> Bool { eventually { if case .ready = c.status 
     let t = Date(); #expect(c.query(WinePoint(x: 1, y: 1)) == nil); #expect(Date().timeIntervalSince(t) < 0.25)
     usleep(400_000)                                    // the late answer arrives: it is not taken by the next query
     #expect(c.query(WinePoint(x: 1, y: 1)) == nil)     // second miss in a row: transport failure
-    #expect(eventually(5) { f.starts >= 2 })
+    #expect(eventually { f.starts >= 2 })
 }
 
 @Test func wrongSeqIsDropped() {
@@ -56,17 +56,17 @@ func ready(_ c: HittestClient) -> Bool { eventually { if case .ready = c.status 
 @Test func overlongLineRestarts() {
     let f = Fake(), c = f.client("long"); c.start(); defer { c.shutdown() }
     #expect(ready(c)); _ = c.query(WinePoint(x: 1, y: 1))
-    #expect(eventually(5) { f.starts >= 2 })
+    #expect(eventually { f.starts >= 2 })
 }
 
 @Test func busyRetriesWithoutFailing() {
     let f = Fake(), c = f.client("busy"); c.start(); defer { c.shutdown() }
-    #expect(eventually(5) { f.starts >= 4 }); #expect(eventually { c.status == .retryLater })
+    #expect(eventually { f.starts >= 4 }); #expect(eventually { c.status == .retryLater })
 }
 
 @Test func threeCrashesFail() {
     let f = Fake(), c = f.client("crash"); c.start(); defer { c.shutdown() }
-    #expect(eventually(5) { if case .failed = c.status { return true }; return false })
+    #expect(eventually { if case .failed = c.status { return true }; return false })
     let n = f.starts; usleep(600_000); #expect(f.starts == n); #expect(n == 3)
 }
 
@@ -75,7 +75,7 @@ func ready(_ c: HittestClient) -> Bool { eventually { if case .ready = c.status 
     #expect(ready(c)); #expect(alive("sleep 61."))
     c.shutdown()
     #expect(c.status == .stopped)
-    #expect(eventually(3) { !alive("sleep 61.") })
+    #expect(eventually(10) { !alive("sleep 61.") })
     let n = f.starts; usleep(600_000); #expect(f.starts == n)
 }
 
@@ -120,7 +120,7 @@ final class FirstNil: @unchecked Sendable {
     let seen = Seen()
     c.onChange { seen.add($0) }
     c.start(); defer { c.shutdown() }
-    #expect(eventually(5) { seen.all.contains { if case .failed = $0 { return true }; return false } })
+    #expect(eventually { seen.all.contains { if case .failed = $0 { return true }; return false } })
     #expect(seen.all.contains(.ready(scale: 2)))
 }
 

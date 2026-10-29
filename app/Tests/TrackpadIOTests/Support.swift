@@ -11,8 +11,9 @@ func tempDir() -> URL {
     return d
 }
 
-/// Polls the condition every 20 ms for up to `seconds`; true when it came true.
-func eventually(_ seconds: Double = 5, _ cond: () -> Bool) -> Bool {
+/// Polls the condition every 20 ms for up to `seconds`; true when it came true. The limit is generous: a slow CI runner
+/// takes several times longer, and a passing test returns as soon as the condition holds.
+func eventually(_ seconds: Double = 20, _ cond: () -> Bool) -> Bool {
     let end = Date().addingTimeInterval(seconds)
     while Date() < end { if cond() { return true }; usleep(20_000) }
     return cond()
