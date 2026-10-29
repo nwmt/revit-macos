@@ -130,7 +130,7 @@ def read_settings(b):
         fds.append(os.open(b, nofollow | os.O_DIRECTORY))
         for part in SETTINGS[:-1]:
             fds.append(os.open(part, nofollow | os.O_DIRECTORY, dir_fd=fds[-1]))
-        f = os.open(SETTINGS[-1], nofollow, dir_fd=fds[-1])
+        f = os.open(SETTINGS[-1], nofollow | os.O_NONBLOCK, dir_fd=fds[-1])   # a FIFO there must not hang it
     except OSError:
         return None
     finally:
@@ -139,7 +139,7 @@ def read_settings(b):
     with os.fdopen(f, "rb") as fh:
         if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
             return None
-        text = fh.read(4096).decode("utf-8", "replace")
+        text = fh.read(1 << 20).decode("utf-8", "replace")   # the whole file (apply writes two short lines)
     out = {"mode": "auto", "names": "en"}
     for line in text.splitlines():
         k, _, v = line.partition("=")

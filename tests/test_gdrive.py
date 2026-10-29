@@ -252,6 +252,19 @@ class SettingsThroughLinks(Fake):
         self.assertIsNone(g.read_settings(self.b))
 
 
+class SettingsFile(Fake):
+    def test_a_fifo_does_not_hang(self):
+        d = os.path.join(self.b, "drive_c", "Program Files", "revit-macos")
+        os.makedirs(d)
+        os.mkfifo(os.path.join(d, "gdrive"))
+        self.assertIsNone(g.read_settings(self.b))
+
+    def test_long_names_are_read_whole(self):
+        names = ";".join("My Drive=" + ("n%02d" % i) * 60 for i in range(20))
+        self.settings("mode=auto\nnames=" + names + "\n")
+        self.assertEqual(g.read_settings(self.b)["names"], names)
+
+
 class Advice(Fake):
     def adv(self, **kw):
         s = dict({"mode": "auto", "mapping": "none", "accounts": "one", "names": 0, "settings": False}, **kw)
