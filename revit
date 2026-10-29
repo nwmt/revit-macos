@@ -199,9 +199,10 @@ if [ "$CMD" = status ]; then
     case "$ys" in [0-9][0-9][0-9][0-9]) ;; *) continue ;; esac   # one Revit year, or not ours
     tm="$(head -1 "$b/drive_c/Program Files/revit-macos/theme" 2>/dev/null)"   # the step theme's mode
     case "$tm" in mac|light|dark) ;; *) tm="" ;; esac
+    gd="$(python3 -I "$ROOT/tools/gdrive.py" state "$b" 2>/dev/null)" || gd=null   # G:: no email, no folder names
     n="$(basename "$b")"; rv=false; [ -f "$(revit_dir_unix "$b" "$ys")/Revit.exe" ] && rv=true
     pids="$(revit_pids "$b" "$ys" | paste -sd, -)"; run_=false; [ -z "$pids" ] || run_=true
-    b_json+="${b_json:+,}{\"name\":$(json_str "$n"),\"year\":$(json_str "$ys"),\"revit\":$rv,\"running\":$run_,\"revit_pids\":[$pids],\"addins\":[$(status_addins "$b" "$ys")],\"theme_mode\":$(json_str "$tm")}"
+    b_json+="${b_json:+,}{\"name\":$(json_str "$n"),\"year\":$(json_str "$ys"),\"revit\":$rv,\"running\":$run_,\"revit_pids\":[$pids],\"addins\":[$(status_addins "$b" "$ys")],\"theme_mode\":$(json_str "$tm"),\"gdrive\":$gd}"
     human+="$(printf '  %-14s Revit %s%s' "$n" "$ys" "$([ $run_ = true ] && echo ', running')")"$'\n'
   done
   busy=false; lock_free || busy=true

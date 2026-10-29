@@ -282,6 +282,34 @@ class Redact(unittest.TestCase):
         self.assertNotIn("alima42", str(self.ident))
 
 
+class GdrivePaths(unittest.TestCase):
+    """Paths on G: (Google Drive in the bottle, step gdrive): the company's projects and people."""
+    FORMS = ["C:\\x> open G:\\Shared drives\\Client Cobalt\\Survey\\notes.txt now",
+             "g:/my drive/Bids 2026/A.rvt", "G:\\\\Shared drives\\\\Team\\\\B.rvt",
+             '{"path": "G:\\\\\u041c\u043e\u0439 \u0434\u0438\u0441\u043a\\\\\u0421\u043c\u0435\u0442\u044b\\\\c.xlsx"}', "G:%5CShared drives%5CTeam", "G:\\Other computers\\Lab PC"]
+
+    def setUp(self):
+        self.ident = rp.learn_identity(base_facts())
+
+    def test_redacted_and_gate_clean(self):
+        for f in self.FORMS:
+            out, counts = rp.redact(f, self.ident)
+            for word in ("Cobalt", "Bids", "Team", "Lab PC", "notes", "\u0421\u043c\u0435\u0442\u044b", "\u041c\u043e\u0439"):
+                self.assertNotIn(word, out, f)
+            self.assertIn("<GDRIVE-PATH>", out, f)
+            self.assertEqual(counts.get("gdrive"), 1, f)
+            self.assertEqual(rp.gate(out, self.ident, "f.txt"), [], f)
+            self.assertEqual(rp.redact(out, self.ident)[0], out, "a second redaction changed it")
+
+    def test_gate_catches_what_is_left(self):
+        for f in self.FORMS:
+            self.assertTrue([h for h in rp.gate(f, self.ident, "f.txt") if h["rule"] == "gdrive-path"], f)
+
+    def test_not_a_path(self):
+        for f in ("G: \\u2192 Google Drive", "MSG:/x", "LOG:\\y", "G: off"):
+            self.assertEqual(rp.redact(f, self.ident)[0], f)
+
+
 class Gate(unittest.TestCase):
     def test_planted_value_in_each_form(self):
         ident = rp.learn_identity(base_facts())

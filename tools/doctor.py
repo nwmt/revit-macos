@@ -42,6 +42,7 @@ import time
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bottleread  # noqa: E402
+import gdrive  # noqa: E402
 import runlog  # noqa: E402
 import signatures  # noqa: E402
 
@@ -929,6 +930,11 @@ def collect_bottle(ctx):
     b["documents"] = documents(p, ctx)
     b["apps"] = apps(ctx)
     b["theme_mode"] = theme_mode(p)
+    try:
+        gdrive.HOME = ctx.home   # the Mac's Google Drive accounts are in this home (a test's fake one)
+        b["gdrive"] = gdrive.state(p)   # no email, no paths
+    except OSError:
+        b["gdrive"] = None
     b["wineserver"] = wineserver_last(p)
     b["watch"] = {"copy": first_line(os.path.join(p, "revit-macos", "watch-server.pl")),
                   "want": first_line(os.path.join(ctx.root, WATCH))}
@@ -1466,6 +1472,16 @@ def theme_checks(f, b):
     return [Check("bottle.theme", "info", "Revit's theme follows the Mac")]
 
 
+def gdrive_checks(f, b):
+    """bottle.gdrive: G: from Google Drive (step gdrive, tools/gdrive.py), with the same words the step prints."""
+    s = b.get("gdrive")
+    if s is None:
+        return []
+    lvl, line = gdrive.advice(s, f"{f['year']}{f['sfx']}")
+    head, _, fix = line.partition(": ./revit")
+    return [Check("bottle.gdrive", lvl, head, fix=f"./revit{fix}" if fix else "")]
+
+
 def wineserver_checks(f, b):
     """bottle.wineserver: how the bottle's last wineserver ended, as watch-server wrote it down. A warning stays until
     a later one ends another way."""
@@ -1821,7 +1837,7 @@ def bottle_checks(f):
     out += app_checks(f, b)
     out += install_checks(f, b) + since_install(f, b)
     if b.get("revit_exe"):
-        out += fixes_checks(f, b) + settings_checks(f, b) + theme_checks(f, b) + wineserver_checks(f, b) + addin_checks(f) + pyrevit_config_checks(f, b) + mcp_checks(f, b) + pyrevit_agent_checks(f, b) + pymcp_checks(f, b)
+        out += fixes_checks(f, b) + settings_checks(f, b) + theme_checks(f, b) + gdrive_checks(f, b) + wineserver_checks(f, b) + addin_checks(f) + pyrevit_config_checks(f, b) + mcp_checks(f, b) + pyrevit_agent_checks(f, b) + pymcp_checks(f, b)
     return out + logs_checks(f, b)
 
 

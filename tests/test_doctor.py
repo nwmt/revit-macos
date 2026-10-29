@@ -881,6 +881,48 @@ class PyrevitConfig(Sandbox):
         self.assertEqual(self.config(), [])
 
 
+class Gdrive(Sandbox):
+    """bottle.gdrive: tools/gdrive.py's state and advice, read from the sandbox's home, never the real one."""
+    profile = dict(PROFILE, STEPS=STEPS + ["gdrive"])
+
+    def account(self, email="someone@example.com"):
+        a = os.path.join(self.home, "Library", "CloudStorage", "GoogleDrive-" + email)
+        for r in ("My Drive", "Shared drives", "Other computers"):
+            os.makedirs(os.path.join(a, r), exist_ok=True)
+        return a
+
+    def g(self, **kw):
+        cs = [c for c in self.checks(**kw) if c.id == "bottle.gdrive"]
+        for c in cs:
+            self.assertNotIn("example.com", c.title + c.detail + c.fix)
+        return [(c.status, c.title, c.fix) for c in cs]
+
+    def apply(self, *args):
+        r = subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(dr.__file__), "gdrive.py"), "apply", self.b,
+                            *args], capture_output=True, text=True, env=dict(os.environ, HOME=self.home))
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_states(self):
+        os.makedirs(os.path.join(self.b, "dosdevices"), exist_ok=True)
+        sfx = "%d%s" % (self.year, self.facts_sfx())
+        self.assertEqual(self.g(), [("info", "Google Drive not found: no G: drive", "")])
+        self.account()
+        self.assertEqual(self.g(), [("warn", "G: is not set up", "./revit set %s gdrive=auto" % sfx)])
+        self.apply()
+        self.assertEqual(self.g(), [("ok", "G: \u2192 Google Drive", "")])
+        self.apply("--names", "ru")
+        self.assertEqual(self.g()[0][:2], ("ok", "G: \u2192 Google Drive (3 more folder names)"))
+        os.unlink(os.path.join(self.b, "drive_g", "Shared drives"))
+        self.assertEqual(self.g(), [("warn", "G: is not set up", "./revit set %s gdrive=again" % sfx)])
+        self.account("other@example.com")
+        self.apply("--mode", "someone@example.com")
+        self.assertEqual(self.g()[0][0], "ok")
+
+    def facts_sfx(self):
+        self.checks()
+        return self.facts["sfx"]
+
+
 class Theme(Sandbox):
     """bottle.theme: the step theme's mode file and the Revit app's script, where the profile has the step."""
     profile = dict(PROFILE, STEPS=STEPS + ["theme"])

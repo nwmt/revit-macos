@@ -418,9 +418,15 @@ revit_exe() { touch "$BOTTLES/$1/drive_c/Program Files/Autodesk/Revit $2/Revit.e
 reset; bottle rvt2024-a 2024 2024; revit_exe rvt2024-a 2024; bottle rvt2025-b 2025 ""; bottle exp "" ""; run "" status --json
 expect "status --json" 0 '"bottles":['
 check "status: valid JSON" eval 'printf "%s" "$OUT" | /usr/bin/perl -MJSON::PP -e "local \$/; JSON::PP->new->decode(<STDIN>)"'
-check "status: a Revit bottle" grep -qF '{"name":"rvt2024-a","year":"2024","revit":true,"running":false,"revit_pids":[],"addins":[],"theme_mode":""}' <<<"$OUT"
+check "status: a Revit bottle" grep -qF '{"name":"rvt2024-a","year":"2024","revit":true,"running":false,"revit_pids":[],"addins":[],"theme_mode":"","gdrive":{"mode": "auto", "mapping": "none", "accounts": "zero", "names": 0, "settings": false}}' <<<"$OUT"
 check "status: a half-installed bottle" grep -qF '{"name":"rvt2025-b","year":"2025","revit":false,' <<<"$OUT"
 check "status: a non-Revit bottle is left out" eval '! grep -q "\"exp\"" <<<"$OUT"'
+reset; bottle rvt2027-a 2027 2027; mkdir -p "$BOTTLES/rvt2027-a/dosdevices" "$H/Library/CloudStorage/GoogleDrive-someone@example.com/My Drive"
+env "${CLEAN_ENV[@]}" HOME="$H" python3 -I "$R/tools/gdrive.py" apply "$BOTTLES/rvt2027-a" --mode someone@example.com --names ru >/dev/null
+run "" status --json
+check "status: G: as gdrive.py state says, no email, no folder names" eval 'grep -qF "\"gdrive\":$(env "${CLEAN_ENV[@]}" HOME="$H" python3 -I "$R/tools/gdrive.py" state "$BOTTLES/rvt2027-a")}" <<<"$OUT" &&
+  grep -qF "\"gdrive\":{\"mode\": \"account\", \"mapping\": \"ok\", \"accounts\": \"one\", \"names\": 3" <<<"$OUT" && ! grep -q -e example.com -e "Other computers=" <<<"$OUT"'
+check "status: still valid JSON" eval 'printf "%s" "$OUT" | /usr/bin/perl -MJSON::PP -e "local \$/; JSON::PP->new->decode(<STDIN>)"'
 reset; bottle rvt2024-a 2024 2024; revit_exe rvt2024-a 2024; fake_revit rvt2024-a 2024; run "" status --json
 check "status: running" grep -qF '"name":"rvt2024-a","year":"2024","revit":true,"running":true' <<<"$OUT"
 reset; for b in rvt2027-a rvt2027-b; do bottle $b 2027 2027; revit_exe $b 2027; done; bottle rvt2025-a 2025 2025; revit_exe rvt2025-a 2025
@@ -1440,7 +1446,7 @@ MCP_ENV=()
 for m in mac light dark junk; do
   theme_world rvt2027-a "$m" dark; run "" status --json
   want="$m"; [ "$m" = junk ] && want=""
-  check "status: theme_mode $m" grep -qF "\"theme_mode\":\"$want\"}" <<<"$OUT"
+  check "status: theme_mode $m" grep -qF "\"theme_mode\":\"$want\"," <<<"$OUT"
 done
 fi
 

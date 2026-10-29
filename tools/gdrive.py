@@ -95,8 +95,11 @@ def parse_names(value):
     return names
 
 
+HOME = None   # the home folder whose Library/CloudStorage is read; None: this user's (doctor sets its own)
+
+
 def cloud():
-    return os.path.join(os.path.expanduser("~"), "Library", "CloudStorage")
+    return os.path.join(HOME or os.path.expanduser("~"), "Library", "CloudStorage")
 
 
 def accounts():

@@ -75,9 +75,10 @@ LABELS = {
     "model": ("<MODEL-{}>", "model name"), "dir": ("<DIR-{}>", "folder name"),
     "secret": ("<SECRET>", "sign-in token"), "query": ("<VALUE>", "web address value"),
     "adsk_serial": ("<SERIAL>", "Autodesk serial number"), "tmpdir": ("<TMPDIR>", "temporary folder path"),
+    "gdrive": ("<GDRIVE-PATH>", "path on G: (Google Drive)"),
 }
 ORDER = ("user", "name", "home", "data", "repo", "host", "adsk_user", "adsk_id", "serial", "hw_uuid", "mac", "ip",
-         "email", "bottle", "private", "volume", "model", "dir", "secret", "query", "adsk_serial", "tmpdir")
+         "email", "bottle", "private", "volume", "model", "dir", "secret", "query", "adsk_serial", "tmpdir", "gdrive")
 NUMBERED = ("ip", "volume", "model", "dir")
 PHASE = {"adsk_user": 1, "adsk_id": 1, "host": 2}   # Autodesk identity, then the host, then the other words (3)
 TOKEN = re.compile(r"<(?:DATA|REPO|USER|NAME|HOST|ADSK-USER|ADSK-ID|MAC-SERIAL|HW-UUID|MAC-ADDR|EMAIL|BOTTLE|PRIVATE|"
@@ -94,6 +95,9 @@ END = r"(?!\w|[-.]\w)"                                # a path value ends here, 
 DRIVE = r"(?:(?<![A-Za-z])[A-Za-z]:)?"                # Z: and the like, not the e: of file:
 _NOSEP = r"(?!%2[Ff]|%5[Cc])"
 
+# a path on G: (Google Drive, step gdrive): its folders are the company's projects and its people. The rest of the line
+# up to a quote, | < > or a tab goes: a path on G: has spaces, so there is no surer end
+GDRIVE_RX = re.compile(r"(?<![A-Za-z0-9])([gG]:)(?:[\\/]|%2[Ff]|%5[Cc])+(?!<GDRIVE-PATH>)[^\"'|<>\t\r\n]+")
 TMPDIR_RX = re.compile(DRIVE + r"(?:" + SEP + r"private)?" + SEP + r"var" + SEP + r"folders" + SEP +
                        r"[^\\/\s%]{1,4}" + SEP + r"[^\\/\s%]{4,40}" + SEP + r"[TC](?!\w)", re.I)
 JWT_RX = re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}")
@@ -838,6 +842,7 @@ def redact(text, identity, rel=None):
     for cls, rx in paths:   # DATA and REPO before the home (longer first), in POSIX, Z:, ~ and Y: forms
         t.sub(rx, lambda m, c=cls: t.tok(LABELS[c][0], c))
     t.sub(TMPDIR_RX, lambda m: t.tok("<TMPDIR>", "tmpdir"))
+    t.sub(GDRIVE_RX, lambda m: m.group(1) + "\\" + t.tok("<GDRIVE-PATH>", "gdrive"))
     t.sub(JWT_RX, lambda m: t.tok("<JWT>", "secret"))
     t.sub(BEARER_RX, lambda m: m.group(1) + t.tok("<SECRET>", "secret"))
     t.sub(CALLBACK_RX, lambda m: m.group(1) + t.tok("<CALLBACK>", "secret"))
@@ -992,6 +997,7 @@ GATE_RULES = (   # (rule, value class, a regex over the folded text or a functio
     ("callback", "token", re.compile(r"adskidmgr:[^\s]*code=")),
     ("secret", "token", re.compile(r"\b(?:access_token|refresh_token|id_token|client_secret|code_verifier|password|"
                                    r"passwd)[\"']?\s{0,2}[=:]\s{0,2}[\"']?(?!<)[^\s\"'&,;<>]{6,}")),
+    ("gdrive-path", "path", re.compile(r"(?<![a-z0-9])g:/+(?!<gdrive-path>)[^\s\"'|<>]")),
     ("mac-address", "address", re.compile(r"(?<![0-9a-f:-])(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}(?![0-9a-f:-])")),
     ("ip-address", "address", _ip_spans),   # the same network contexts as the redaction, on the unfolded text
     ("serial", "serial", re.compile(r"(?:serial|csn)\W{1,4}(?!000-00000000)\d{3}-\d{8}")),
