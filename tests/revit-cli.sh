@@ -655,6 +655,16 @@ reset; bottle rvt2027-a 2027 2027; run "" set 2027 gdrive=again gdrive_names=ru;
 reset; bottle rvt2027-a 2027 2027; run "" set 2027 gdrive=maybe; expect "set gdrive: an unknown value" 1 "gdrive is auto, off, again or the email"
 reset; bottle rvt2027-a 2027 2027; fake_revit rvt2027-a 2027; run "" set 2027 gdrive=auto
 expect "set gdrive refuses while Revit runs" 1 "running"; check "set gdrive: nothing runs while Revit runs" not_called "run-steps.sh"
+# ---- gdrive warm ----
+reset; bottle rvt2027-a 2027 2027; run "" gdrive; expect "gdrive: the usage" 2 "Usage: ./revit gdrive warm <year> [bottle] <folder"
+reset; bottle rvt2027-a 2027 2027; run "" gdrive warm 2027; expect "gdrive warm without a folder" 2 "Usage: ./revit gdrive warm"
+reset; bottle rvt2027-a 2027 2027; mkdir -p "$BOTTLES/rvt2027-a/dosdevices"; run "" gdrive warm 2027 'G:\'
+expect "gdrive warm without G:" 1 "Google Drive not found: no G: drive"
+reset; bottle rvt2027-b 2027 2027; mkdir -p "$BOTTLES/rvt2027-b/dosdevices" "$H/Library/CloudStorage/GoogleDrive-someone@example.com/My Drive/a/b"
+OUT="$(cd / && env "${CLEAN_ENV[@]}" HOME="$H" python3 -I "$R/tools/gdrive.py" apply "$BOTTLES/rvt2027-b" 2>&1)"
+run "" gdrive warm 2027 rvt2027-b 'G:\My Drive'; expect "gdrive warm with a bottle and a G: path" 0 "3 folders listed, 0 were cloud-only"
+check "gdrive warm: no email" eval '! grep -q example.com <<<"$OUT"'
+reset; bottle rvt2027-a 2027 2027; run "" gdrive warm 2027 nope 'G:\'; expect "gdrive warm: no such bottle" 1 "There is no bottle nope"
 reset; run "" set 2027 retina=off; expect "set: no bottle" 1 "There is no bottle rvt2027-a"
 reset; bottle rvt2027-a 2027 2027; fake_revit rvt2027-a 2027; run "" set 2027 retina=off
 expect "set refuses while Revit runs" 1 "Revit 2027 is running in rvt2027-a"; check "set: nothing runs while Revit runs" not_called "run-steps.sh"

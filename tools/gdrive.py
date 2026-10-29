@@ -11,6 +11,10 @@ the names a Russian Windows gives them).
   gdrive.py apply <bottle> [--mode auto|off|again|<email>] [--names <value>]
                                  saves the setting, then sets G: up or removes it to match (code 1: refused or failed,
                                  nothing of the user's touched; 2: bad arguments)
+  gdrive.py warm <bottle> <folder> [<year and bottle for the advice>]
+                                 lists every folder inside <folder> once (no files), so Google Drive keeps their
+                                 lists and Revit's Open dialog does not wait on each; <folder> is a Windows path on G:
+                                 (any of its names) or a Mac path inside the account (0 done, 1 errors, 130 stopped)
 
 The bottle keeps it in drive_g/ (a marker file and one link per name) and dosdevices/g: -> ../drive_g; the setting
 is in drive_c/Program Files/revit-macos/gdrive (mode=auto|off|<email>, names=<value>). Nothing here writes to Google
@@ -18,6 +22,7 @@ Drive. Output never carries an account's email or the path of its folder. Run wi
 """
 import json
 import os
+import time
 import re
 import secrets
 import stat
@@ -481,6 +486,72 @@ def apply(b, mode=None, names=None):
         os.close(root)
 
 
+# --- warm: list folders so Google Drive keeps their lists (Wine looks inside every subfolder a dialog shows) ---
+
+SKIP = {".Trash", ".shortcut-targets-by-id"}
+SF_DATALESS = 0x40000000   # sys/stat.h: the folder's list is not on this Mac yet
+
+
+def warm_roots(b, folder, where="<year>"):
+    """The real folders to walk for folder (a G: path or a Mac path): [(role folder, start)]. Raises Refuse."""
+    s = state(b)
+    if s["mapping"] != "ok":
+        raise Refuse(advice(s, where)[1])
+    links = mapped(b)[1]
+    acc = os.path.realpath(os.path.dirname(next(iter(links.values()))))
+    names = {key(n): os.path.basename(t) for n, t in links.items()}   # every name of G: → its role
+    m = re.match(r"^[gG]:(?:[\\/]+(.*))?$", folder)
+    if m:
+        parts = [x for x in re.split(r"[\\/]+", m.group(1) or "") if x]
+        if not parts:   # G:\ itself: the role folders this account has
+            return [(os.path.join(acc, r), os.path.join(acc, r)) for r in ROLES if os.path.isdir(os.path.join(acc, r))]
+        role = names.get(key(parts[0]))
+        if role is None:
+            raise Refuse("not a folder of G:")
+        base = os.path.join(acc, role)
+        start = os.path.realpath(os.path.join(base, *parts[1:]))
+    else:
+        start = os.path.realpath(folder)
+        rel = os.path.relpath(start, acc)
+        if rel.startswith(".."):
+            raise Refuse("not a folder in this Google Drive")
+        base = os.path.join(acc, rel.split(os.sep)[0]) if rel != "." else acc
+    if start != base and not start.startswith(base + os.sep) or not os.path.isdir(start):
+        raise Refuse("not a folder in this Google Drive")
+    return [(base, start)]
+
+
+def warm(b, folder, where="<year>", out=sys.stdout, every=5.0):
+    roots = warm_roots(b, folder, where)
+    listed = cloud_only = failed = 0
+    last = time.monotonic()
+    queue = [start for _, start in roots]
+    try:
+        while queue:
+            d = queue.pop(0)
+            try:
+                if os.lstat(d).st_flags & SF_DATALESS:
+                    cloud_only += 1
+                with os.scandir(d) as it:
+                    for e in it:
+                        if e.name not in SKIP and e.is_dir(follow_symlinks=False):
+                            queue.append(e.path)
+                listed += 1
+            except OSError:
+                failed += 1
+            if time.monotonic() - last >= every:
+                last = time.monotonic()
+                print(f"{listed} folders listed, {cloud_only} were cloud-only", file=out, flush=True)
+    except KeyboardInterrupt:
+        print(f"stopped: {listed} folders listed, {cloud_only} were cloud-only", file=out, flush=True)
+        return 130
+    print(f"{listed} folders listed, {cloud_only} were cloud-only", file=out)
+    if failed:
+        print(f"{failed} folders could not be listed", file=out)
+        return 1
+    return 0
+
+
 def main(argv):
     if len(argv) >= 2 and argv[0] == "names":
         try:
@@ -520,6 +591,12 @@ def main(argv):
         for line in lines:
             print(sanitize(line), file=sys.stderr if code else sys.stdout)
         return code
+    if len(argv) in (3, 4) and argv[0] == "warm":
+        try:
+            return warm(argv[1], argv[2], *argv[3:])
+        except Refuse as e:
+            print(sanitize(str(e)), file=sys.stderr)
+            return 1
     print(__doc__.split("\n\n")[1], file=sys.stderr)
     return 2
 

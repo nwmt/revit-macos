@@ -59,6 +59,7 @@ Usage: ./revit <command> <year> [bottle]
   doctor    check an installed Revit, its bottle and this Mac, change nothing (no year: this Mac and CrossOver)
   report    make a report for a GitHub issue, with personal data removed (no year: this Mac and the last runs)
   addins    add RevitLookup and pyRevit (--only <add-ins>; ./revit addins list <year>)
+  gdrive    list folders on G: ahead, so Revit's Open dialog does not wait (gdrive warm <year> [bottle] <folder>)
   set       turn Retina display and Mac keys on or off, fix or free the theme (2020, 2027; theme: 2027), set up G: from Google Drive
   import    add a file the install needs from your Windows PC (import msls31 <file>)
   cache     show or clear downloaded and unpacked installer files (cache clear --yes)
@@ -110,6 +111,12 @@ while [ $# -gt 0 ]; do
   shift
 done
 CMD="${POS[0]:-}"; YEAR_ARG="${POS[1]:-}"; NAME="${POS[2]:-}"
+GPATH=""   # ./revit gdrive warm <year> [bottle] <folder>: the folder
+if [ "$CMD" = gdrive ]; then
+  [ "${POS[1]:-}" = warm ] && [ ${#POS[@]} -ge 4 ] && [ ${#POS[@]} -le 5 ] \
+    || usage_die "Usage: ./revit gdrive warm <year> [bottle] <folder on G: or in Google Drive>"
+  YEAR_ARG="${POS[2]}"; NAME=""; GPATH="${POS[${#POS[@]}-1]}"; [ ${#POS[@]} = 5 ] && NAME="${POS[3]}"
+fi
 SETS=()   # ./revit set: the words with "=" are settings, the one without is the bottle (bottle names have no "=")
 if [ "$CMD" = set ]; then
   NAME=""
@@ -171,7 +178,7 @@ if [ -n "$EVENTS_DIR" ]; then
 fi
 [ -z "$FLAG_ERR" ] || die "$FLAG_ERR"
 case "$CMD" in
-  install|check|doctor|report|addins|import|cache|stop|logs|debug|rebuild|remove|status|find-installer|link-installer|test|mcp|set|hittest|theme) ;;
+  install|check|doctor|report|addins|import|cache|stop|logs|debug|rebuild|remove|status|find-installer|link-installer|test|mcp|set|hittest|theme|gdrive) ;;
   ""|help|-h|--help) usage; exit 0 ;;
   *) echo "Unknown command: $CMD" >&2; echo >&2; usage >&2; exit 1 ;;
 esac
@@ -511,6 +518,9 @@ case "$CMD" in
   mcp) need_crossover; exec "$ROOT/scripts/mcp-launch.sh" "$YEAR" "$NAME" "$WRITE" "$SERVER" ;;
   hittest) need_crossover; exec "$ROOT/scripts/hittest-launch.sh" "$YEAR" "$NAME" ;;
   theme) need_crossover; exec "$ROOT/scripts/theme-launch.sh" "$YEAR" "$NAME" ;;
+  gdrive)   # lists folders ahead (tools/gdrive.py): Mac files only, no Wine, no lock; Revit may be open
+    bottle_guard running_ok "$YEAR" "$NAME"
+    exec python3 -I "$ROOT/tools/gdrive.py" warm "$B" "$GPATH" "$YEAR$SFX" ;;
   set)   # Retina, Mac keys, the theme and G:: the steps retina, mackeys, theme and gdrive (scripts/steps/fixes.sh)
     [ ${#SETS[@]} -gt 0 ] || die "Usage: ./revit set $YEAR$SFX retina=on|compact|off keys=mac|windows theme=mac|light|dark gdrive=auto|off|again|<email> gdrive_names=ru. ./revit doctor $YEAR$SFX shows the current ones."
     list=(); seen=" "; shown=()   # shown: the settings as the line below prints them (no email, no folder names)

@@ -2,7 +2,7 @@
 """Tests for tools/gdrive.py (the G: drive: Google Drive in a bottle). Run: python3 -I -m unittest tests.test_gdrive
 A fake home with Library/CloudStorage/GoogleDrive-<account> and a fake bottle live in a temporary folder; nothing
 touches the real Google Drive."""
-import importlib.util, json, os, subprocess, sys, tempfile, unicodedata, unittest
+import importlib.util, io, json, os, subprocess, sys, tempfile, unicodedata, unittest
 
 TOOLS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools")
 EMAIL = "someone@example.com"
@@ -502,6 +502,88 @@ class Apply(Fake):
         sp = os.path.join(self.b, *g.SETTINGS)
         if os.path.exists(sp):
             os.unlink(sp)
+
+
+class Warm(Fake):
+    def setUp(self):
+        super().setUp()
+        self.a = self.account()
+        self.settings("mode=auto\nnames=ru\n")
+        r = self.run_tool("apply", self.b)
+        assert r.returncode == 0, r.stderr
+        work = os.path.join(self.a, "Shared drives", "Team", "Work")
+        for d in ("p1/sub", "p2", ".hidden"):
+            os.makedirs(os.path.join(work, d))
+        os.makedirs(os.path.join(self.a, "My Drive", "x"))
+        os.makedirs(os.path.join(self.a, ".Trash", "old"))
+        os.symlink(self.tmp.name, os.path.join(work, "a shortcut"))
+        open(os.path.join(work, "file.rvt"), "w").close()
+
+    def warm(self, folder):
+        return self.run_tool("warm", self.b, folder, "2027")
+
+    def count(self, r):
+        return int(r.stdout.split(" folders listed")[0].split("\n")[-1])
+
+    def test_windows_paths_and_names(self):
+        r = self.warm("G:\\Shared drives\\Team\\Work")
+        self.assertEqual((r.returncode, self.count(r)), (0, 5), r.stderr)   # Work, p1, p2, .hidden, p1/sub; no link
+        ru = "G:\\\u041e\u0431\u0449\u0438\u0435 \u0434\u0438\u0441\u043a\u0438\\Team\\Work"
+        self.assertEqual(self.count(self.warm(ru)), 5)
+        self.assertEqual(self.count(self.warm("g:/shared DRIVES/Team/Work")), 5)
+
+    def test_drive_root_skips_missing_folders_and_trash(self):
+        os.rmdir(os.path.join(self.a, "Other computers"))
+        r = self.warm("G:\\")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.count(r), 9)   # My Drive, x, Shared drives, Team, Work and its 4; no .Trash, no link
+
+    def test_mac_path(self):
+        r = self.warm(os.path.join(self.a, "Shared drives", "Team"))
+        self.assertEqual((r.returncode, self.count(r)), (0, 6), r.stderr)
+
+    def test_outside_and_missing(self):
+        for f in ("G:\\Shared drives\\..\\..\\..", "G:\\Nowhere", self.tmp.name, "G:\\Shared drives\\Team\\Work\\a shortcut",
+                  "G:\\Other computers\\none"):
+            r = self.warm(f)
+            self.assertEqual(r.returncode, 1, f)
+            self.assertNotIn("example.com", r.stdout + r.stderr)
+
+    def test_needs_g(self):
+        self.run_tool("apply", self.b, "--mode", "off")
+        r = self.warm("G:\\")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("G: off", r.stderr)
+
+    def test_counts_cloud_only_and_errors(self):
+        out = io.StringIO()
+        real = os.lstat
+        work = os.path.join(self.a, "Shared drives", "Team", "Work")
+
+        class St:
+            def __init__(self, st, flags):
+                self.st, self.st_flags = st, flags
+
+            def __getattr__(self, n):
+                return getattr(self.st, n)
+
+        def fake(p, *a, **k):
+            st = real(p, *a, **k)
+            return St(st, g.SF_DATALESS) if p.endswith("p2") else st
+        g.os.lstat = fake
+        try:
+            code = g.warm(self.b, work, "2027", out=out)
+        finally:
+            g.os.lstat = real
+        self.assertEqual(code, 0)
+        self.assertIn("5 folders listed, 1 were cloud-only", out.getvalue())
+        os.chmod(os.path.join(work, "p2"), 0)
+        try:
+            out = io.StringIO()
+            self.assertEqual(g.warm(self.b, work, "2027", out=out), 1)
+            self.assertIn("1 folders could not be listed", out.getvalue())
+        finally:
+            os.chmod(os.path.join(work, "p2"), 0o755)
 
 
 if __name__ == "__main__":
