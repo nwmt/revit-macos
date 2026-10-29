@@ -309,6 +309,7 @@ static BOOL imgcache_on;
 static get_image_desc_fn orig_get_image_desc;   /* the moved prologue, then a jump back */
 static kstring_wcs_fn kstring_wcs;              /* OGSObjects!KString::operator const wchar_t * */
 static heap_new_fn *imgdesc_new_slot;           /* the import slot of the function's own operator new */
+static heap_new_fn imgdesc_new;                 /* OGSObjects!HeapOperators::operator new(size_t): what that slot must hold */
 static SRWLOCK imgdesc_lock = SRWLOCK_INIT;
 static struct { WCHAR *path; ULONGLONG time; BOOL none; BYTE desc[IMGDESC_SIZE]; } imgdesc[IMGDESC_SLOTS];
 
@@ -325,7 +326,8 @@ static void *hook_get_image_desc(void *self, const void *str)
     ULONGLONG now = GetTickCount64();
     unsigned h, i;
     void *desc;
-    if (!path || !*path) return orig_get_image_desc(self, str);
+    /* the slot is bound only after the patch; another allocator there (another build): no cache, the copy needs ours */
+    if (!path || !*path || *imgdesc_new_slot != imgdesc_new) return orig_get_image_desc(self, str);
     h = imgdesc_hash(path);
     AcquireSRWLockShared(&imgdesc_lock);
     for (i = 0; i < 8; i++) {
@@ -362,9 +364,12 @@ static void patch_imagedesc(HMODULE mod)
     HMODULE objects = GetModuleHandleW(L"OGSObjects.dll");   /* imported by OGSOIIOIntegration: already mapped */
     BYTE *f = (BYTE *)GetProcAddress(mod, "?GetImageDesc@OIIOImageHandler@Devices@OGS@@UEAAPEAUImageDesc@23@AEBVKString@Objects@3@@Z");
     BYTE *tramp, back[12] = {0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xe0};
-    if (objects) kstring_wcs = (kstring_wcs_fn)GetProcAddress(objects, "??BKString@Objects@OGS@@QEBAPEB_WXZ");
+    if (objects) {
+        kstring_wcs = (kstring_wcs_fn)GetProcAddress(objects, "??BKString@Objects@OGS@@QEBAPEB_WXZ");
+        imgdesc_new = (heap_new_fn)GetProcAddress(objects, "??2HeapOperators@Objects@OGS@@SAPEAX_K@Z");
+    }
     /* +0x3b: "mov ecx, 30h; call [rip+disp]": the ImageDesc's allocation, through OGSObjects!HeapOperators::operator new */
-    if (!f || !kstring_wcs || memcmp(f, prologue, sizeof(prologue)) || f[0x3b] != 0xb9 ||
+    if (!f || !kstring_wcs || !imgdesc_new || memcmp(f, prologue, sizeof(prologue)) || f[0x3b] != 0xb9 ||
         *(DWORD *)(f + 0x3c) != IMGDESC_SIZE || f[0x40] != 0xff || f[0x41] != 0x15) {
         trace("OGSOIIOIntegration.dll: GetImageDesc not as expected: no texture cache\n");
         return;
@@ -396,6 +401,7 @@ static void fix_autodesk(void)
     if (GetModuleFileNameW(NULL, path, MAX_PATH) && (slash = wcsrchr(path, L'\\'))) {
         WCHAR env[2];
         imgcache_on = !lstrcmpiW(slash + 1, L"Revit.exe");
+        SetLastError(0);   /* an empty variable leaves the last error as it was */
         if (imgcache_on && !GetEnvironmentVariableW(L"RVTFIX_IMGCACHE", env, 2) && GetLastError() != ERROR_ENVVAR_NOT_FOUND) {
             imgcache_on = FALSE;
             trace("texture cache: disabled (RVTFIX_IMGCACHE is empty)\n");
