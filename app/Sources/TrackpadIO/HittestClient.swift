@@ -225,7 +225,9 @@ public final class HittestClient: HitQuerying, @unchecked Sendable {
                     hello = true
                     let s = scale(rect)
                     cond.lock()
-                    guard generation == gen else { cond.unlock(); return }
+                    // only a process still starting gets ready: a hello read after its exit was counted (the third
+                    // one: failed) must not turn the state back to ready
+                    guard generation == gen, state == .starting else { cond.unlock(); return }
                     if let s { state = .ready(scale: s) } else { layout = true }
                     cond.unlock()
                     log.line("hittest \(bottle): \(s.map { "ready, scale \($0)" } ?? "unknown display layout")")
