@@ -14,7 +14,7 @@ func statusWith(running: Bool) -> EngineOutput {
     return EngineOutput(stdout: Data(json.utf8), stderr: "", exitCode: 0)
 }
 
-let leftoverJSON = #"{"items":[{"pid":24030,"kind":"wine","reason":"bottle_gone","bottle":"probe-drag","name":"winedevice.exe","cpu":99.6,"age_s":30600},{"pid":38935,"kind":"helper","reason":"parent_gone","bottle":null,"name":"T Trackpad","cpu":1.0,"age_s":150000}],"skipped":[{"bottle":"rvt2027-a","why":"revit_running"}]"#
+let leftoverJSON = #"{"items":[{"pid":24030,"kind":"wine","reason":"bottle_gone","bottle":"probe-drag","name":"winedevice.exe","cpu":99.6,"age_s":30600,"start":1761641129},{"pid":38935,"kind":"helper","reason":"parent_gone","bottle":null,"name":"T Trackpad","cpu":1.0,"age_s":150000,"start":1761500000}],"skipped":[{"bottle":"rvt2027-a","why":"revit_running"}]"#
 
 @MainActor @Suite(.serialized) struct CleanupTests {
 
@@ -29,11 +29,11 @@ let leftoverJSON = #"{"items":[{"pid":24030,"kind":"wine","reason":"bottle_gone"
     @Test func closeAllPassesTheExactArgsAndReportsWhatIsLeft() async {
         let h = Harness()
         await h.fake.set(query: ["cleanup", "--all", "--dry-run", "--json"], EngineOutput(stdout: Data((leftoverJSON + "}").utf8), stderr: "", exitCode: 0))
-        await h.fake.set(query: ["cleanup", "--all", "--json"],
+        await h.fake.set(query: ["cleanup", "--all", "--targets", "24030:1761641129,38935:1761500000", "--json"],
                          EngineOutput(stdout: Data((leftoverJSON + #","closed":[38935],"left":[24030]}"#).utf8), stderr: "", exitCode: 1))
         guard case let .report(p) = await h.model.cleanup(all: true, dryRun: true) else { Issue.record("no plan"); return }
         #expect(p.items.map(\.pid) == [24030, 38935])
-        guard case let .report(r) = await h.model.cleanup(all: true, dryRun: false) else { Issue.record("no report"); return }
+        guard case let .report(r) = await h.model.cleanup(all: true, dryRun: false, targets: p.items) else { Issue.record("no report"); return }
         #expect(r.closed == [38935] && r.left == [24030])   // exit 1 with a report is still a report
     }
 
@@ -85,8 +85,15 @@ let leftoverJSON = #"{"items":[{"pid":24030,"kind":"wine","reason":"bottle_gone"
         let m = AppModel(engine: ProcessEngine(engine: repoEngine, environment: env), defaults: TestDefaults.make(), notifier: FakeNotifier())
         guard case let .report(p) = await m.cleanup(all: true, dryRun: true) else { Issue.record("no plan"); return }
         #expect(p.items.map(\.pid) == [fake.processIdentifier] && p.items.first?.reason == "bottle_gone")
-        guard case let .report(r) = await m.cleanup(all: true, dryRun: false) else { Issue.record("no report"); return }
+        let later = Process()   // found after the list was shown: Close all does not end it without asking
+        later.executableURL = URL(fileURLWithPath: "/bin/bash")
+        later.arguments = ["-c", #"exec -a 'C:\windows\system32\conhost.exe' perl -e 'sleep 60' "$1""#, "x", root.path]
+        try later.run()
+        defer { if later.isRunning { kill(later.processIdentifier, SIGKILL) } }
+        try await Task.sleep(for: .milliseconds(300))
+        guard case let .report(r) = await m.cleanup(all: true, dryRun: false, targets: p.items) else { Issue.record("no report"); return }
         #expect(r.closed == [fake.processIdentifier] && r.left == [])
+        #expect(later.isRunning)
         fake.waitUntilExit()
         #expect(fake.terminationReason == .uncaughtSignal)
     }

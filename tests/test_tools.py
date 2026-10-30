@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Unit tests for the Python helpers in tools/. Run: python3 -I -m unittest discover -s tests -p 'test_*.py'
 Every input is generated here; nothing from Autodesk or Microsoft is needed."""
-import hashlib, importlib.util, io, json, os, shutil, struct, subprocess, sys, tempfile, unittest, zipfile
+import hashlib, importlib.util, io, json, os, shutil, struct, subprocess, sys, tempfile, time, unittest, zipfile
 
 TOOLS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools")
 
@@ -646,12 +646,12 @@ class PythonMcpRun(Tmp):
 
 
 class LeftoversTest(Tmp):
-    """tools/leftovers.py: what is left over, from canned ps and lsof answers (no process is touched)."""
+    """tools/leftovers.py: what is left over, from canned ps and lsof answers; the signals only reach a sleep of its own."""
     def setUp(self):
         super().setUp()
         self.L = load("leftovers")
         self.b = self.path("Bottles")
-        os.makedirs(os.path.join(self.b, "live", "drive_c"))
+        os.makedirs(os.path.join(self.b, "live", "revit-macos"))
         os.environ.pop("REVIT_CLEANUP_ONLY", None)
         os.environ["REVIT_CLEANUP_AGE"] = "60"; os.environ["REVIT_GDRIVE_STUCK_AGE"] = "1800"
 
@@ -664,7 +664,10 @@ class LeftoversTest(Tmp):
         return {"ppid": ppid, "age": age, "cpu": cpu, "command": command, "comm": comm or command.split(" ")[0]}
 
     def at(self, bottle):
-        return [("DIR", f"{self.b}/{bottle}/drive_c/windows")]
+        return [("DIR", f"{self.b}/{bottle}/drive_c/windows", "cwd")]
+
+    SERVER = "/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wineserver"
+    DEVICE = "C:\\windows\\system32\\winedevice.exe"
 
     def classify(self, procs, files, **kw):
         items, skipped = self.L.classify(procs, files, self.b, now_pid=1, **kw)
@@ -676,17 +679,38 @@ class LeftoversTest(Tmp):
         self.assertEqual(self.L.secs("01-17:47:38"), 150458)
 
     def test_no_wineserver_gone_bottle_and_idle(self):
-        procs = {10: self.proc("C:\\windows\\system32\\winedevice.exe"), 11: self.proc("C:\\windows\\system32\\services.exe"),
-                 12: self.proc("/cx/bin/wineserver", comm="/cx/bin/wineserver"), 13: self.proc("C:\\windows\\system32\\rpcss.exe")}
-        files = {10: self.at("probe-drag"), 11: self.at("live"), 12: self.at("live"), 13: self.at("live")}
+        procs = {10: self.proc(self.DEVICE), 11: self.proc("C:\\windows\\system32\\services.exe"),
+                 12: self.proc(self.SERVER + " -p0"), 13: self.proc("C:\\windows\\system32\\rpcss.exe")}
+        files = {10: self.at("probe-drag"), 11: self.at("live"), 12: [("DIR", f"{self.b}/live", "3")], 13: self.at("live")}
         self.assertEqual(self.classify(procs, files), ({10: "bottle_gone"}, []))
         self.assertEqual(self.classify(procs, files, everything=True)[0], {10: "bottle_gone", 11: "idle", 12: "idle", 13: "idle"})
         del procs[12]
         self.assertEqual(self.classify(procs, files)[0], {10: "bottle_gone", 11: "no_wineserver", 13: "no_wineserver"})
         self.assertEqual(self.classify(procs, files, bottle="probe-drag")[0], {10: "bottle_gone"})
 
+    def test_a_native_program_with_a_bottle_file_open_is_not_wine(self):
+        procs = {20: self.proc(f"/usr/bin/less {self.b}/live/revit-macos/wineserver.log"),
+                 21: self.proc(f"/usr/bin/tail -f {self.b}/live/drive_c/x.exe.log"), 22: self.proc("/bin/zsh -c wine-thing")}
+        files = {20: [("REG", f"{self.b}/live/revit-macos/wineserver.log", "3")], 21: self.at("live"), 22: self.at("live")}
+        self.assertEqual(self.classify(procs, files, everything=True), ({}, []))
+
+    def test_a_wineserver_found_by_its_server_folder(self):
+        st = os.stat(os.path.join(self.b, "live"))
+        procs = {11: self.proc("C:\\windows\\system32\\services.exe"), 12: self.proc(self.SERVER)}
+        files = {11: self.at("live"), 12: [("DIR", "/private/tmp/.wine-501/server-%x-%x" % (st.st_dev, st.st_ino), "cwd")]}
+        self.assertEqual(self.classify(procs, files)[0], {})
+        self.assertEqual(self.classify(procs, files, everything=True)[0], {11: "idle", 12: "idle"})
+
+    def test_a_wineserver_of_no_known_bottle_makes_no_wineserver_unknown(self):
+        procs = {10: self.proc(self.DEVICE), 11: self.proc("C:\\windows\\system32\\services.exe"), 12: self.proc(self.SERVER),
+                 30: self.proc("C:\\windows\\system32\\conhost.exe --server 0x3c")}
+        files = {10: self.at("probe-drag"), 11: self.at("live"), 12: [("DIR", "/private/tmp/.wine-501/server-1-2", "cwd")]}
+        got, skipped = self.classify(procs, files)
+        self.assertEqual(got, {10: "bottle_gone"})   # a deleted bottle is still a fact; 11 and 30 may have a server
+        self.assertEqual(skipped, [{"bottle": "live", "why": "wineserver_unknown"}])
+
     def test_young_programs_and_revit_bottles_are_left_alone(self):
-        procs = {10: self.proc("C:\\windows\\system32\\winedevice.exe", age=5),
+        procs = {10: self.proc(self.DEVICE, age=5),
                  20: self.proc("C:\\Program Files\\Autodesk\\Revit 2027\\Revit.exe"), 21: self.proc("C:\\windows\\system32\\services.exe")}
         files = {10: self.at("live"), 20: self.at("probe-drag"), 21: self.at("probe-drag")}
         self.assertEqual(self.classify(procs, files), ({}, [{"bottle": "probe-drag", "why": "revit_running"}]))
@@ -694,23 +718,50 @@ class LeftoversTest(Tmp):
     def test_programs_in_no_bottle_only_without_any_wineserver(self):
         procs = {30: self.proc("C:\\windows\\system32\\conhost.exe --server 0x3c --headless"),
                  31: self.proc("/cx/lib/wine/x86_64-windows/winewrapper.exe --run -- notepad"),
-                 32: self.proc("/usr/bin/vim notes-about-wine.txt")}
+                 32: self.proc("/usr/bin/vim notes-about-wine.exe")}
         self.assertEqual(self.classify(procs, {})[0], {30: "no_wineserver", 31: "no_wineserver"})
-        procs[12] = self.proc("/cx/bin/wineserver", comm="/cx/bin/wineserver")
-        self.assertEqual(self.classify(procs, {12: self.at("live")})[0], {})
+        procs[12] = self.proc(self.SERVER)
+        self.assertEqual(self.classify(procs, {12: [("DIR", f"{self.b}/live", "3")]})[0], {})
 
-    def test_helpers_and_a_stuck_warm(self):
+    def test_helpers(self):
         tp = "/A/T.app/Contents/Helpers/T Trackpad.app/Contents/MacOS/T Trackpad --session S --parent 38111:Wed Oct 28 10:45:29 2026 --engine /e --data /d"
-        warm = f"/usr/bin/python3 -I /r/tools/gdrive.py warm {self.b}/live G:\\Shared 2027"
         procs = {40: self.proc(tp), 41: self.proc("python3 /r/tools/python_mcp_run.py revit-macos-python-mcp /b x"),
-                 42: self.proc("python3 /r/tools/python_mcp_run.py revit-macos-python-mcp /b x", ppid=500), 43: self.proc(warm)}
-        alive = {38111: "Wed Oct 28 10:45:29 2026"}
-        got = self.classify(procs, {}, started=alive.get, stuck=lambda p: True)[0]
-        self.assertEqual(got, {41: "parent_gone", 43: "stuck"})
-        got = self.classify(procs, {}, started=lambda p: "Thu Oct 29 09:00:00 2026", stuck=lambda p: False)[0]
+                 42: self.proc("python3 /r/tools/python_mcp_run.py revit-macos-python-mcp /b x", ppid=500)}
+        self.assertEqual(self.classify(procs, {}, started={38111: "Wed Oct 28 10:45:29 2026"}.get)[0], {41: "parent_gone"})
+        got = self.classify(procs, {}, started=lambda p: "Thu Oct 29 09:00:00 2026")[0]
         self.assertEqual(got, {40: "parent_gone", 41: "parent_gone"})   # pid 38111 was reused by another process
-        self.assertEqual(self.classify(procs, {}, bottle="live", started=alive.get, stuck=lambda p: True)[0], {43: "stuck"})
         self.assertEqual(self.L.short(tp), "T Trackpad")
+
+    def beat(self, pid, started, progress):
+        with open(os.path.join(self.b, "live", "revit-macos", "gdrive-warm-%d" % pid), "w") as f:
+            json.dump({"pid": pid, "started": started, "progress": progress}, f)
+
+    def test_a_warm_is_stuck_by_its_heartbeat(self):
+        now = 1_800_000_000
+        warm = f"/usr/bin/python3 -I /r/tools/gdrive.py warm {self.b}/live G:\\Shared 2027"
+        procs = {43: self.proc(warm, age=7200), 44: self.proc(warm, age=7200), 45: self.proc(warm, age=7200),
+                 46: self.proc(warm, age=600)}
+        self.beat(43, now - 7200, now - 60)      # slow, but it moved a minute ago
+        self.beat(44, now - 7200, now - 1900)    # nothing for 31 minutes
+        self.beat(45, now - 90000, now - 60)     # a file an earlier process of that PID left: not its own
+        self.assertEqual(self.classify(procs, {}, now=now)[0], {44: "stuck", 45: "stuck"})   # 45, 46: by their age
+        self.assertEqual(self.classify(procs, {}, bottle="other", now=now)[0], {})
+
+    def test_signals_only_reach_the_same_process(self):
+        p = subprocess.Popen(["sleep", "30"])
+        try:
+            st = self.L.starts([p.pid])[p.pid]
+            old = {"pid": p.pid, "start": st - 5, "reason": "no_wineserver", "bottle": "x"}   # the PID was reused
+            self.assertEqual(self.L.still([old]), [])
+            self.L.signal_all([old], 9)
+            time.sleep(0.2)
+            self.assertIsNone(p.poll())
+            same = dict(old, start=st)
+            self.assertEqual(self.L.still([same]), [same])
+            self.assertEqual(self.L.close(self.b, "/nonexistent", [same]), ([], []))   # no wineserver -k: by PID only
+            self.assertIsNotNone(p.poll())
+        finally:
+            p.kill(); p.wait()
 
 
 if __name__ == "__main__":

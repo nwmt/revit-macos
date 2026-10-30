@@ -151,7 +151,10 @@ public struct CleanupReport: Decodable, Equatable, Sendable {
 
     /// The lines of Close all's confirmation: one per program, then the bottles left alone.
     public var planLines: [String] {
-        items.map(\.line) + skipped.map { String(localized: "Left alone: \($0.bottle) (Revit runs there)") }
+        items.map(\.line) + skipped.map { s in
+            s.why == "wineserver_unknown" ? String(localized: "Left alone: \(s.bottle) (whether Wine runs there is not known)")
+                : String(localized: "Left alone: \(s.bottle) (Revit runs there)")
+        }
     }
 }
 
@@ -163,11 +166,15 @@ public struct Leftover: Decodable, Equatable, Sendable {
     public let name: String
     public let cpu: Double
     public let ageS: Int
+    public let start: Int64                 // the process's start (epoch seconds): with pid, the process approved
 
-    public init(pid: Int32, kind: String, reason: String, bottle: String?, name: String, cpu: Double, ageS: Int) {
+    public init(pid: Int32, kind: String, reason: String, bottle: String?, name: String, cpu: Double, ageS: Int, start: Int64) {
         self.pid = pid; self.kind = kind; self.reason = reason; self.bottle = bottle; self.name = name; self.cpu = cpu
-        self.ageS = ageS
+        self.ageS = ageS; self.start = start
     }
+
+    /// <pid>:<start>, as cleanup --targets takes it.
+    public var target: String { "\(pid):\(start)" }
 
     /// winedevice.exe · probe-drag (deleted) · 98% CPU · 8 h 37 min
     public var line: String {
@@ -187,6 +194,6 @@ public struct Leftover: Decodable, Equatable, Sendable {
 
 public struct SkippedBottle: Decodable, Equatable, Sendable {
     public let bottle: String
-    public let why: String                  // revit_running
+    public let why: String                  // revit_running, wineserver_unknown, revit_started
     public init(bottle: String, why: String) { self.bottle = bottle; self.why = why }
 }

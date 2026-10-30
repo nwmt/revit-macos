@@ -84,11 +84,13 @@ public enum CleanupAnswer: Equatable, Sendable { case report(CleanupReport), ref
 
     // MARK: programs left running (./revit cleanup)
 
-    /// cleanup --json: all = also the bottles that run without Revit (Close all), dryRun = only list them.
-    public func cleanup(all: Bool, dryRun: Bool) async -> CleanupAnswer {
+    /// cleanup --json: all = also the bottles that run without Revit (Close all), dryRun = only list them, targets =
+    /// close only these (the list the person approved; each only while it is still the same process).
+    public func cleanup(all: Bool, dryRun: Bool, targets: [Leftover]? = nil) async -> CleanupAnswer {
         var a = ["cleanup"]
         if all { a.append("--all") }
         if dryRun { a.append("--dry-run") }
+        if let t = targets { a += ["--targets", t.map(\.target).joined(separator: ",")] }
         guard let out = await query(a + ["--json"]) else { return .refused(engineError ?? "") }
         // exit 1 with a report: some program could not be ended (its PID is in left)
         if let r = try? JSONDecoder.engine.decode(CleanupReport.self, from: out.stdout) { return .report(r) }

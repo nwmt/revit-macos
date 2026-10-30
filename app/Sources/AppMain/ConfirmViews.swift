@@ -56,7 +56,7 @@ import AppKit
         }
         guard ask(String(localized: "Close \(p.items.count) program(s)?"), p.planLines.joined(separator: "\n"),
                   button: String(localized: "Close all"), destructive: true) else { return }
-        switch await app.cleanup(all: true, dryRun: false) {
+        switch await app.cleanup(all: true, dryRun: false, targets: p.items) {   // what was shown, nothing found since
         case let .refused(t): tell(String(localized: "Could not close the programs."), t)
         case let .report(r):
             let left = r.left ?? []

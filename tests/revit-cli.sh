@@ -257,17 +257,26 @@ reset; bottle rvt2024-a 2024 2024; fake_lock "install.sh 2024 rvt2024-a"; run ""
 expect "stop refuses while another task runs" 1 "Another task is running: install.sh 2024 rvt2024-a."
 check "busy: nothing stopped" not_called "wineserver"
 # ---- cleanup: programs left running (tools/leftovers.py); only the sandbox's fakes count (REVIT_CLEANUP_ONLY) ----
-cleanup() { REVIT_CLEANUP_ONLY="$T" REVIT_CLEANUP_AGE="${AGE:-0}" REVIT_GDRIVE_STUCK_AGE=0 REVIT_GDRIVE_SAMPLE=0.5 run "" cleanup "$@"; }
-fake_named() { # $1 = folder to run in, $2 = the process's name (argv[0]), rest = files it holds open: its PID in LEFT
+cleanup() { REVIT_CLEANUP_ONLY="$T" REVIT_CLEANUP_AGE="${AGE:-0}" REVIT_GDRIVE_STUCK_AGE=600 run "" cleanup "$@"; }
+fake_named() { # $1 = folder to run in, $2 = the process's name (argv[0], what tells a Wine program), rest = files it holds
+  # open. It ignores TERM, as winedevice.exe does. Its PID in LEFT
   local dir="$1" name="$2"; shift 2
   (cd "$dir" && export RDY && exec -a "$name" perl -e '$SIG{TERM} = "IGNORE"; my @f; for (@ARGV) { open(my $f, "<", $_) or die; push @f, $f }
     open(my $r, ">", $ENV{RDY}) and close $r; sleep 60' "$@") &
   LEFT=$!; PIDS="$PIDS $LEFT"; fake_ready
 }
-fake_server() { # $1 = bottle: its wineserver alone (the background services' bottle without Revit); its PID in SRVP
-  touch "$BOTTLES/$1/drive_c/srv.tmp"
-  RDY="$RDY" "$SRV" -e 'open(my $f, "<", $ARGV[0]) or die; open(my $r, ">", $ENV{RDY}) and close $r; sleep 60' "$BOTTLES/$1/drive_c/srv.tmp" &
+wine_left() { # $1 = bottle: winedevice.exe holding the bottle's windows folder, as one Wine left behind; its PID in LEFT
+  mkdir -p "$BOTTLES/$1/drive_c/windows"; touch "$BOTTLES/$1/drive_c/windows/held"
+  fake_named "$BOTTLES/$1/drive_c/windows" 'C:\windows\system32\winedevice.exe' "$BOTTLES/$1/drive_c/windows/held"
+}
+fake_server() { # $1 = bottle ("" = one whose bottle cannot be told): its wineserver alone; its PID in SRVP
+  if [ -n "$1" ]; then touch "$BOTTLES/$1/drive_c/srv.tmp"; set -- "$BOTTLES/$1/drive_c/srv.tmp"; else set -- "$T/calls"; fi
+  RDY="$RDY" "$SRV" -e 'open(my $f, "<", $ARGV[0]) or die; open(my $r, ">", $ENV{RDY}) and close $r; sleep 60' "$1" &
   SRVP=$!; PIDS="$PIDS $SRVP"; fake_ready
+}
+revit_in() { # $1 = bottle, $2 = year: its wineserver and a Revit.exe; Revit's PID in REV
+  fake_server "$1"; touch "$BOTTLES/$1/drive_c/open.tmp"
+  fake_named "$BOTTLES/$1/drive_c" "C:\\Program Files\\Autodesk\\Revit $2\\Revit.exe" "$BOTTLES/$1/drive_c/open.tmp"; REV=$LEFT
 }
 fake_trackpad() { # $1 = the parent as --parent gives it (<pid>:<start>): the app's Trackpad helper (a script, so that
   # its arguments follow its path as the real one's do); its PID in LEFT
@@ -276,53 +285,69 @@ fake_trackpad() { # $1 = the parent as --parent gives it (<pid>:<start>): the ap
   RDY="$RDY" "$x" --session S1 --parent "$1" --engine "$T/engine/revit" --data "$T/data" &
   LEFT=$!; PIDS="$PIDS $LEFT"; fake_ready
 }
-fake_warm() { # $1 = stuck | moving | between: ./revit gdrive warm of rvt2027-a with one folder open, a new one each
-  # 0.1 s, or none (between two listings; its working folder stays the same)
-  mkdir -p "$T/drive/a" "$T/drive/b"
-  RDY="$RDY" M="$1" perl -e 'opendir(my $d, "$ARGV[0]/a") or die; open(my $r, ">", $ENV{RDY}) and close $r;
-    closedir $d if $ENV{M} eq "between";
-    if ($ENV{M} eq "moving") { for (1 .. 600) { closedir $d; opendir($d, "$ARGV[0]/" . ($_ % 2 ? "b" : "a")); select(undef, undef, undef, 0.1) } }
-    sleep 60' "$T/drive" "$R/tools/gdrive.py" warm "$BOTTLES/rvt2027-a" 'G:\Projects' 2027 &
+fake_warm() { # $1 = seconds since its last progress ("" = no heartbeat): ./revit gdrive warm of rvt2027-a; PID in LEFT
+  RDY="$RDY" perl -e 'open(my $r, ">", $ENV{RDY}) and close $r; sleep 60' "$R/tools/gdrive.py" warm "$BOTTLES/rvt2027-a" 'G:\Projects' 2027 &
   LEFT=$!; PIDS="$PIDS $LEFT"; fake_ready
+  [ -z "$1" ] || { mkdir -p "$BOTTLES/rvt2027-a/revit-macos"; python3 -c 'import json, sys, time; t = time.time()
+json.dump({"pid": int(sys.argv[1]), "started": t, "progress": t - int(sys.argv[2])}, open(sys.argv[3], "w"))' "$LEFT" "$1" "$BOTTLES/rvt2027-a/revit-macos/gdrive-warm-$LEFT"; }
 }
+plan_targets() { python3 -c 'import json, sys; print(",".join("%d:%d" % (i["pid"], i["start"]) for i in json.load(sys.stdin)["items"]))' <<<"$OUT"; }
 gone() { ! kill -0 "$1" 2>/dev/null || case "$(ps -o stat= -p "$1")" in Z*) true ;; *) false ;; esac; }
 reset; cleanup; expect "cleanup with nothing left" 0 "Nothing is left running."
-reset; bottle rvt2024-a 2024 2024; fake_leftover rvt2024-a; cleanup --dry-run
+reset; bottle rvt2024-a 2024 2024; wine_left rvt2024-a; cleanup --dry-run
 expect "cleanup --dry-run lists a program Wine left behind" 0 "winedevice.exe"
 check "dry run: it still runs, no wineserver -k" eval 'kill -0 "$LEFT" && not_called "wineserver"'
 cleanup; expect "cleanup ends it" 0 "Closed 1 program(s)."
-check "cleanup: wineserver -k of its bottle first" called "wineserver -k | REVIT_YEAR= INSTALL_DRYRUN= CX_RECREATE= WINEPREFIX=$BOTTLES/rvt2024-a"
+check "cleanup: by PID only, no wineserver -k (a server started meanwhile would be hit)" not_called "wineserver"
 check "cleanup: it is gone (SIGTERM would not do)" gone "$LEFT"
 reset; bottle probe 2027 2027; fake_named "$BOTTLES/probe/drive_c" 'C:\windows\system32\services.exe' "$T/calls"
 rm -rf "$BOTTLES/probe"; cleanup --dry-run --json
-check "a deleted bottle's program: bottle_gone, with its pid, CPU and age" eval 'python3 -c "import json, sys; d = json.load(sys.stdin)
+check "a deleted bottle's program: bottle_gone, with its pid, start, CPU and age" eval 'python3 -c "import json, sys; d = json.load(sys.stdin)
 i = d[\"items\"][0]; assert (i[\"pid\"], i[\"bottle\"], i[\"reason\"], i[\"name\"]) == ($LEFT, \"probe\", \"bottle_gone\", \"services.exe\"), d
-assert isinstance(i[\"cpu\"], float) and i[\"age_s\"] >= 0" <<<"$OUT"'
-cleanup; check "a deleted bottle's program is ended, no wineserver -k for a bottle that is gone" eval 'gone "$LEFT" && not_called "wineserver -k"'
-reset; bottle rvt2024-a 2024 2024; fake_revit rvt2024-a 2024; REV=$!; fake_named / 'C:\windows\system32\conhost.exe' "$T/calls"; cleanup
+assert isinstance(i[\"cpu\"], float) and i[\"age_s\"] >= 0 and i[\"start\"] > 1700000000" <<<"$OUT"'
+cleanup; check "a deleted bottle's program is ended" eval 'gone "$LEFT" && not_called "wineserver"'
+reset; bottle rvt2024-a 2024 2024; mkdir -p "$BOTTLES/rvt2024-a/revit-macos"; touch "$BOTTLES/rvt2024-a/revit-macos/wineserver.log"
+(cd "$BOTTLES/rvt2024-a/revit-macos" && export RDY && exec perl -e 'open(my $f, "<", $ARGV[0]) or die; open(my $r, ">", $ENV{RDY}) and close $r; sleep 60' \
+  "$BOTTLES/rvt2024-a/revit-macos/wineserver.log") & LEFT=$!; PIDS="$PIDS $LEFT"; fake_ready
+cleanup --all; check "a Mac program reading a bottle's wineserver.log is no Wine program: it stays" eval '[ "$RC" = 0 ] && kill -0 "$LEFT" && grep -q "Nothing is left running." <<<"$OUT"'
+reset; bottle rvt2024-a 2024 2024; wine_left rvt2024-a; fake_server ""; cleanup
+expect "a wineserver of no known bottle: whether this bottle has one is not known" 0 "Skipped rvt2024-a: a wineserver runs whose bottle cannot be told"
+check "unknown wineserver: the program stays" eval 'kill -0 "$LEFT" && kill -0 "$SRVP"'
+reset; bottle rvt2024-a 2024 2024; revit_in rvt2024-a 2024; fake_named / 'C:\windows\system32\conhost.exe' "$T/calls"; cleanup
 expect "a bottle where Revit runs is skipped and says how to end it" 0 "Skipped rvt2024-a: Revit runs there. To end it: ./revit stop 2024 rvt2024-a"
 check "skipped: Revit runs; a program in no bottle stays while a wineserver runs" eval 'kill -0 "$REV" && kill -0 "$LEFT" && not_called "wineserver"'
-cleanup --all; check "--all leaves a bottle where Revit runs alone too" eval 'kill -0 "$REV" && kill -0 "$LEFT"'
+cleanup --all; check "--all leaves a bottle where Revit runs alone too" eval 'kill -0 "$REV" && kill -0 "$LEFT" && not_called "wineserver"'
 reset; fake_named / 'C:\windows\system32\conhost.exe' "$T/calls"; cleanup
 check "a Windows program in no bottle while no wineserver runs is ended" eval '[ "$RC" = 0 ] && grep -q "conhost.exe .*no bottle" <<<"$OUT" && gone "$LEFT"'
 reset; bottle rvt2024-a 2024 2024; fake_server rvt2024-a; cleanup
 expect "a bottle that runs without Revit is not a leftover" 0 "Nothing is left running."
 cleanup --all --dry-run; expect "--all lists it" 0 "runs without Revit"
 cleanup --all; check "--all ends it: wineserver -k, then by PID" eval '[ "$RC" = 0 ] && called "wineserver -k | REVIT_YEAR= INSTALL_DRYRUN= CX_RECREATE= WINEPREFIX=$BOTTLES/rvt2024-a" && gone "$SRVP"'
-reset; bottle rvt2024-a 2024 2024; bottle rvt2024-b 2024 2024; fake_leftover rvt2024-a; A=$LEFT; fake_leftover rvt2024-b; cleanup 2024 rvt2024-b
+reset; bottle rvt2024-a 2024 2024; fake_server rvt2024-a; S1=$SRVP; cleanup --all --dry-run --json; tg="$(plan_targets)"
+touch "$BOTTLES/rvt2024-a/drive_c/open.tmp"; fake_named "$BOTTLES/rvt2024-a/drive_c" 'C:\Program Files\Autodesk\Revit 2024\Revit.exe' "$BOTTLES/rvt2024-a/drive_c/open.tmp"
+cleanup --all --targets "$tg"
+check "Revit started after the list was shown: no wineserver -k, nothing ended" eval 'kill -0 "$LEFT" && kill -0 "$S1" && not_called "wineserver" && grep -q "Revit runs there" <<<"$OUT"'
+reset; bottle rvt2024-a 2024 2024; wine_left rvt2024-a; A=$LEFT; cleanup --dry-run --json; tg="$(plan_targets)"; wine_left rvt2024-a
+cleanup --targets "$tg" --json
+check "--targets: what was approved is ended, a program found since is not" eval 'gone "$A" && kill -0 "$LEFT" && grep -q "\"closed\": \[$A\]" <<<"$OUT"'
+cleanup --targets "$LEFT:$(( $(sed -n 's/.*"start": \([0-9]*\).*/\1/p' <<<"$OUT") - 1 ))"
+check "--targets: a PID whose start changed (reused) is not signalled" eval 'kill -0 "$LEFT" && grep -q "Nothing is left running." <<<"$OUT"'
+run "" cleanup --targets "1:x"; expect "--targets needs <pid>:<start>" 1 "--targets takes <pid>:<start>,…"
+run "" cleanup --dry-run --targets "1:2"; expect "--targets is not for --dry-run" 1 "it is not for --dry-run"
+reset; bottle rvt2024-a 2024 2024; bottle rvt2024-b 2024 2024; wine_left rvt2024-a; A=$LEFT; wine_left rvt2024-b; cleanup 2024 rvt2024-b
 check "cleanup <year> <bottle> ends that bottle's programs only" eval '[ "$RC" = 0 ] && gone "$LEFT" && kill -0 "$A"'
-reset; bottle rvt2024-a 2024 2024; fake_leftover rvt2024-a; AGE=60 cleanup --dry-run
+reset; bottle rvt2024-a 2024 2024; wine_left rvt2024-a; AGE=60 cleanup --dry-run
 expect "a program younger than 60 s is not counted (Revit may be starting)" 0 "Nothing is left running."
 reset; fake_trackpad "999999:Thu Jan  1 00:00:00 2026"; cleanup
 check "a Trackpad helper whose app is gone is ended" eval '[ "$RC" = 0 ] && grep -q "T Trackpad .*the program that started it is gone" <<<"$OUT" && gone "$LEFT"'
 reset; fake_trackpad "$$:$(ps -o lstart= -p $$)"; cleanup --dry-run; expect "a Trackpad helper whose app runs stays" 0 "Nothing is left running."
-reset; bottle rvt2027-a 2027 2027; fake_warm stuck; cleanup --dry-run
-expect "a gdrive warm with the same folder open is stuck" 0 "a Google Drive folder does not answer"
+reset; bottle rvt2027-a 2027 2027; fake_warm 700; cleanup --dry-run
+expect "a gdrive warm whose heartbeat is older than the limit is stuck" 0 "a Google Drive folder does not answer"
 cleanup 2027; check "cleanup 2027 ends the stuck warm of its bottle" eval '[ "$RC" = 0 ] && gone "$LEFT"'
-reset; bottle rvt2027-a 2027 2027; fake_warm moving; cleanup --dry-run; expect "a gdrive warm that moves on is not stuck" 0 "Nothing is left running."
-reset; bottle rvt2027-a 2027 2027; fake_warm between; cleanup --dry-run
-expect "a gdrive warm between two listings is not stuck (its working folder does not count)" 0 "Nothing is left running."
-reset; bottle rvt2024-a 2024 2024; fake_leftover rvt2024-a; fake_lock "install.sh 2025 rvt2025-a"; cleanup
+reset; bottle rvt2027-a 2027 2027; fake_warm 5; cleanup --dry-run; expect "a slow gdrive warm that still makes progress is not stuck" 0 "Nothing is left running."
+reset; bottle rvt2027-a 2027 2027; fake_warm ""; cleanup --dry-run
+expect "a young gdrive warm without a heartbeat is not stuck" 0 "Nothing is left running."
+reset; bottle rvt2024-a 2024 2024; wine_left rvt2024-a; fake_lock "install.sh 2025 rvt2025-a"; cleanup
 expect "cleanup refuses while another task runs" 1 "Another task is running: install.sh 2025 rvt2025-a."
 check "busy: nothing ended" eval 'kill -0 "$LEFT" && not_called "wineserver"'
 reset; cleanup 2022; expect "cleanup of an unsupported year" 1 "Revit 2022 is not supported yet"
