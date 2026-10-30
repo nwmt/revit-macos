@@ -59,7 +59,8 @@ point_why_not() { # $1 = bottle path, $2 = year: 0 when a point can be made now;
   [ "$(volume_id "$root")" = "$have" ] || { POINT_WHY="the folder for restore points is on another volume than the bottle"; return 1; }
   d="$root"; while [ ! -e "$d" ]; do d="$(dirname "$d")"; done
   [ -w "$d" ] || { POINT_WHY="cannot write to $(tilde "$d")"; return 1; }
-  [ -d "$(revit_extracted "$2")" ] && [ "${REVIT_REEXTRACT:-0}" != 1 ] || need="$POINT_NEED_ALL_GB"
+  [ -d "$(revit_extracted "$2")" ] && [ "${REVIT_REEXTRACT:-0}" != 1 ] \
+    || [ "$(volume_id "$DATA/installers/extracted")" != "$have" ] || need="$POINT_NEED_ALL_GB"   # the installers may be on another disk
   free="${REVIT_FREE_GB:-$(free_gb "$BOTTLES")}"
   [ "$free" -ge "$need" ] && return 0
   POINT_WHY="only $free GB free, and a rebuild that keeps the old bottle needs about $need GB"; POINT_NO_SPACE=1; return 1
