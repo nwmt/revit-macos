@@ -696,13 +696,15 @@ case "$CMD" in
     bid_old=""
     if [ -d "$B" ]; then
       need_crossover; bid_old="$(sed -n 's/^"BottleID" = //p' "$B/cxbottle.conf" 2>/dev/null)"
+      cx_bottle_lock "$B" || { point_rm "$IN"; stop_check; die "CrossOver is busy with $NAME. Try again in a minute. The bottle was not changed."; }
+      # nothing starts from here on, and a Revit that started during the copy is not killed: the check comes before the -k
+      ( bottle_guard allow_broken "$YEAR" "$NAME" ) || { cx_bottle_unlock; point_rm "$IN"; exit 1; }
       WINEPREFIX="$B" "$CX/bin/wineserver" -k 2>/dev/null </dev/null 7>&- 9>&-
-      wait_stopped "$B" 30 || { point_rm "$IN"; die "Programs still run in $NAME. Quit them with ./revit stop $YEAR$SFX, then try again. The bottle was not changed."; }
-      cx_bottle_lock "$B" || { point_rm "$IN"; die "CrossOver is busy with $NAME. Try again in a minute. The bottle was not changed."; }
-      if [ "$(bottle_activity "$B")" != stopped ]; then
-        cx_bottle_unlock; point_rm "$IN"; die "Programs started in $NAME. Quit them with ./revit stop $YEAR$SFX, then try again. The bottle was not changed."
+      if ! wait_stopped "$B" 30; then
+        cx_bottle_unlock; point_rm "$IN"; die "Programs still run in $NAME. Quit them with ./revit stop $YEAR$SFX, then try again. The bottle was not changed."
       fi
     fi
+    if [ "$STOP_REQUESTED" != 0 ]; then cx_bottle_unlock; point_rm "$IN"; stop_check; fi
     point_swap "$B" "$IN" "$OLD"; rc=$?
     cx_bottle_unlock
     [ $rc != 2 ] || die "Could not bring the restore point in, and some of the bottle stayed in $(tilde "$OLD"). Run ./revit rollback $YEAR$SFX again, or copy what you need from there first."

@@ -94,9 +94,10 @@ point_swap() { # $1 = bottle path, $2 = the folder with the clone, $3 = a new fo
     my ($b, $in, $out, $failat) = @ARGV; my ($n, @o, @i) = (0);
     sub names { opendir(my $d, $_[0]) or exit 1; my @l = grep { !/^\.\.?$/ } readdir $d; return @l }
     if (!lstat $b) { rename($in, $b) or exit 1; exit 0 }
+    my @ob = names($b); my @ib = names($in);   # both read before anything moves
     mkdir $out or exit 1;
     sub undo { my $bad = 0; rename("$b/$_", "$in/$_") or $bad = 1 for reverse @i; rename("$out/$_", "$b/$_") or $bad = 1 for reverse @o; exit($bad ? 2 : 1) }
-    for (names($b)) { undo() if ++$n == $failat; rename("$b/$_", "$out/$_") or undo(); push @o, $_ }
-    for (names($in)) { undo() if ++$n == $failat; rename("$in/$_", "$b/$_") or undo(); push @i, $_ }
+    for (@ob) { undo() if ++$n == $failat; rename("$b/$_", "$out/$_") or undo(); push @o, $_ }
+    for (@ib) { undo() if ++$n == $failat; rename("$in/$_", "$b/$_") or undo(); push @i, $_ }
     exit 0' "$1" "$2" "$3" "${REVIT_SWAP_FAIL_AT:-0}"
 }

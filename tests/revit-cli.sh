@@ -1628,6 +1628,26 @@ for at in 1 3 9; do
   check "failed swap $at: all back" eval 'grep -qx current "$BOTTLES/rvt2024-a/mark" && [ -f "$BOTTLES/rvt2024-a/.hidden" ] && [ -f "$BOTTLES/rvt2024-a/system.reg" ] && [ "$(stat -f %i "$BOTTLES/rvt2024-a")" = "$ino" ]'
   check "failed swap $at: nothing left over" eval '[ "$(pt_ids rvt2024-a)" = "20260101-000000 " ]'
 done
+reset; pt_bottle rvt2024-a 2024; pt_make rvt2024-a 2024 20260101-000000; echo current > "$BOTTLES/rvt2024-a/mark"
+mkdir -p "$T/lie"; printf '#!/bin/bash\n[ "$1" = -R ] || [ "$1" = -cR ] || exit 1\n/bin/cp "$@"; rc=$?; chmod 000 "${!#}"; exit $rc\n' > "$T/lie/cp"; chmod +x "$T/lie/cp"
+POINT_ENV=(PATH="$T/lie:$PATH"); run "" rollback 2024 --yes; POINT_ENV=(); chmod -R u+rwx "$PR" 2>/dev/null
+expect "an unreadable clone stops the rollback" 1 "was not changed"
+check "unreadable clone: the bottle stays" grep -qx current "$BOTTLES/rvt2024-a/mark"
+reset; pt_bottle rvt2024-a 2024; pt_make rvt2024-a 2024 20260101-000000; echo current > "$BOTTLES/rvt2024-a/mark"
+cat > "$T/lie/cp" <<EOF
+#!/bin/bash
+/bin/cp "\$@"; rc=\$?
+perl -e 'open(my \$f, "<", \$ARGV[0]) or die; sleep 20' "$BOTTLES/rvt2024-a/cxbottle.conf" "C:\\\\Program Files\\\\Autodesk\\\\Revit 2024\\\\Revit.exe" </dev/null >/dev/null 2>&1 7>&- 9>&- &
+sleep 1; exit \$rc
+EOF
+POINT_ENV=(PATH="$T/lie:$PATH"); run "" rollback 2024 --yes; POINT_ENV=(); pkill -f "Revit 2024.Revit.exe" 2>/dev/null
+expect "Revit started during the copy stops the rollback" 1 "Save your work and quit Revit"
+check "started during the copy: not killed, bottle stays" eval 'not_called "wineserver -k" && grep -qx current "$BOTTLES/rvt2024-a/mark"'
+check "started during the copy: the clone is gone" eval '[ "$(pt_ids rvt2024-a)" = "20260101-000000 " ]'
+reset; pt_bottle rvt2024-a 2024; pt_make rvt2024-a 2024 20260101-000000; echo current > "$BOTTLES/rvt2024-a/mark"
+printf '#!/bin/bash\n[ "$1" = -k ] && kill -TERM $PPID; exit 0\n' > "$CXF/bin/wineserver"; run "" rollback 2024 --yes
+expect "TERM after the copy stops the rollback" 1 "Stopped."
+check "TERM: bottle stays, nothing left" eval 'grep -qx current "$BOTTLES/rvt2024-a/mark" && [ "$(pt_ids rvt2024-a)" = "20260101-000000 " ]'
 reset; pt_bottle rvt2024-a 2024 two; pt_make rvt2024-a 2024 20260101-000000
 sed -i '' 's/id-two/id-one/' "$PR/rvt2024-a/20260101-000000/bottle/cxbottle.conf"; cxapp "Programs/Thing.app" rvt2024-a
 run "" rollback 2024 --yes; expect "rollback to another BottleID" 0 "is back"
