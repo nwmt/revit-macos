@@ -25,6 +25,7 @@ shim_spec() { # $1 = shim → OUT (its file in build/<shim>/), FLAGS, LIBS; 1 = 
     mcppipes)   OUT=mcppipes.dll;    FLAGS+=(-shared) ;;
     ncryptshim) OUT=ncrypt.dll;      FLAGS+=(-shared -municode); LIBS=(-lbcrypt -Wl,--enable-stdcall-fixup) ;;
     pdfprinter) OUT=add_printer.exe; FLAGS+=(-municode);         LIBS=(-lwinspool) ;;
+    revitopen)  OUT=revitopen.exe;   FLAGS+=(-municode);         LIBS=(-luser32) ;;
     rvtfix)     OUT=rvtfix.dll;      FLAGS+=(-shared);           LIBS=(-luser32 -lole32 -lgdi32 -ladvapi32) ;;
     svcshim)    OUT=svcshim.exe;     FLAGS+=(-municode);         LIBS=(-ladvapi32) ;;
     themeset)   OUT=themeset.exe;    FLAGS+=(-municode);         LIBS=(-luser32 -ladvapi32) ;;

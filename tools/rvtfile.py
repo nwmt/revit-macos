@@ -4,6 +4,8 @@
   rvtfile.py info <file>             JSON: format (year or null), build, worksharing, size, mtime_ns, error. Exit 1 on error.
   rvtfile.py winpath <bottle> <file> the file's Windows path in the bottle. Exit 1, with the reason, when it has none.
   rvtfile.py copy <file> <year>      a copy beside the file, "<name> (Revit <year>).<ext>"; prints its path. Exit 1 on error.
+  rvtfile.py plan <file> <supported years, comma> [<bottle>] [<copy year>]   what ./revit open does with it, as JSON. Stdin:
+                                     one "<year> <bottle> <running 0|1>" per bottle that has Revit.
 A .rvt, .rfa, .rte or .rft is an OLE2 compound file; its stream BasicFileInfo holds the version as text, UTF-16LE after a
 binary part, so the text may start on an odd byte. The labels are not translated. Since 2019: "Format: 2021". 2016 to
 2018: "Revit Build: Autodesk Revit 2017 (Build: …)". Much older files name a build only, no year: format is null then.
@@ -206,6 +208,55 @@ def copy(path, year):
     return dest
 
 
+def plan(path, bottles, supported, only="", copy_for=0):
+    """What ./revit open does. The rule that keeps a file from being upgraded unasked lives here: "open" only ever
+    names a bottle of the file's own year, and "copy" happens only when copy_for is asked for."""
+    r = info(path)
+    shared = r["worksharing"] not in ("", "Not enabled")
+    p = {"file": path, "format": r["format"], "worksharing": r["worksharing"], "error": r["error"], "size": r["size"],
+         "mtime_ns": r["mtime_ns"], "action": "unreadable", "year": 0, "bottles": [], "newer": [], "can_add": False, "say": ""}
+    y = r["format"]
+    if y is None:
+        p["say"] = "Cannot tell which Revit saved %s (%s)." % (os.path.basename(path), r["error"] or "it names no version")
+        return p
+    pool = [b for b in bottles if not only or b[1] == only]
+
+    def rows(year):
+        return sorted((b for b in pool if b[0] == year), key=lambda b: (not b[2], b[1]))
+
+    for year in sorted({b[0] for b in pool if b[0] > y}):
+        p["newer"].append({"year": year, "bottle": rows(year)[0][1]})
+    p["can_add"] = y in supported
+    if copy_for:
+        ok = rows(copy_for)
+        if copy_for <= y or not ok:
+            p["action"], p["say"] = "refused", "A copy goes to a newer Revit that is on this Mac. This file is Revit %d." % y
+        elif shared:
+            p["action"], p["say"] = "refused", "This file uses worksharing. To upgrade it, open it in Revit %d with Detach from Central." % copy_for
+        else:
+            p["action"], p["year"] = "copy", copy_for
+            p["bottles"] = [{"name": ok[0][1], "running": ok[0][2]}]
+        return p
+    same = rows(y)
+    running = [b for b in same if b[2]]
+    p["year"] = y
+    use = running if running else same
+    p["bottles"] = [{"name": b[1], "running": b[2]} for b in use]
+    if len(use) == 1:
+        p["action"] = "open"
+    elif use:
+        p["action"] = "pick_bottle"
+        p["say"] = "Revit %d is in several bottles: %s. Add --bottle <bottle>." % (y, ", ".join(b[1] for b in use))
+    else:
+        p["action"] = "choose"
+        options = ["./revit install %d" % y] if p["can_add"] else []
+        options += ["./revit open <file> --copy-for %d" % n["year"] for n in p["newer"][:1] if not shared]
+        p["say"] = "%s was saved in Revit %d, which is not on this Mac%s Nothing was opened.%s" % (
+            os.path.basename(path), y, " (%s)." % only if only else ".",
+            " You can run: " + " or ".join(options) if options else "")
+    return p
+
+
 def main(argv):
     try:
         if len(argv) == 2 and argv[0] == "info":
@@ -214,6 +265,11 @@ def main(argv):
             return 1 if r["error"] else 0
         if len(argv) == 3 and argv[0] == "winpath":
             print(winpath(argv[1], argv[2]))
+            return 0
+        if 3 <= len(argv) <= 5 and argv[0] == "plan":
+            rows = [(int(a), b, c == "1") for a, b, c in (l.split() for l in sys.stdin if l.strip())]
+            only, copy_for = (argv[3:] + ["", ""])[:2]
+            print(json.dumps(plan(argv[1], rows, [int(y) for y in argv[2].split(",")], only, int(copy_for or 0))))
             return 0
         if len(argv) == 3 and argv[0] == "copy" and argv[2].isdigit():
             print(copy(argv[1], int(argv[2])))

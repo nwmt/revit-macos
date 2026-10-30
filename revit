@@ -11,6 +11,7 @@ TARGETS=""   # ./revit cleanup: --targets <pid>:<start>,… (the app: what the p
 RUN_ARG=""; EXCL=()   # ./revit report: --run <log_dir>, --exclude <file> (again for more files)
 WARM_OPTS=()   # ./revit gdrive warm: --depth N, --max N
 NO_POINT=0; POINT_TO=""; POINT_CLEAR=""   # ./revit rebuild --no-point, rollback --to <id>, points --clear old|all
+OPEN_BOTTLE=""; COPY_FOR=""   # ./revit open --bottle <bottle>, --copy-for <year>
 RESULT_HINT=usage   # what an exit before the child means: usage until the arguments check out (Task 5 reads it)
 sup_end() { # $1 = exit status: the one end event, from the child's result file or from what an early exit means
   [ "$END_DONE" = 0 ] || return 0; END_DONE=1
@@ -67,6 +68,7 @@ Usage: ./revit <command> <year> [bottle]
   import    add a file the install needs from your Windows PC (import msls31 <file>)
   cache     show or clear downloaded and unpacked installer files (cache clear --yes)
   stop      quit a Revit that hangs
+  open      open a file in the Revit it was saved in (open <file>, no year; never upgrades it: --copy-for <year> opens a copy)
   cleanup   close programs Wine or the app left running (no year: every bottle; --dry-run lists them; --all closes
             all of Wine, Revit too, without saving; --targets <pid>:<start>,… only those of them)
   logs      list the newest logs
@@ -104,10 +106,10 @@ while [ $# -gt 0 ]; do
     --keep) KEEP=1 ;;
     --write) WRITE=1 ;;
     --no-point) NO_POINT=1 ;;
-    --events|--only|--accept-eula|--run|--exclude|--server|--tier|--name|--targets|--depth|--max|--to|--clear)
+    --events|--only|--accept-eula|--run|--exclude|--server|--tier|--name|--targets|--depth|--max|--to|--clear|--bottle|--copy-for)
       if [ $# -lt 2 ]; then FLAG_ERR="$1 needs a value"
       else case "$1" in --events) EVENTS_DIR="$2" ;; --only) ONLY="$2" ;; --accept-eula) EULA="$2" ;;
-        --run) RUN_ARG="$2" ;; --exclude) EXCL+=("$2") ;; --server) SERVER="$2" ;; --tier) TIER="$2" ;; --name) TOKEN_NAME="$2" ;; --depth|--max) WARM_OPTS+=("$1" "$2") ;; --targets) TARGETS="$2" ;; --to) POINT_TO="$2" ;; --clear) POINT_CLEAR="$2" ;; esac; shift; fi ;;
+        --run) RUN_ARG="$2" ;; --exclude) EXCL+=("$2") ;; --server) SERVER="$2" ;; --tier) TIER="$2" ;; --name) TOKEN_NAME="$2" ;; --depth|--max) WARM_OPTS+=("$1" "$2") ;; --targets) TARGETS="$2" ;; --to) POINT_TO="$2" ;; --clear) POINT_CLEAR="$2" ;; --bottle) OPEN_BOTTLE="$2" ;; --copy-for) COPY_FOR="$2" ;; esac; shift; fi ;;
     -h|--help) POS+=(help) ;;
     --*) FLAG_ERR="Unknown option: $1" ;;
     *) POS+=("$1") ;;
@@ -140,8 +142,15 @@ if [ "$CMD" = set ]; then
 fi
 [ "$REUSE_X$REEXTRACT" != 11 ] || FLAG_ERR="Use --reuse-extracted or --reextract, not both."
 [ "$LOG" = 0 ] || [ "$CMD" = test ] || FLAG_ERR="--log is for ./revit test only."
-[ "$DRY" = 0 ] || [ "$CMD" = remove ] || [ "$CMD" = rebuild ] || [ "$CMD" = cleanup ] || [ "$CMD" = rollback ] || [ "$CMD" = points ] \
-  || FLAG_ERR="--dry-run is for ./revit remove, rebuild, rollback, points and cleanup only."
+[ "$DRY" = 0 ] || [ "$CMD" = remove ] || [ "$CMD" = rebuild ] || [ "$CMD" = cleanup ] || [ "$CMD" = rollback ] || [ "$CMD" = points ] || [ "$CMD" = open ] \
+  || FLAG_ERR="--dry-run is for ./revit remove, rebuild, rollback, points, cleanup and open only."
+[ -z "$OPEN_BOTTLE$COPY_FOR" ] || [ "$CMD" = open ] || FLAG_ERR="--bottle and --copy-for are for ./revit open only."
+if [ "$CMD" = open ]; then
+  [ ${#POS[@]} = 2 ] || FLAG_ERR="Usage: ./revit open <file> [--bottle <bottle>] [--copy-for <year>]"
+  [ "$DRY" = "$JSON" ] || FLAG_ERR="--dry-run and --json go together for ./revit open."
+  [ "$DRY" = 0 ] || [ -z "$COPY_FOR" ] || FLAG_ERR="--copy-for makes a copy: it is not for --dry-run."
+  [ -z "$COPY_FOR" ] || [[ "$COPY_FOR" =~ ^[0-9]{4}$ ]] || FLAG_ERR="--copy-for takes a Revit year."
+fi
 [ "$NO_POINT" = 0 ] || [ "$CMD" = rebuild ] || FLAG_ERR="--no-point is for ./revit rebuild only."
 [ -z "$POINT_TO" ] || [ "$CMD" = rollback ] || FLAG_ERR="--to is for ./revit rollback only."
 [ -z "$POINT_TO" ] || [[ "$POINT_TO" =~ ^[0-9]{8}-[0-9]{6}$ ]] || FLAG_ERR="--to takes a restore point as ./revit points lists it."
@@ -206,10 +215,12 @@ case "$MCPSUB" in   # no year, no bottle to check
     exec python3 -I -B "$ROOT/tools/mcp_gate.py" token-revoke --data "$DATA" --name "$YEAR_ARG" ;;
 esac
 case "$CMD" in
-  install|check|doctor|report|addins|import|cache|stop|cleanup|logs|debug|rebuild|remove|status|find-installer|link-installer|test|mcp|set|hittest|theme|gdrive|rollback|points) ;;
+  install|check|doctor|report|addins|import|cache|stop|cleanup|logs|debug|rebuild|remove|status|find-installer|link-installer|test|mcp|set|hittest|theme|gdrive|rollback|points|open) ;;
   ""|help|-h|--help) usage; exit 0 ;;
   *) echo "Unknown command: $CMD" >&2; echo >&2; usage >&2; exit 1 ;;
 esac
+# a file, not a year: Mac files and our own lock, none of the checks below
+[ "$CMD" != open ] || exec "$ROOT/scripts/open-file.sh" "$YEAR_ARG" "$OPEN_BOTTLE" "$COPY_FOR" "$DRY"
 . "$ROOT/scripts/lib/addins.sh"
 . "$ROOT/scripts/lib/points.sh"
 status_addins() { # $1 = bottle path, $2 = year: the ids of the add-ins installed there, as JSON strings

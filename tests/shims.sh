@@ -55,7 +55,7 @@ EOF
   chmod +x "$CCF"
 }
 run() { OUT="$(cd / && env "${CLEAN_ENV[@]}" -u FAKE_ZIP HOME="$T/home" PATH="$T/bin:$PATH" "$@" 2>&1)"; RC=$?; }
-ALL="d3dwp/d3dwp.dll dpapi/dpapi.exe hittest/hittest.exe mcphost/mcphost.exe mcppipes/mcppipes.dll ncryptshim/ncrypt.dll pdfprinter/add_printer.exe rvtfix/rvtfix.dll svcshim/svcshim.exe themeset/themeset.exe tlbpin/msls31.dll vkshim/vulkan-1.dll wbemshim/wbemshim.dll wv2fix/version.dll"
+ALL="d3dwp/d3dwp.dll dpapi/dpapi.exe hittest/hittest.exe mcphost/mcphost.exe mcppipes/mcppipes.dll ncryptshim/ncrypt.dll pdfprinter/add_printer.exe revitopen/revitopen.exe rvtfix/rvtfix.dll svcshim/svcshim.exe themeset/themeset.exe tlbpin/msls31.dll vkshim/vulkan-1.dll wbemshim/wbemshim.dll wv2fix/version.dll"
 V="$(sed -n 's/^SHIMS_VERSION=//p' "$REPO/scripts/lib/shims.sh")"   # the pinned version: the tests follow the pin
 OLD="d3dwp/d3dwp.dll ncrypt-shim/ncrypt.dll pdf-printer/add_printer.exe rvtfix/rvtfix.dll svcshim/svcshim.exe tlbpin/msls31.dll vkshim/vulkan-1.dll wbem-shim/wbemshim.dll wv2fix/version.dll"
 mkzip() { # $1 = zip, rest = shim files (as in ALL/OLD): a release package with build/LICENSE and build/<file> "release <name>"
@@ -184,7 +184,7 @@ check "hittest: the header shows protocol version 1" grep -qF 'hello 1 <vx> <vy>
 reset; run "$R/scripts/build-release.sh" 9.9.9
 expect "build-release packs the shims" 0 "revit-macos-shims-9.9.9.zip"
 check "release zip: LICENSE and exactly the fourteen shim files" test "$(unzip -Z1 "$R/dist/revit-macos-shims-9.9.9.zip" | tr '\n' ' ')" = \
-  "build/LICENSE build/d3dwp/d3dwp.dll build/dpapi/dpapi.exe build/hittest/hittest.exe build/mcphost/mcphost.exe build/mcppipes/mcppipes.dll build/ncryptshim/ncrypt.dll build/pdfprinter/add_printer.exe build/rvtfix/rvtfix.dll build/svcshim/svcshim.exe build/themeset/themeset.exe build/tlbpin/msls31.dll build/vkshim/vulkan-1.dll build/wbemshim/wbemshim.dll build/wv2fix/version.dll "
+  "build/LICENSE build/d3dwp/d3dwp.dll build/dpapi/dpapi.exe build/hittest/hittest.exe build/mcphost/mcphost.exe build/mcppipes/mcppipes.dll build/ncryptshim/ncrypt.dll build/pdfprinter/add_printer.exe build/revitopen/revitopen.exe build/rvtfix/rvtfix.dll build/svcshim/svcshim.exe build/themeset/themeset.exe build/tlbpin/msls31.dll build/vkshim/vulkan-1.dll build/wbemshim/wbemshim.dll build/wv2fix/version.dll "
 check "release: checksum file" test -s "$R/dist/revit-macos-shims-9.9.9.zip.sha256"
 
 echo; echo "$((n - fails))/$n passed"

@@ -11,7 +11,8 @@ CLEAN_ENV=(-u REVIT_DATA -u REVIT_LOCK_DIR -u SHIMS_DIR -u REVIT_BUNDLED -u REVI
   -u INSTALL_DRYRUN -u REVIT_LANG -u ODIS_PKGS -u REVIT_THEME -u REVIT_GDRIVE -u REVIT_GDRIVE_NAMES -u REVIT_DEFAULTS -u REVIT_YEAR -u SMOKE_TIMEOUT -u SMOKE_START_WAIT
   -u SMOKE_STALL -u SMOKE_WORKER_WAIT -u SMOKE_POLL -u SMOKE_PREP_TIMEOUT -u REVIT_CX_TMP -u REVIT_WATCH_IDLE -u REVIT_WATCH_LOCK_WAIT -u REVIT_WATCH_LSOF -u MCP_TEST_HOLD -u MCP_HANDOFF_S
   -u REVIT_RETINA -u REVIT_KEYS -u SETTINGS_SAVE_WAIT -u REVIT_FREE_GB -u REVIT_SWAP_FAIL_AT
-  -u PYMCP_ROUTES_PORT -u PYMCP_DPAPI_S -u PYMCP_STATUS_S -u PYMCP_EXEC_HOLD -u PYMCP_TEST_HOLD -u REVIT_HOST -u REVIT_PORT)
+  -u PYMCP_ROUTES_PORT -u PYMCP_DPAPI_S -u PYMCP_STATUS_S -u PYMCP_EXEC_HOLD -u PYMCP_TEST_HOLD -u REVIT_HOST -u REVIT_PORT
+  -u REVIT_OPENER -u REVIT_OPEN_START_WAIT -u REVIT_OPEN_ATTEMPT_S -u REVIT_OPEN_WAIT -u REVIT_OPEN_WAIT_BUSY)
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)" && [ -d "$TMP" ] || { echo "mktemp failed" >&2; exit 1; }   # an empty TOP would be the current folder
 TOP="$(cd "$TMP" && pwd -P)" || exit 1   # /var → /private/var: lsof reports real paths
@@ -70,7 +71,7 @@ reset() { # a fresh sandbox for each test
   cp "$REPO/revit" "$R/"; cp -R "$REPO/tools" "$R/"; cp "$REPO/scripts/lib/common.sh" "$REPO/scripts/lib/versions.sh" "$R/scripts/lib/"
   mkdir -p "$R/scripts/profiles"; cp "$REPO"/scripts/profiles/*.sh "$R/scripts/profiles/"
   cp "$REPO/scripts/lib/addins.sh" "$REPO/scripts/lib/points.sh" "$REPO/scripts/lib/mcp.sh" "$REPO/scripts/lib/pymcp.sh" "$REPO/scripts/lib/shims.sh" "$REPO/scripts/lib/handoff.sh" "$R/scripts/lib/" 2>/dev/null
-  [ ! -f "$REPO/scripts/mcp-launch.sh" ] || cp "$REPO/scripts/mcp-launch.sh" "$R/scripts/"; cp "$REPO/scripts/hittest-launch.sh" "$REPO/scripts/theme-launch.sh" "$R/scripts/"; cp "$REPO/scripts/lib/wine.sh" "$R/scripts/lib/"; cp -R "$REPO/scripts/addins" "$REPO/scripts/steps" "$R/scripts/" 2>/dev/null
+  [ ! -f "$REPO/scripts/mcp-launch.sh" ] || cp "$REPO/scripts/mcp-launch.sh" "$R/scripts/"; cp "$REPO/scripts/hittest-launch.sh" "$REPO/scripts/theme-launch.sh" "$REPO/scripts/open-file.sh" "$R/scripts/"; cp "$REPO/scripts/lib/wine.sh" "$R/scripts/lib/"; cp -R "$REPO/scripts/addins" "$REPO/scripts/steps" "$R/scripts/" 2>/dev/null
   stub "$R/install.sh"; stub "$R/scripts/run-steps.sh"; stub "$R/scripts/launch.sh"; stub "$R/scripts/smoke.sh"
   # ensure_shim's builder: done when build/<shim>/ holds a file, else it fails
   printf '#!/bin/bash\nfor f in "$(dirname "$0")/../build/$1"/*; do [ -f "$f" ] && exit 0; done\necho "no $1 to build"; exit 1\n' \
@@ -1744,6 +1745,132 @@ reset; pt_bottle rvt2025-a 2025; pt_make rvt2025-a 2025 20260101-000000; mv "$BO
 run "2024" remove 2024 rvt2025-a; expect "remove with another year's point" 0 "Nothing to remove"
 check "another year's point stays" eval '[ -d "$PR/rvt2025-a/20260101-000000" ]'
 reset; run "" --help; check "the help names rollback" grep -q "^  rollback " <<<"$OUT"
+fi
+
+# ---- ./revit open (scripts/open-file.sh, tools/rvtfile.py): a file goes to the Revit it was saved in, or nowhere ----
+if part 2; then
+rvt() { # $1 = path, $2 = year, $3 = worksharing: a Revit file of that format
+  python3 -I -B -c 'import importlib.util, sys
+s = importlib.util.spec_from_file_location("t", sys.argv[1]); t = importlib.util.module_from_spec(s); s.loader.exec_module(t)
+open(sys.argv[2], "wb").write(t.compound(t.text(["Worksharing: %s" % sys.argv[4], "Format: %s" % sys.argv[3], "Build: 20240516_1515(x64)"])))' \
+    "$REPO/tests/test_rvtfile.py" "$1" "$2" "${3:-Not enabled}"
+}
+open_world() { # bottles rvt2027-a and rvt2020-a with Revit.exe and their apps; a fake wine plays revitopen.exe: $T/ro-ready
+  # and $T/ro-send give its exit codes, $T/ro-log what it was asked
+  pkill -f "$BOTTLES/rvt2027-a/drive_c/open.tmp" 2>/dev/null; reset
+  local y; for y in 2027 2020; do
+    bottle "rvt$y-a" "$y" "$y"; : > "$BOTTLES/rvt$y-a/drive_c/Program Files/Autodesk/Revit $y/Revit.exe"
+    mkdir -p "$BOTTLES/rvt$y-a/dosdevices" "$H/Applications/Revit $y (rvt$y-a).app"; ln -s / "$BOTTLES/rvt$y-a/dosdevices/z:"
+  done
+  mkdir -p "$R/build/revitopen"; : > "$R/build/revitopen/revitopen.exe"
+  cat > "$CXF/bin/wine" <<EOF
+#!/bin/bash
+shift 3   # --bottle <name> --wait-children
+{ printf '%s ' "\$1" "\$2" "\$3"; [ -e /dev/fd/9 ] && printf 'FD9'; echo; } >> "$T/ro-log"
+case "\$2" in
+  ready) exit "\$(cat "$T/ro-ready" 2>/dev/null || echo 0)" ;;
+  send) exit "\$(cat "$T/ro-send" 2>/dev/null || echo 0)" ;;
+esac
+EOF
+  chmod +x "$CXF/bin/wine"
+  cat > "$T/opener" <<EOF
+#!/bin/bash
+echo "\$1" >> "$T/opened"
+[ -f "$T/opener-stays" ] && exit 0
+perl -e 'open(my \$f, "<", \$ARGV[0]) or die; sleep 6' "$BOTTLES/rvt2027-a/drive_c/open.tmp" 'C:\\Program Files\\Autodesk\\Revit 2027\\Revit.exe' >/dev/null 2>&1 &
+EOF
+  chmod +x "$T/opener"; : > "$BOTTLES/rvt2027-a/drive_c/open.tmp"
+  POINT_ENV=(REVIT_OPENER="$T/opener" REVIT_OPEN_START_WAIT=5 REVIT_OPEN_ATTEMPT_S=3 REVIT_OPEN_WAIT=3 REVIT_OPEN_WAIT_BUSY=3)
+  rvt "$H/Documents/p.rvt" 2027
+}
+plan() { run "" open "$1" --dry-run --json; PJ="$OUT"; }
+pf() { python3 -I -c 'import json,sys; print(json.loads(sys.argv[1])[sys.argv[2]])' "$PJ" "$1"; }
+is_touched() { [ -e "$T/ro-log" ] || [ -e "$T/opened" ]; }
+
+open_world; plan "$H/Documents/p.rvt"
+check "open plan: its year is here → open, in that bottle" eval '[ "$(pf action)" = open ] && [ "$(pf year)" = 2027 ] && grep -q rvt2027-a <<<"$PJ"'
+check "open plan: nothing started, nothing run" eval '! is_touched'
+rvt "$H/Documents/old.rvt" 2025; plan "$H/Documents/old.rvt"
+check "open plan: its year is not here → choose, newer Revit named, it can be added" eval '[ "$(pf action)" = choose ] && [ "$(pf can_add)" = True ] && grep -q "\"year\": 2027" <<<"$PJ"'
+check "open plan: an older Revit is never offered" eval '! grep -q "\"year\": 2020" <<<"$PJ"'
+run "" open "$H/Documents/old.rvt"
+expect "open: its year is not here → refused" 1 "saved in Revit 2025, which is not on this Mac"
+check "open: refused, nothing started, nothing sent" eval '! is_touched'
+rvt "$H/Documents/new.rvt" 2028; plan "$H/Documents/new.rvt"
+check "open plan: newer than any Revit → choose, no Revit named, nothing to add" eval '[ "$(pf action)" = choose ] && [ "$(pf can_add)" = False ] && grep -q "\"newer\": \[\]" <<<"$PJ"'
+echo notrevit > "$H/Documents/bad.rvt"; plan "$H/Documents/bad.rvt"
+check "open plan: not a Revit file → unreadable" eval '[ "$(pf action)" = unreadable ]'
+run "" open "$H/Documents/bad.rvt"
+expect "open: not a Revit file → refused" 1 "Cannot tell which Revit saved bad.rvt"
+run "" open "$H/Documents/none.rvt"; expect "open: no such file" 1 "There is no file"
+
+open_world; fake_revit rvt2027-a 2027; run "" open "$H/Documents/p.rvt"
+expect "open: Revit runs → sent to it" 0 "Opened in Revit 2027 (rvt2027-a)."
+check "open: running Revit: no app started" eval '[ ! -e "$T/opened" ]'
+check "open: asks if DDE is there, sends the Windows path once" eval '[ "$(grep -c " send " "$T/ro-log")" = 1 ] && grep -qF "ready 10" "$T/ro-log" && grep -qF "Documents\\p.rvt" "$T/ro-log"'
+check "open: the lock does not reach Wine" eval '! grep -q FD9 "$T/ro-log"'
+open_world; fake_revit rvt2027-a 2027; fake_revit rvt2027-a 2027; run "" open "$H/Documents/p.rvt"
+expect "open: two Revits in one bottle → refused" 1 "Quit one"
+check "open: two Revits: nothing sent" eval '[ ! -e "$T/ro-log" ]'
+
+open_world; run "" open "$H/Documents/p.rvt"
+expect "open: Revit not running → its app starts, the file is sent" 0 "Opened in Revit 2027"
+check "open: the bottle's own app, once" eval '[ "$(grep -c . "$T/opened")" = 1 ] && grep -q "Revit 2027 (rvt2027-a).app" "$T/opened"'
+check "open: a start is recorded" eval '[ -s "$BOTTLES/rvt2027-a/revit-macos/open-start" ]'
+
+open_world; : > "$T/opener-stays"; mkdir -p "$BOTTLES/rvt2027-a/revit-macos"; date +%s > "$BOTTLES/rvt2027-a/revit-macos/open-start"
+POINT_ENV+=(REVIT_OPEN_START_WAIT=1); run "" open "$H/Documents/p.rvt"
+expect "open: a start under way, Revit never shows → gives up" 1 "did not take the file in time"
+check "open: a start under way is not repeated" eval '[ ! -e "$T/opened" ]'
+
+open_world; : > "$T/opener-stays"; POINT_ENV+=(REVIT_OPEN_START_WAIT=1); rm -rf "$H/Applications/Revit 2027 (rvt2027-a).app"; run "" open "$H/Documents/p.rvt"
+expect "open: no app → says what to do, starts nothing else" 1 "There is no"
+
+open_world; fake_revit rvt2027-a 2027; echo 3 > "$T/ro-ready"; run "" open "$H/Documents/p.rvt"
+expect "open: Revit runs, DDE never answers → gives up, nothing sent" 1 "did not take the file in time"
+check "open: no send without a server" eval '! grep -q " send " "$T/ro-log"'
+open_world; fake_revit rvt2027-a 2027; echo 4 > "$T/ro-send"; run "" open "$H/Documents/p.rvt"; expect "open: Revit busy" 1 "close its open dialog"
+open_world; fake_revit rvt2027-a 2027; echo 5 > "$T/ro-send"; run "" open "$H/Documents/p.rvt"; expect "open: no answer → said so" 1 "It may still open the file"
+check "open: no answer → not sent again" eval '[ "$(grep -c " send " "$T/ro-log")" = 1 ]'
+open_world; fake_revit rvt2027-a 2027; echo 3 > "$T/ro-send"; run "" open "$H/Documents/p.rvt"; expect "open: server gone at send → gives up in time" 1 "did not take the file in time"
+
+open_world; fake_revit rvt2027-a 2027; rvt "$H/Documents/late.rvt" 2027
+# the real rvtfile.py behind a front: the file changes between the plan and the check before sending
+mv "$R/tools/rvtfile.py" "$T/rf.py"
+cat > "$R/tools/rvtfile.py" <<EOF
+import runpy, sys
+if sys.argv[1] == "info":
+    open("$H/Documents/late.rvt", "ab").write(b"x")
+sys.argv[0] = "$T/rf.py"; runpy.run_path("$T/rf.py", run_name="__main__")
+EOF
+run "" open "$H/Documents/late.rvt"
+expect "open: the file changed before sending → refused" 1 "The file changed while Revit started"
+check "open: a changed file is not sent" eval '! grep -q " send " "$T/ro-log"'
+
+open_world; mkdir -p "$H/Documents/a"; rvt "$H/Documents/a/b.rvt" 2025; rvt "$H/Documents/a\\b.rvt" 2027; fake_revit rvt2027-a 2027
+run "" open "$H/Documents/a\\b.rvt"
+expect "open: a backslash in a Mac name is refused" 1 "Rename it first"
+check "open: backslash: nothing sent" eval '[ ! -e "$T/ro-log" ]'
+
+open_world; rvt "$H/Documents/old.rvt" 2025; fake_revit rvt2027-a 2027; run "" open "$H/Documents/old.rvt" --copy-for 2027
+expect "open --copy-for: the copy opens" 0 "Opened in Revit 2027"
+check "open --copy-for: beside the file, the original stays" eval '[ -f "$H/Documents/old (Revit 2027).rvt" ] && [ -f "$H/Documents/old.rvt" ]'
+check "open --copy-for: Revit gets the copy" eval 'grep -qF "old (Revit 2027).rvt" "$T/ro-log"'
+run "" open "$H/Documents/old.rvt" --copy-for 2020; expect "open --copy-for: not to an older Revit" 1 "newer Revit"
+run "" open "$H/Documents/p.rvt" --copy-for 2027; expect "open --copy-for: not to its own year" 1 "newer Revit"
+rvt "$H/Documents/c.rvt" 2025 Central; run "" open "$H/Documents/c.rvt" --copy-for 2027; expect "open --copy-for: not for a central model" 1 "worksharing"
+
+open_world; bottle rvt2027-b 2027 2027; : > "$BOTTLES/rvt2027-b/drive_c/Program Files/Autodesk/Revit 2027/Revit.exe"
+plan "$H/Documents/p.rvt"; check "open plan: two bottles of the year → pick_bottle" eval '[ "$(pf action)" = pick_bottle ]'
+run "" open "$H/Documents/p.rvt"; expect "open: two bottles → asks for one" 1 "--bottle"
+fake_revit rvt2027-b 2027; plan "$H/Documents/p.rvt"; check "open plan: one of them runs → that one" eval '[ "$(pf action)" = open ] && grep -q rvt2027-b <<<"$PJ" && ! grep -q "\"rvt2027-a\"" <<<"$PJ"'
+run "" open "$H/Documents/p.rvt" --bottle rvt2020-a; expect "open --bottle: another year's bottle → refused" 1 "not on this Mac"
+
+open_world; run "" open; expect "open: no file" 1 "Usage: ./revit open"
+run "" open "$H/Documents/p.rvt" --dry-run; expect "open: --dry-run alone" 1 "go together"
+run "" open "$H/Documents/p.rvt" --copy-for x; expect "open: --copy-for needs a year" 1 "Revit year"
+run "" status --bottle x; expect "--bottle is for open only" 1 "for ./revit open only"
+POINT_ENV=(); pkill -f "$BOTTLES/rvt2027-a/drive_c/open.tmp" 2>/dev/null
 fi
 
 # ---- end ----
