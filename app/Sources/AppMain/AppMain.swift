@@ -7,6 +7,7 @@ import SwiftUI
 
 @main
 struct AppMain: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var env = AppEnvironment()
 
     var body: some Scene {
@@ -55,6 +56,7 @@ struct AppMain: App {
     let settings: SettingsModel?
     let trackpad: TrackpadModel?
     let theme: ThemeSync?
+    let files: FileOpenModel?
     /// What the menu shows. Rebuilding an open menu closes its submenus, so it is updated only while no menu is open
     /// (AppKit says when menu tracking begins and ends) and only when it differs.
     private(set) var menu: MenuContent?
@@ -109,13 +111,17 @@ struct AppMain: App {
             launcher.onExit = { [weak t] h in Task { await t?.helperExited(h) } }
             trackpad = t
             theme = ThemeSync(engine: ProcessEngine(engine: engine, environment: EngineEnvironment.make(from: env)))
+            files = FileOpenModel(engine: ProcessEngine(engine: engine, environment: EngineEnvironment.make(from: env)),
+                                  ask: FileOpenDialogs(router: router))
         } else {
             app = nil
             wizard = nil
             settings = nil
             trackpad = nil
             theme = nil
+            files = nil
         }
+        FileInbox.receive = { [weak self] urls in Task { await self?.files?.add(urls) } }
         // the Mac turned light or dark: Revit 2027 follows (ThemeSync)
         DistributedNotificationCenter.default().addObserver(forName: .init("AppleInterfaceThemeChangedNotification"),
                                                             object: nil, queue: .main) { [weak self] _ in
@@ -156,9 +162,11 @@ struct MenuLabel: View {
         if app.status?.app?.placement == "move" { Placement.ask(name: env.name) }
         if app.watched != nil {
             env.router.open(.run)
-        } else if (app.status?.bottles ?? []).isEmpty && !app.isBusy {
-            env.router.open(.wizard)
+        } else if (app.status?.bottles ?? []).isEmpty && !app.isBusy && FileInbox.early.isEmpty {
+            env.router.open(.wizard)   // started for a file: its dialog offers the wizard
         }
+        await env.files?.add(FileInbox.early); FileInbox.early = []
+        Task { await env.files?.start() }   // the poll loop must not wait for Revit to take a file
         var tick = 0
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(1))

@@ -22,6 +22,110 @@
 	<string>@APP_MIN_MACOS@</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>@APP_BUNDLE_ID@.rvt</string>
+			<key>UTTypeDescription</key>
+			<string>Revit Project</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>rvt</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>@APP_BUNDLE_ID@.rfa</string>
+			<key>UTTypeDescription</key>
+			<string>Revit Family</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>rfa</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>@APP_BUNDLE_ID@.rte</string>
+			<key>UTTypeDescription</key>
+			<string>Revit Template</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>rte</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>@APP_BUNDLE_ID@.rft</string>
+			<key>UTTypeDescription</key>
+			<string>Revit Family Template</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>rft</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Revit File</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>@APP_BUNDLE_ID@.rvt</string>
+				<string>@APP_BUNDLE_ID@.rfa</string>
+				<string>@APP_BUNDLE_ID@.rte</string>
+				<string>@APP_BUNDLE_ID@.rft</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Revit File</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>rvt</string>
+				<string>rfa</string>
+				<string>rte</string>
+				<string>rft</string>
+			</array>
+		</dict>
+	</array>
 	<key>AppRepository</key>
 	<string>@APP_REPO@</string>
 </dict>

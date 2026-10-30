@@ -181,6 +181,9 @@ pl() { plutil -extract "$1" raw -o - "$B/Contents/Info.plist" 2>/dev/null; }
 check "bundle: Info.plist" eval '[ "$(pl CFBundleIdentifier)" = io.example.testapp ] && [ "$(pl CFBundleExecutable)" = "Test App" ] &&
   [ "$(pl CFBundleName)" = "Test App" ] && [ "$(pl CFBundleShortVersionString)" = 0.0.1 ] && [ "$(pl LSMinimumSystemVersion)" = 26.0 ] &&
   [ "$(pl LSUIElement)" = true ] && [ "$(pl AppRepository)" = example/test-app ]'
+check "bundle: it opens Revit files by its own types and, when another app exports them, by extension" eval '
+  [ "$(pl UTImportedTypeDeclarations.0.UTTypeIdentifier)" = io.example.testapp.rvt ] && [ "$(pl UTImportedTypeDeclarations.3.UTTypeIdentifier)" = io.example.testapp.rft ] &&
+  [ "$(pl CFBundleDocumentTypes.0.LSItemContentTypes.1)" = io.example.testapp.rfa ] && [ "$(pl CFBundleDocumentTypes.1.CFBundleTypeExtensions.2)" = rte ]'
 HP="$B/Contents/Helpers/Test App Trackpad.app"; plh() { plutil -extract "$1" raw -o - "$HP/Contents/Info.plist" 2>/dev/null; }
 check "bundle: the trackpad helper, its own bundle ID and version" eval '[ -x "$HP/Contents/MacOS/Test App Trackpad" ] &&
   [ "$(plh CFBundleIdentifier)" = io.example.testapp.trackpad ] && [ "$(plh CFBundleExecutable)" = "Test App Trackpad" ] &&
