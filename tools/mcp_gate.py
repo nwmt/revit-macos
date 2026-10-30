@@ -302,6 +302,8 @@ class Session:
         f = self.child.stdin
         try:
             for data in iter(self.to_child.get, None):
+                if self.ending:   # a call still queued when its token was revoked is not delivered
+                    break
                 f.write(data)
                 f.flush()
         except (OSError, ValueError):

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 """tools/mcp_gate.py against a fake scripts/mcp-launch.sh that speaks MCP. Run with the other unit tests."""
-import hashlib, importlib.util, json, os, pty, queue, signal, stat, subprocess, sys, tempfile, textwrap, threading, time
+import argparse, hashlib, importlib.util, io, json, os, pty, queue, signal, stat, subprocess, sys, tempfile, textwrap, threading, time
 import unittest, zipfile
 
 GATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "mcp_gate.py")
@@ -370,6 +370,26 @@ class Protocol(World):
         time.sleep(0.5)
         gate.save_tokens(self.data, [])
         self.assertEqual(p.wait(gate.WATCH_S + 8), 1)
+
+    def test_a_queued_call_is_not_delivered_after_revoking(self):
+        class Child:
+            stdin = io.BytesIO()
+        child = Child()
+        child.stdin.close = lambda: None
+        a = argparse.Namespace(server="autodesk", data=self.data, bottle="b")
+        s = gate.Session(a, None, "", {"tier": "read"}, child, "x")
+        s.send_child(b"first\n")
+        s.send_child(b"second\n")
+        real, s.to_child.get = s.to_child.get, None
+        def get():
+            item = real()
+            if item == b"second\n":
+                s.ending = "revoked"
+            return item
+        s.to_child.get = get
+        s.send_child(None)
+        s.write_child()
+        self.assertEqual(child.stdin.getvalue(), b"first\n")
 
     def test_a_late_reader_gets_the_whole_answer(self):
         p = self.start(self.token(), mode="answer-and-leave")
