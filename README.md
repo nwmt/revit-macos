@@ -91,9 +91,11 @@ Run them in Terminal, in the project folder. In a new Terminal window, first typ
 | `./revit logs 2025` | List the newest logs |
 | `./revit debug 2025` | Start Revit and record a log |
 | `./revit report 2025` | Make a report for a GitHub issue, with personal data removed |
-| `./revit rebuild 2025` | Delete the bottle and install Revit again |
+| `./revit rebuild 2025` | Keep a restore point, delete the bottle and install Revit again |
+| `./revit rollback 2025` | Bring the bottle back from its newest restore point (`--to <id>`: an older one) |
+| `./revit points 2025` | List the bottle's restore points (`--clear old` keeps the newest, `--clear all` deletes all) |
 | `./revit remove 2025` | Delete Revit, its bottle and its apps |
-| `./revit status` | List the Revit bottles on this Mac |
+| `./revit status` | List the Revit bottles and restore points on this Mac |
 | `./revit find-installer ~/Downloads/Revit` | Say which Revit installer a folder holds |
 | `./revit link-installer 2025 ~/Downloads/Revit` | Install Revit 2025 from that folder instead of `installers/revit2025/` |
 | `./revit import msls31 <file>` | Add msls31.dll from your Windows PC |
@@ -109,6 +111,12 @@ Run them in Terminal, in the project folder. In a new Terminal window, first typ
   `installers/extracted/revit2025` (it holds the old unpacked files). Then run `./revit rebuild 2025`: it downloads
   the new update and installs it.
 - `rebuild` and `remove` reset Revit's settings and add-ins in the bottle. Your projects in Documents stay.
+- **Restore points:** before it deletes the bottle, `rebuild` keeps an APFS copy of it, with your settings, add-ins and
+  sign-in. If the new install is worse, `./revit rollback 2025` brings the old bottle back. The copy costs almost nothing
+  at first, but after `rebuild` it holds the old bottle's disk space, up to its full size, until you delete it:
+  `./revit status` shows the size, `./revit points 2025 --clear old` deletes all but the newest. Points are deleted only
+  by that command and by `./revit remove`. Without an APFS volume or with too little free space, `rebuild` says so and
+  asks; `--no-point` skips the copy.
 
 ## Good to know
 

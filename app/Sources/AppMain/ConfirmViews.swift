@@ -40,7 +40,7 @@ import AppKit
         let title = verb == "remove" ? String(localized: "Remove Revit \(String(r.year)) (\(r.bottle))?") : String(localized: "Rebuild Revit \(String(r.year)) (\(r.bottle))?")
         let button = verb == "remove" ? String(localized: "Remove") : String(localized: "Rebuild")
         guard ask(title, lines.joined(separator: "\n"), button: button, destructive: true) else { return }
-        await start(app: app, env: env, r)
+        await start(app: app, env: env, r.withPlan(restorePoint: p.restorePoint))
     }
 
     /// Close all: what cleanup --all would end (all of Wine, Revit too, and what the app left), then the close on a yes:

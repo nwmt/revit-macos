@@ -390,6 +390,13 @@ cx_bottle_unlock() { # ends the holder of cx_bottle_lock: the kernel drops the l
   [ -n "$CX_LOCK_PID" ] || return 0
   kill -KILL "$CX_LOCK_PID" 2>/dev/null; wait "$CX_LOCK_PID" 2>/dev/null; CX_LOCK_PID=""; return 0
 }
+wait_stopped() { # $1 = bottle path, $2 = seconds: 0 once nothing runs in it
+  local t=$SECONDS
+  while [ "$(bottle_activity "$1")" != stopped ]; do
+    [ $((SECONDS - t)) -lt "$2" ] || return 1
+    sleep 1
+  done
+}
 COPY_WHY=""   # why bottle_copy_at_rest failed: busy (CrossOver's lock), active, copy, active_after
 bottle_copy_at_rest() { # $1 = bottle path, $2 = an existing folder: an APFS clone of the bottle's contents in it, under
   # CrossOver's lock, so nothing starts in the bottle meanwhile and it is at rest before and after. 1 with COPY_WHY
@@ -413,6 +420,13 @@ cx_menu_apps() { # $1 = bottle name: the apps CrossOver made for its Start Menu 
   find "$HOME/Applications/CrossOver" -type d -name '*.app' -prune 2>/dev/null | while IFS= read -r a; do
     [ "$(plutil -extract CXHelperAppBottleName raw -o - "$a/Contents/Info.plist" 2>/dev/null)" = "$1" ] && echo "$a"
   done
+  return 0
+}
+
+menu_apps_remove() { # $1 = bottle name: its CrossOver menu apps, then the folders they leave empty
+  local a any=0
+  while IFS= read -r a; do [ -n "$a" ] && rm -rf "$a" && any=1; done < <(cx_menu_apps "$1")
+  [ $any = 0 ] || find "$HOME/Applications/CrossOver" -mindepth 1 -type d -empty -delete 2>/dev/null
   return 0
 }
 

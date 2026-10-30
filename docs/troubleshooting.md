@@ -17,7 +17,8 @@ problem with what to do. `./revit doctor` without a year checks the Mac and Cros
 All versions
 
 **Solution:** `./revit rebuild <year>`. It deletes the bottle and installs Revit into it again. Revit's settings and
-add-ins in the bottle are reset; your projects in Documents stay. See [Updating](../README.md#updating).
+add-ins in the bottle are reset; your projects in Documents stay. If it turns out worse, `./revit rollback <year>` brings
+the old bottle back. See [Updating](../README.md#updating).
 
 ### Revit hangs
 

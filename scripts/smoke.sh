@@ -96,13 +96,6 @@ clone_guard() { # $1 = copy path: ours to delete only as a real folder right ins
   rp="$(cd "$1" 2>/dev/null && pwd -P)" && rb="$(cd "$BOTTLES" 2>/dev/null && pwd -P)" || return 1
   [ "$(dirname "$rp")" = "$rb" ] && is_smoke_clone "$1" && grep -qx 'smoke_clone=1' "$1/$SMOKE_MARK"
 }
-wait_stopped() { # $1 = bottle path, $2 = seconds: 0 once nothing runs in it
-  local t=$SECONDS
-  while [ "$(bottle_activity "$1")" != stopped ]; do
-    [ $((SECONDS - t)) -lt "$2" ] || return 1
-    sleep 1
-  done
-}
 rm_clone() { # $1 = a copy that passed clone_guard, deleted by hand: the marker last, and only once all else is gone,
   # so a delete cut short or failed leaves a copy that the next run still knows as one of ours
   bg_wait shielded find "$1" -mindepth 1 -maxdepth 1 ! -name revit-macos -exec rm -rf {} + 2>/dev/null
@@ -111,12 +104,6 @@ rm_clone() { # $1 = a copy that passed clone_guard, deleted by hand: the marker 
 }
 KEEP_FOR_CX=(! -name revit-macos ! -name system.reg ! -name cxbottle.conf)   # find: all but our marker's folder and
 # what CrossOver needs to find the bottle and read it
-menu_apps_remove() { # $1 = bottle name: its CrossOver menu apps, then the folders they leave empty
-  local a any=0
-  while IFS= read -r a; do [ -n "$a" ] && rm -rf "$a" && any=1; done < <(cx_menu_apps "$1")
-  [ $any = 0 ] || find "$HOME/Applications/CrossOver" -mindepth 1 -type d -empty -delete 2>/dev/null
-  return 0
-}
 clone_remove() { # $1 = name of a copy of ours: ends what runs in it, then deletes it with CrossOver (a copy CrossOver
   # cannot find, one without system.reg, by hand) and its menu apps. A copy cut short while it was made (state
   # creating) never ran Wine: by hand at once. CrossOver deletes in no set order, so it gets only the last few files:

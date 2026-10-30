@@ -7,11 +7,17 @@ public enum SourceChoice: String, Codable, Equatable, Sendable { case reuseExtra
 
 public enum RunRequest: Codable, Equatable, Sendable {
     case install(year: Int, bottle: String, source: SourceChoice?)
-    case rebuild(year: Int, bottle: String, source: SourceChoice?)
+    case rebuild(year: Int, bottle: String, source: SourceChoice?, noPoint: Bool? = nil)   // nil in a request saved by an older app
     case check(year: Int, bottle: String, source: SourceChoice?)
     case addins(year: Int, bottle: String, ids: [String], eula: [String])
     case remove(year: Int, bottle: String)
     case stop(year: Int, bottle: String)
+
+    /// A rebuild as the newest plan says: without a restore point only when the plan says none can be kept.
+    public func withPlan(restorePoint: Bool?) -> RunRequest {
+        guard case let .rebuild(y, b, s, _) = self else { return self }
+        return .rebuild(year: y, bottle: b, source: s, noPoint: restorePoint == false ? true : nil)
+    }
 
     /// The engine's argv, without --events.
     public var arguments: [String] {
@@ -20,7 +26,7 @@ public enum RunRequest: Codable, Equatable, Sendable {
         }
         switch self {
         case let .install(y, b, s): return ["install", String(y), b, "--yes"] + flag(s)
-        case let .rebuild(y, b, s): return ["rebuild", String(y), b, "--yes"] + flag(s)
+        case let .rebuild(y, b, s, np): return ["rebuild", String(y), b, "--yes"] + flag(s) + (np == true ? ["--no-point"] : [])
         case let .check(y, b, s): return ["check", String(y), b] + flag(s)
         case let .addins(y, b, ids, eula):
             return ["addins", String(y), b, "--only", ids.joined(separator: ",")] + (eula.isEmpty ? [] : ["--accept-eula", eula.joined(separator: ",")])
@@ -38,7 +44,7 @@ public enum RunRequest: Codable, Equatable, Sendable {
     public func with(_ source: SourceChoice) -> RunRequest {
         switch self {
         case let .install(y, b, _): .install(year: y, bottle: b, source: source)
-        case let .rebuild(y, b, _): .rebuild(year: y, bottle: b, source: source)
+        case let .rebuild(y, b, _, np): .rebuild(year: y, bottle: b, source: source, noPoint: np)
         case let .check(y, b, _): .check(year: y, bottle: b, source: source)
         default: self
         }
@@ -46,13 +52,13 @@ public enum RunRequest: Codable, Equatable, Sendable {
 
     public var year: Int {
         switch self {
-        case let .install(y, _, _), let .rebuild(y, _, _), let .check(y, _, _), let .addins(y, _, _, _), let .remove(y, _), let .stop(y, _): y
+        case let .install(y, _, _), let .rebuild(y, _, _, _), let .check(y, _, _), let .addins(y, _, _, _), let .remove(y, _), let .stop(y, _): y
         }
     }
 
     public var bottle: String {
         switch self {
-        case let .install(_, b, _), let .rebuild(_, b, _), let .check(_, b, _), let .addins(_, b, _, _), let .remove(_, b), let .stop(_, b): b
+        case let .install(_, b, _), let .rebuild(_, b, _, _), let .check(_, b, _), let .addins(_, b, _, _), let .remove(_, b), let .stop(_, b): b
         }
     }
 }

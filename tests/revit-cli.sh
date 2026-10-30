@@ -10,7 +10,7 @@ CLEAN_ENV=(-u REVIT_DATA -u REVIT_LOCK_DIR -u SHIMS_DIR -u REVIT_BUNDLED -u REVI
   -u REVIT_FOR_BOTTLE -u INSTALL_PARENT -u W_CACHE -u SHIMS_FROM_SOURCE -u RUN_DIR -u RUN_KIND -u CX_RECREATE
   -u INSTALL_DRYRUN -u REVIT_LANG -u ODIS_PKGS -u REVIT_THEME -u REVIT_GDRIVE -u REVIT_GDRIVE_NAMES -u REVIT_DEFAULTS -u REVIT_YEAR -u SMOKE_TIMEOUT -u SMOKE_START_WAIT
   -u SMOKE_STALL -u SMOKE_WORKER_WAIT -u SMOKE_POLL -u SMOKE_PREP_TIMEOUT -u REVIT_CX_TMP -u REVIT_WATCH_IDLE -u REVIT_WATCH_LOCK_WAIT -u REVIT_WATCH_LSOF -u MCP_TEST_HOLD -u MCP_HANDOFF_S
-  -u REVIT_RETINA -u REVIT_KEYS -u SETTINGS_SAVE_WAIT
+  -u REVIT_RETINA -u REVIT_KEYS -u SETTINGS_SAVE_WAIT -u REVIT_FREE_GB -u REVIT_SWAP_FAIL_AT
   -u PYMCP_ROUTES_PORT -u PYMCP_DPAPI_S -u PYMCP_STATUS_S -u PYMCP_EXEC_HOLD -u PYMCP_TEST_HOLD -u REVIT_HOST -u REVIT_PORT)
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)" && [ -d "$TMP" ] || { echo "mktemp failed" >&2; exit 1; }   # an empty TOP would be the current folder
@@ -69,7 +69,7 @@ reset() { # a fresh sandbox for each test
     || { echo "sandbox setup failed"; exit 1; }
   cp "$REPO/revit" "$R/"; cp -R "$REPO/tools" "$R/"; cp "$REPO/scripts/lib/common.sh" "$REPO/scripts/lib/versions.sh" "$R/scripts/lib/"
   mkdir -p "$R/scripts/profiles"; cp "$REPO"/scripts/profiles/*.sh "$R/scripts/profiles/"
-  cp "$REPO/scripts/lib/addins.sh" "$REPO/scripts/lib/mcp.sh" "$REPO/scripts/lib/pymcp.sh" "$REPO/scripts/lib/shims.sh" "$REPO/scripts/lib/handoff.sh" "$R/scripts/lib/" 2>/dev/null
+  cp "$REPO/scripts/lib/addins.sh" "$REPO/scripts/lib/points.sh" "$REPO/scripts/lib/mcp.sh" "$REPO/scripts/lib/pymcp.sh" "$REPO/scripts/lib/shims.sh" "$REPO/scripts/lib/handoff.sh" "$R/scripts/lib/" 2>/dev/null
   [ ! -f "$REPO/scripts/mcp-launch.sh" ] || cp "$REPO/scripts/mcp-launch.sh" "$R/scripts/"; cp "$REPO/scripts/hittest-launch.sh" "$REPO/scripts/theme-launch.sh" "$R/scripts/"; cp "$REPO/scripts/lib/wine.sh" "$R/scripts/lib/"; cp -R "$REPO/scripts/addins" "$REPO/scripts/steps" "$R/scripts/" 2>/dev/null
   stub "$R/install.sh"; stub "$R/scripts/run-steps.sh"; stub "$R/scripts/launch.sh"; stub "$R/scripts/smoke.sh"
   # ensure_shim's builder: done when build/<shim>/ holds a file, else it fails
@@ -144,10 +144,11 @@ fake_lock() { # $1 = owner text: a process that holds the repo's lock as a runni
     open(my $o, ">", "$ARGV[0].owner") or die; print $o "$ARGV[1]\n"; close $o; open(my $r, ">", $ENV{RDY}) and close $r; sleep 60' "$H/Library/Application Support/revit-macos/lock" "$1" &
   PIDS="$PIDS $!"; fake_ready
 }
+POINT_ENV=()   # more env for run (restore point tests)
 run() { # $1 = what to type at the prompt; rest = ./revit arguments. Sets OUT and RC.
   local input="$1"; shift; : > "$CALLS"
   OUT="$(cd / && printf '%s\n' "$input" | env "${CLEAN_ENV[@]}" \
-    HOME="$H" REVIT_CX="$CXF" /bin/bash "$R/revit" "$@" 2>&1)"; RC=$?
+    HOME="$H" REVIT_CX="$CXF" REVIT_FREE_GB="${FREE_GB:-100}" ${POINT_ENV[@]+"${POINT_ENV[@]}"} /bin/bash "$R/revit" "$@" 2>&1)"; RC=$?
 }
 run_install() { # real install.sh in the sandbox; $1 = extra env (VAR=value or ""), rest = arguments
   local extra="$1"; shift; cp "$REPO/install.sh" "$R/install.sh"
@@ -157,7 +158,7 @@ run_racing() { # like run, but runs shell code $1 while ./revit waits at its pro
   local act="$1" input="$2" i; shift 2; : > "$CALLS"; : > "$T/out"
   { for i in $(seq 1 100); do grep -q "to continue" "$T/out" 2>/dev/null && break; sleep 0.1; done
     eval "$act"; printf '%s\n' "$input"; } \
-    | (cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" /bin/bash "$R/revit" "$@" > "$T/out" 2>&1)
+    | (cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" REVIT_FREE_GB="${FREE_GB:-100}" /bin/bash "$R/revit" "$@" > "$T/out" 2>&1)
   RC=$?; OUT="$(cat "$T/out")"
 }
 expect() { # $1 = test name, $2 = exit code, $3 = text the output contains ("" = anything)
@@ -918,7 +919,7 @@ reset; bottle rvt2027-a 2027 2027; run "" rebuild 2027 --dry-run --json
 check "rebuild --dry-run --json: add-ins reset in 2027" eval '[ "$RC" = 0 ] && grep -qF "\"addins_reset\":true" <<<"$OUT"'
 reset; bottle rvt2025-a 2025 2025; run "" rebuild 2025 --dry-run
 check "rebuild --dry-run: today's lines, then the dry-run line" eval '[ "$RC" = 0 ] && grep -qF "This deletes the bottle rvt2025-a" <<<"$OUT" && [ "$(tail -1 <<<"$OUT")" = "(dry run: nothing changed)" ] && not_called install.sh'
-reset; run "" install 2024 --dry-run; expect "--dry-run on install is refused" 1 "--dry-run is for ./revit remove, rebuild and cleanup only."
+reset; run "" install 2024 --dry-run; expect "--dry-run on install is refused" 1 "--dry-run is for ./revit remove, rebuild, rollback, points and cleanup only."
 reset; bottle rvt2025-a 2025 2025; touch "$T/stamp"; sleep 1; run "" remove 2025 --dry-run --events "$T/ev"
 newer="$(find "$T" -mindepth 1 -newer "$T/stamp" ! -path "$T/ev" ! -path "$T/ev/*" ! -path "$CALLS")"
 if [ -s "$T/ev/events.ndjson" ] && [ -z "$newer" ]; then ok "remove --dry-run with --events writes only the events folder"
@@ -1534,6 +1535,138 @@ for m in mac light dark junk; do
   want="$m"; [ "$m" = junk ] && want=""
   check "status: theme_mode $m" grep -qF "\"theme_mode\":\"$want\"," <<<"$OUT"
 done
+# ---- restore points ----
+PR="$H/Library/Application Support/CrossOver/Revit Restore Points"
+pt_bottle() { # $1 = name, $2 = year: a bottle with Revit in it and a BottleID, a hidden file, a marker to tell it apart
+  bottle "$1" "$2" "$2"; touch "$BOTTLES/$1/drive_c/Program Files/Autodesk/Revit $2/Revit.exe" "$BOTTLES/$1/.hidden" "$BOTTLES/$1/system.reg"
+  printf '"BottleID" = "id-%s"\n' "${3:-one}" >> "$BOTTLES/$1/cxbottle.conf"; echo "${3:-one}" > "$BOTTLES/$1/mark"
+}
+pt_make() { # $1 = bottle, $2 = year, $3 = id: a finished point
+  local d="$PR/$1/$3"; mkdir -p "$d/bottle"; cp -R "$BOTTLES/$1/" "$d/bottle"
+  printf 'year=%s\nbottle=%s\ntime=2026-10-30T10:00:00Z\nbytes=13000000000\nreason=rebuild\n' "$2" "$1" > "$d/point.conf"
+}
+pt_ids() { ls "$PR/$1" 2>/dev/null | tr '\n' ' '; }
+fake_fs() { # the file system as diskutil reports it comes from $T/fstype; on PATH until unfake_fs
+  mkdir -p "$T/bin"; echo apfs > "$T/fstype"; OLDPATH="$PATH"; PATH="$T/bin:$PATH"
+  printf '#!/bin/bash\nprintf "<plist version=\\"1.0\\"><dict><key>FilesystemType</key><string>%%s</string></dict></plist>" "$(cat "%s/fstype")"\n' "$T" > "$T/bin/diskutil"
+  chmod +x "$T/bin/diskutil"
+}
+unfake_fs() { PATH="$OLDPATH"; }
+reset; pt_bottle rvt2024-a 2024; run "2024" rebuild 2024
+expect "rebuild keeps a restore point" 0 "A restore point is kept first"
+check "the point is a full copy, hidden files too" eval '[ -f "$PR/rvt2024-a/"*/bottle/.hidden ] && [ -f "$PR/rvt2024-a/"*/point.conf ]'
+check "the point knows its bottle and year" eval 'grep -qx "year=2024" "$PR/rvt2024-a/"*/point.conf && grep -qx "bottle=rvt2024-a" "$PR/rvt2024-a/"*/point.conf'
+check "its BottleID stays" eval 'grep -qF "id-one" "$PR/rvt2024-a/"*/bottle/cxbottle.conf'
+check "the point comes before install.sh" eval 'grep -n "wineserver -k\|install.sh 2024" "$CALLS" | head -1 | grep -q wineserver'
+check "install.sh ran" called "install.sh 2024 rvt2024-a"
+reset; pt_bottle rvt2024-a 2024; run "no" rebuild 2024; expect "cancelled rebuild" 1 "Cancelled"
+check "cancelled: no point" eval '[ ! -e "$PR" ]'
+reset; pt_bottle rvt2024-a 2024; run "" rebuild 2024 --dry-run --json
+check "dry run promises a point" grep -qF '"restore_point":true' <<<"$OUT"
+check "dry run: the note" grep -qF 'A restore point is kept first' <<<"$OUT"
+check "dry run: no point made" eval '[ ! -e "$PR" ]'
+FREE_GB=10; reset; pt_bottle rvt2024-a 2024; mkdir -p "$R/installers/extracted/revit2024"; run "" rebuild 2024 --yes
+expect "--yes without room for a point refuses" 1 "Nothing was deleted"
+check "refused: no install.sh" not_called "install.sh"
+check "refused: the way out is named" grep -qF -- "--no-point" <<<"$OUT"
+run "" rebuild 2024 --dry-run --json; check "dry run says no point" grep -qF '"restore_point":false' <<<"$OUT"
+run "" rebuild 2024 --yes --no-point; expect "--no-point goes on" 0 ""
+check "--no-point: install.sh ran, no point" eval 'called "install.sh 2024" && [ -z "$(pt_ids rvt2024-a)" ]'
+run "2024" rebuild 2024; expect "typed year accepts no point" 0 "No restore point: only 10 GB free"
+check "typed: install.sh ran" called "install.sh 2024"
+FREE_GB=30; reset; pt_bottle rvt2024-a 2024; run "" rebuild 2024 --yes
+expect "no unpacked files: 55 GB needed" 1 "about 55 GB"
+mkdir -p "$R/installers/extracted/revit2024"; run "" rebuild 2024 --yes; expect "unpacked files there: 25 GB is enough" 0 ""
+run "" rebuild 2024 --yes --reextract; expect "--reextract: 55 GB needed" 1 "about 55 GB"
+FREE_GB=100
+reset; fake_fs; pt_bottle rvt2024-a 2024; echo hfs > "$T/fstype"; run "" rebuild 2024 --yes
+expect "not APFS: refused without --no-point" 1 "not on an APFS volume"
+echo apfs > "$T/fstype"; run_racing 'echo hfs > "$T/fstype"' 2024 rebuild 2024
+expect "a promised point that became impossible stops the rebuild" 1 "Nothing was deleted"
+check "stopped before install.sh and wineserver" eval 'not_called "install.sh" && not_called "wineserver"'
+unfake_fs
+reset; bottle rvt2024-a 2024 2024; run "2024" rebuild 2024; expect "no Revit in the bottle: no point needed" 0 ""
+check "no Revit: none made" eval '[ -z "$(pt_ids rvt2024-a)" ]'
+reset; pt_bottle rvt2024-a 2024; mkdir -p "$PR/rvt2024-a/20260101-000000.partial"; run "" rebuild 2024 --yes --no-point
+check "--no-point clears what a cut-short run left" eval '[ ! -e "$PR/rvt2024-a/20260101-000000.partial" ]'
+reset; pt_bottle rvt2024-a 2024
+printf '#!/bin/bash\nexit 1\n' > "$T/cp"; chmod +x "$T/cp"; POINT_ENV=(PATH="$T:$PATH"); run "" rebuild 2024 --yes; POINT_ENV=()
+expect "a failed copy stops the rebuild" 1 "Nothing was deleted"
+check "failed copy: no install.sh, no partial left" eval 'not_called "install.sh" && [ -z "$(pt_ids rvt2024-a)" ]'
+
+reset; run "" rollback 2024; expect "rollback without a point" 1 "There is no restore point"
+reset; pt_bottle rvt2024-a 2024; pt_make rvt2024-a 2024 20260101-000000; pt_make rvt2024-a 2024 20260201-000000
+echo newer > "$PR/rvt2024-a/20260201-000000/bottle/mark"; echo older > "$PR/rvt2024-a/20260101-000000/bottle/mark"
+echo current > "$BOTTLES/rvt2024-a/mark"; touch "$BOTTLES/rvt2024-a/.extra"; ino="$(stat -f %i "$BOTTLES/rvt2024-a")"
+run "no" rollback 2024; expect "rollback can be cancelled" 1 "Cancelled"
+check "cancelled: bottle as it was" grep -qx current "$BOTTLES/rvt2024-a/mark"
+run "" rollback 2024 --dry-run; expect "rollback --dry-run" 0 "dry run"
+run "2024" rollback 2024; expect "rollback" 0 "is back"
+check "rollback: the newest point" grep -qx newer "$BOTTLES/rvt2024-a/mark"
+check "rollback: hidden files of the point, none of the bottle" eval '[ -f "$BOTTLES/rvt2024-a/.hidden" ] && [ ! -e "$BOTTLES/rvt2024-a/.extra" ]'
+check "rollback: the bottle's folder is the same folder" eval '[ "$(stat -f %i "$BOTTLES/rvt2024-a")" = "$ino" ]'
+check "rollback: the point stays, nothing else" eval '[ "$(pt_ids rvt2024-a)" = "20260101-000000 20260201-000000 " ]'
+check "rollback: no cxbottle" not_called "cxbottle"
+run "" rollback 2024 --yes --to 20260101-000000; expect "rollback --to" 0 "is back"
+check "rollback --to: that point" grep -qx older "$BOTTLES/rvt2024-a/mark"
+run "" rollback 2024 --yes --to 20250101-000000; expect "rollback --to an unknown id" 1 "No restore point 20250101-000000"
+run "" rollback 2024 --yes --to junk; expect "rollback --to junk" 1 "as ./revit points lists it"
+reset; pt_bottle rvt2024-a 2024; pt_make rvt2024-a 2024 20260101-000000; mv "$BOTTLES/rvt2024-a" "$T/gone"
+run "" rollback 2024 --yes; expect "rollback with no bottle there" 0 "is back"
+check "no bottle: it is back" eval '[ -f "$BOTTLES/rvt2024-a/cxbottle.conf" ]'
+reset; pt_bottle rvt2024-a 2024; pt_make rvt2024-a 2024 20260101-000000; mv "$BOTTLES/rvt2024-a" "$T/gone"; mkdir "$BOTTLES/rvt2024-a"
+run "" rollback 2024 --yes; expect "rollback over a half-made bottle" 0 "is back"
+reset; pt_bottle rvt2024-a 2024; pt_bottle rvt2025-a 2025; pt_make rvt2025-a 2025 20260101-000000
+run "" rollback 2024 rvt2025-a --yes; expect "rollback of another year's bottle" 1 "is for Revit 2025"
+mv "$BOTTLES/rvt2025-a" "$T/gone"; run "" rollback 2024 rvt2025-a --yes; expect "a point of another year is not used" 1 "There is no restore point"
+reset; pt_bottle rvt2024-a 2024; pt_make rvt2024-a 2024 20260101-000000; fake_revit rvt2024-a 2024; run "" rollback 2024 --yes
+expect "rollback refuses while Revit runs" 1 "Save your work and quit Revit"; stop_fakes
+for at in 1 3 9; do
+  reset; pt_bottle rvt2024-a 2024; pt_make rvt2024-a 2024 20260101-000000; echo current > "$BOTTLES/rvt2024-a/mark"; ino="$(stat -f %i "$BOTTLES/rvt2024-a")"
+  POINT_ENV=(REVIT_SWAP_FAIL_AT="$at"); run "" rollback 2024 --yes; POINT_ENV=()
+  expect "a swap that fails at entry $at" 1 "The bottle was not changed"
+  check "failed swap $at: all back" eval 'grep -qx current "$BOTTLES/rvt2024-a/mark" && [ -f "$BOTTLES/rvt2024-a/.hidden" ] && [ -f "$BOTTLES/rvt2024-a/system.reg" ] && [ "$(stat -f %i "$BOTTLES/rvt2024-a")" = "$ino" ]'
+  check "failed swap $at: nothing left over" eval '[ "$(pt_ids rvt2024-a)" = "20260101-000000 " ]'
+done
+reset; pt_bottle rvt2024-a 2024 two; pt_make rvt2024-a 2024 20260101-000000
+sed -i '' 's/id-two/id-one/' "$PR/rvt2024-a/20260101-000000/bottle/cxbottle.conf"; cxapp "Programs/Thing.app" rvt2024-a
+run "" rollback 2024 --yes; expect "rollback to another BottleID" 0 "is back"
+check "menu apps of the replaced bottle go" eval '[ -z "$(find "$H/Applications/CrossOver" -name "*.app" 2>/dev/null)" ]'
+
+reset; run "" points 2024; expect "points: none" 0 "No restore points"
+reset; pt_bottle rvt2024-a 2024; pt_make rvt2024-a 2024 20260101-000000; pt_make rvt2024-a 2024 20260201-000000
+mkdir -p "$PR/rvt2024-a/20260301-000000.partial/bottle"
+run "" points 2024; expect "points lists them" 0 "20260201-000000"
+check "points: size, newest first, no partial" eval 'grep -qF "up to 13 GB" <<<"$OUT" && ! grep -qF "20260301" <<<"$OUT" && [ "$(grep -n 20260201 <<<"$OUT" | cut -d: -f1)" -lt "$(grep -n 20260101 <<<"$OUT" | cut -d: -f1)" ]'
+run "" points 2024 --json; check "points --json" eval '/usr/bin/perl -MJSON::PP -e "local \$/; my \$j = decode_json(<STDIN>); exit !(@{\$j->{points}} == 2 && \$j->{points}[0]{bytes} == 13000000000)" <<<"$OUT"'
+run "" status; check "status shows the size" grep -qF "Restore points: rvt2024-a 2 (up to 26 GB, unfinished files)" <<<"$OUT"
+run "" status --json
+check "status --json: points and leftovers" eval '/usr/bin/perl -MJSON::PP -e "local \$/; my \$j = decode_json(<STDIN>); exit !(@{\$j->{restore_points}} == 2 && \$j->{restore_leftovers}[0] eq q(rvt2024-a))" <<<"$OUT"'
+run "no" points 2024 --clear old; expect "points --clear can be cancelled" 1 "Cancelled"
+run "" points 2024 --clear old --dry-run; expect "points --clear --dry-run" 0 "dry run"
+check "dry run: all there" eval '[ -d "$PR/rvt2024-a/20260101-000000" ]'
+run "2024" points 2024 --clear old; expect "points --clear old" 0 "Deleted"
+check "--clear old: the newest stays, leftovers go" eval '[ "$(pt_ids rvt2024-a)" = "20260201-000000 " ]'
+run "" points 2024 --clear old; expect "--clear old with one point" 0 "Nothing to delete"
+ln -s "$H/Documents" "$PR/rvt2024-a/20260201-000000/bottle/link"
+run "" points 2024 --clear all --yes; expect "points --clear all" 0 "Deleted"
+check "--clear all: gone, links not followed" eval '[ ! -e "$PR" ] && [ -f "$H/Documents/project.rvt" ]'
+run "" points 2024 --clear junk; expect "--clear junk" 1 "--clear is old"
+run "" rollback 2024 --no-point; expect "--no-point elsewhere" 1 "for ./revit rebuild only"
+run "" status; check "status without points says nothing of them" eval '! grep -qF "Restore points" <<<"$OUT"'
+
+reset; pt_bottle rvt2024-a 2024; pt_make rvt2024-a 2024 20260101-000000; mkdir -p "$PR/rvt2024-a/replaced.20260101-000000"
+run "" remove 2024 --dry-run; expect "remove lists the points" 0 "restore point 20260101-000000"
+run "" remove 2024 --dry-run --json; check "remove --json lists the point" grep -qF '"label":"restore point 20260101-000000","bytes":13000000000' <<<"$OUT"
+run "2024" remove 2024; expect "remove" 0 "Removed"
+check "remove deletes the points and leftovers" eval '[ ! -e "$PR" ]'
+reset; pt_bottle rvt2024-a 2024; pt_make rvt2024-a 2024 20260101-000000; mv "$BOTTLES/rvt2024-a" "$T/gone"
+run "2024" remove 2024; expect "remove with only a point left" 0 "Removed"
+check "only a point left: gone" eval '[ ! -e "$PR" ]'
+reset; pt_bottle rvt2025-a 2025; pt_make rvt2025-a 2025 20260101-000000; mv "$BOTTLES/rvt2025-a" "$T/gone"
+run "2024" remove 2024 rvt2025-a; expect "remove with another year's point" 0 "Nothing to remove"
+check "another year's point stays" eval '[ -d "$PR/rvt2025-a/20260101-000000" ]'
+reset; run "" --help; check "the help names rollback" grep -q "^  rollback " <<<"$OUT"
 fi
 
 # ---- end ----

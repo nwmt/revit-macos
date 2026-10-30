@@ -48,7 +48,7 @@ Each fact lives in one place. Other pages link to it instead of repeating it.
 | Version status | First line of `versions/<year>.md`; the summary in the README table |
 | Requirements for all versions (Mac, CrossOver, Rosetta 2, Homebrew, license, msls31.dll) | README |
 | Which file goes where; disk space per version | `installers/README.md` |
-| Install, `./revit` commands, updating | README |
+| Install, `./revit` commands, updating, restore points | README |
 | First launch (2020, 2023 and 2024 and newer) | README |
 | Issues of one version, with a one-line workaround | `versions/<year>.md` |
 | Problems by symptom, shared by versions, longer workarounds, how to report a problem | `docs/troubleshooting.md` |
