@@ -750,7 +750,11 @@ reset; bottle rvt2027-a 2027 2027; mkdir -p "$BOTTLES/rvt2027-a/dosdevices"; run
 expect "gdrive warm without G:" 1 "Google Drive not found: no G: drive"
 reset; bottle rvt2027-b 2027 2027; mkdir -p "$BOTTLES/rvt2027-b/dosdevices" "$H/Library/CloudStorage/GoogleDrive-someone@example.com/My Drive/a/b"
 OUT="$(cd / && env "${CLEAN_ENV[@]}" HOME="$H" python3 -I "$R/tools/gdrive.py" apply "$BOTTLES/rvt2027-b" 2>&1)"
-run "" gdrive warm 2027 rvt2027-b 'G:\My Drive'; expect "gdrive warm with a bottle and a G: path" 0 "3 folders listed, 0 were cloud-only"
+run "" gdrive warm 2027 rvt2027-b 'G:\My Drive'; expect "gdrive warm: the folder and its subfolders" 0 "2 folders listed, 0 were cloud-only"
+check "gdrive warm: says what it left" grep -q "deeper folders were not listed" <<<"$OUT"
+run "" gdrive warm 2027 rvt2027-b 'G:\My Drive' --depth 2; expect "gdrive warm --depth 2" 0 "3 folders listed"
+run "" gdrive warm 2027 rvt2027-b 'G:\My Drive' --depth 9 --max 1; expect "gdrive warm --max 1" 0 "1 folders listed"
+run "" status --depth 2; expect "--depth is for gdrive warm only" 1 "--depth and --max are for ./revit gdrive warm only."
 check "gdrive warm: no email" eval '! grep -q example.com <<<"$OUT"'
 reset; bottle rvt2027-a 2027 2027; run "" gdrive warm 2027 nope 'G:\'; expect "gdrive warm: no such bottle" 1 "There is no bottle nope"
 reset; run "" set 2027 retina=off; expect "set: no bottle" 1 "There is no bottle rvt2027-a"

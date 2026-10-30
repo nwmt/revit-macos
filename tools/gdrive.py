@@ -11,10 +11,11 @@ the names a Russian Windows gives them).
   gdrive.py apply <bottle> [--mode auto|off|again|<email>] [--names <value>]
                                  saves the setting, then sets G: up or removes it to match (code 1: refused or failed,
                                  nothing of the user's touched; 2: bad arguments)
-  gdrive.py warm <bottle> <folder> [<year and bottle for the advice>]
-                                 lists every folder inside <folder> once (no files), so Google Drive keeps their
-                                 lists and Revit's Open dialog does not wait on each; <folder> is a Windows path on G:
-                                 (any of its names) or a Mac path inside the account (0 done, 1 errors, 130 stopped)
+  gdrive.py warm <bottle> <folder> [<year and bottle for the advice>] [--depth N] [--max N]
+                                 lists <folder> and its subfolders once (no files), so Google Drive keeps their lists
+                                 and Revit's Open dialog does not wait on each; --depth levels down (1), at most --max
+                                 folders (500), a pause after each one Google had to send; <folder> is a Windows path on
+                                 G: (any of its names) or a Mac path inside the account (0 done, 1 errors, 130 stopped)
 
 The bottle keeps it in drive_g/ (a marker file and one link per name) and dosdevices/g: -> ../drive_g; the setting
 is in drive_c/Program Files/revit-macos/gdrive (mode=auto|off|<email>, names=<value>). Nothing here writes to Google
@@ -506,6 +507,12 @@ def apply(b, mode=None, names=None):
 SKIP = {".Trash", ".shortcut-targets-by-id"}
 SF_DATALESS = 0x40000000   # sys/stat.h: the folder's list is not on this Mac yet
 TIMEOUTS = 5               # listings in a row that time out: Google Drive does not answer (not running, offline)
+# A company's Google Drive can hold tens of thousands of folders, each a request to Google when it is not on this Mac
+# yet: the walk is shallow and slow on purpose. Revit's Open dialog looks one level down from the folder it shows, so
+# the folder and its subfolders (depth 1) are what it needs
+DEPTH = 1                  # levels below the folder that are listed (0: the folder only)
+LIMIT = 500                # folders listed in one run at most
+PAUSE = 0.2                # s after a folder that was cloud-only: one request to Google Drive at a time, spaced
 
 
 def warm_roots(b, folder, where="<year>"):
@@ -575,11 +582,12 @@ class Beat:
                 pass
 
 
-def warm(b, folder, where="<year>", out=sys.stdout, every=5.0):
+def warm(b, folder, where="<year>", out=sys.stdout, every=5.0, depth=DEPTH, limit=LIMIT, pause=PAUSE):
     roots = warm_roots(b, folder, where)
     listed = cloud_only = failed = timeouts = 0
     last = time.monotonic()
-    queue = [start for _, start in roots]
+    queue = [(start, 0) for _, start in roots]
+    more = False   # folders left below the depth or past the limit
     beat = Beat(b, every)
 
     def term(*_):   # TERM (./revit cleanup) ends the walk through the finally below: the heartbeat goes too
@@ -587,18 +595,26 @@ def warm(b, folder, where="<year>", out=sys.stdout, every=5.0):
     old = signal.signal(signal.SIGTERM, term)
     try:
         while queue:
-            d = queue.pop(0)
+            if listed >= limit:
+                more = True
+                break
+            d, level = queue.pop(0)
             try:
-                if os.lstat(d).st_flags & SF_DATALESS:
-                    cloud_only += 1
+                remote = bool(os.lstat(d).st_flags & SF_DATALESS)
+                cloud_only += remote
                 with os.scandir(d) as it:
                     for e in it:
                         beat.tick()
                         if e.name not in SKIP and e.is_dir(follow_symlinks=False):
-                            queue.append(e.path)
+                            if level < depth:
+                                queue.append((e.path, level + 1))
+                            else:
+                                more = True
                 listed += 1
                 timeouts = 0
                 beat.tick()
+                if remote and pause:
+                    time.sleep(pause)
             except OSError as e:
                 failed += 1
                 timeouts = timeouts + 1 if e.errno == errno.ETIMEDOUT else 0
@@ -616,6 +632,9 @@ def warm(b, folder, where="<year>", out=sys.stdout, every=5.0):
         beat.end()
         signal.signal(signal.SIGTERM, old)
     print(f"{listed} folders listed, {cloud_only} were cloud-only", file=out)
+    if more:
+        print(f"deeper folders were not listed (--depth {depth}, at most {limit} folders): Revit's Open dialog needs "
+              "only the folder you open and its subfolders; run warm on a deeper folder when you go there", file=out)
     if failed:
         print(f"{failed} folders could not be listed", file=out)
         return 1
@@ -661,9 +680,20 @@ def main(argv):
         for line in lines:
             print(sanitize(line), file=sys.stderr if code else sys.stdout)
         return code
-    if len(argv) in (3, 4) and argv[0] == "warm":
+    if len(argv) >= 3 and argv[0] == "warm":
+        rest, opts = argv[3:], {}
+        while len(rest) >= 2 and rest[-2] in ("--depth", "--max"):
+            try:
+                opts["depth" if rest[-2] == "--depth" else "limit"] = int(rest[-1])
+            except ValueError:
+                print(f"warm: {rest[-2]} takes a number", file=sys.stderr)
+                return 2
+            rest = rest[:-2]
+        if len(rest) > 1 or any(v < 0 for v in opts.values()) or opts.get("limit") == 0:
+            print("warm: bad arguments", file=sys.stderr)
+            return 2
         try:
-            return warm(argv[1], argv[2], *argv[3:])
+            return warm(argv[1], argv[2], *rest, **opts)
         except Refuse as e:
             print(sanitize(str(e)), file=sys.stderr)
             return 1

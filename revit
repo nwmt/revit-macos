@@ -9,6 +9,7 @@ WRITE=0; SERVER=""   # ./revit mcp: --write, --server <autodesk|pyrevit>
 DRY=0; LOG=0; KEEP=0   # --dry-run: remove and rebuild only. ./revit test: --log, and --keep (the maintainer's, not in the help)
 TARGETS=""   # ./revit cleanup: --targets <pid>:<start>,… (the app: what the person approved)
 RUN_ARG=""; EXCL=()   # ./revit report: --run <log_dir>, --exclude <file> (again for more files)
+WARM_OPTS=()   # ./revit gdrive warm: --depth N, --max N
 RESULT_HINT=usage   # what an exit before the child means: usage until the arguments check out (Task 5 reads it)
 sup_end() { # $1 = exit status: the one end event, from the child's result file or from what an early exit means
   [ "$END_DONE" = 0 ] || return 0; END_DONE=1
@@ -103,10 +104,10 @@ while [ $# -gt 0 ]; do
     --log) LOG=1 ;;
     --keep) KEEP=1 ;;
     --write) WRITE=1 ;;
-    --events|--only|--accept-eula|--run|--exclude|--server|--targets)
+    --events|--only|--accept-eula|--run|--exclude|--server|--targets|--depth|--max)
       if [ $# -lt 2 ]; then FLAG_ERR="$1 needs a value"
       else case "$1" in --events) EVENTS_DIR="$2" ;; --only) ONLY="$2" ;; --accept-eula) EULA="$2" ;;
-        --run) RUN_ARG="$2" ;; --exclude) EXCL+=("$2") ;; --server) SERVER="$2" ;; --targets) TARGETS="$2" ;; esac; shift; fi ;;
+        --run) RUN_ARG="$2" ;; --exclude) EXCL+=("$2") ;; --server) SERVER="$2" ;; --depth|--max) WARM_OPTS+=("$1" "$2") ;; --targets) TARGETS="$2" ;; esac; shift; fi ;;
     -h|--help) POS+=(help) ;;
     --*) FLAG_ERR="Unknown option: $1" ;;
     *) POS+=("$1") ;;
@@ -114,10 +115,11 @@ while [ $# -gt 0 ]; do
   shift
 done
 CMD="${POS[0]:-}"; YEAR_ARG="${POS[1]:-}"; NAME="${POS[2]:-}"
-GPATH=""   # ./revit gdrive warm <year> [bottle] <folder>: the folder
+GPATH=""   # ./revit gdrive warm <year> [bottle] <folder> [--depth N] [--max N]: the folder (WARM_OPTS: the options)
+[ ${#WARM_OPTS[@]} = 0 ] || [ "$CMD" = gdrive ] || FLAG_ERR="--depth and --max are for ./revit gdrive warm only."
 if [ "$CMD" = gdrive ]; then
   [ "${POS[1]:-}" = warm ] && [ ${#POS[@]} -ge 4 ] && [ ${#POS[@]} -le 5 ] \
-    || usage_die "Usage: ./revit gdrive warm <year> [bottle] <folder on G: or in Google Drive>"
+    || usage_die "Usage: ./revit gdrive warm <year> [bottle] <folder on G: or in Google Drive> [--depth N] [--max N]"
   YEAR_ARG="${POS[2]}"; NAME=""; GPATH="${POS[${#POS[@]}-1]}"; [ ${#POS[@]} = 5 ] && NAME="${POS[3]}"
 fi
 SETS=()   # ./revit set: the words with "=" are settings, the one without is the bottle (bottle names have no "=")
@@ -544,7 +546,7 @@ case "$CMD" in
   theme) need_crossover; exec "$ROOT/scripts/theme-launch.sh" "$YEAR" "$NAME" ;;
   gdrive)   # lists folders ahead (tools/gdrive.py): Mac files only, no Wine, no lock; Revit may be open
     bottle_guard running_ok "$YEAR" "$NAME"
-    exec python3 -I "$ROOT/tools/gdrive.py" warm "$B" "$GPATH" "$YEAR$SFX" ;;
+    exec python3 -I "$ROOT/tools/gdrive.py" warm "$B" "$GPATH" "$YEAR$SFX" ${WARM_OPTS[@]+"${WARM_OPTS[@]}"} ;;
   set)   # Retina, Mac keys, the theme and G:: the steps retina, mackeys, theme and gdrive (scripts/steps/fixes.sh)
     [ ${#SETS[@]} -gt 0 ] || die "Usage: ./revit set $YEAR$SFX retina=on|compact|off keys=mac|windows theme=mac|light|dark gdrive=auto|off|again|<email> gdrive_names=ru. ./revit doctor $YEAR$SFX shows the current ones."
     list=(); seen=" "; shown=()   # shown: the settings as the line below prints them (no email, no folder names)

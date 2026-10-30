@@ -594,8 +594,8 @@ class Warm(Fake):
         os.symlink(self.tmp.name, os.path.join(work, "a shortcut"))
         open(os.path.join(work, "file.rvt"), "w").close()
 
-    def warm(self, folder):
-        return self.run_tool("warm", self.b, folder, "2027")
+    def warm(self, folder, *opts):   # the whole tree unless options are given (the tests below count all of it)
+        return self.run_tool("warm", self.b, folder, "2027", *(opts or ("--depth", "9")))
 
     def count(self, r):
         return int(r.stdout.split(" folders listed")[0].split("\n")[-1])
@@ -621,6 +621,41 @@ class Warm(Fake):
         r = self.warm("G:\\")
         self.assertEqual((r.returncode, self.count(r)), (0, 9), r.stderr)   # as without Other computers
         self.assertEqual(self.warm("G:\\Other computers").returncode, 1)
+
+    def test_shallow_by_default(self):
+        r = self.run_tool("warm", self.b, "G:\\Shared drives\\Team", "2027")
+        self.assertEqual((r.returncode, self.count(r)), (0, 2), r.stderr)   # Team and Work, not Work's folders
+        self.assertIn("deeper folders were not listed", r.stdout)
+        r = self.warm("G:\\Shared drives\\Team\\Work", "--depth", "0")
+        self.assertEqual(self.count(r), 1)
+        r = self.warm("G:\\Shared drives\\Team\\Work", "--depth", "9")
+        self.assertNotIn("deeper folders", r.stdout)
+
+    def test_at_most_max_folders(self):
+        r = self.warm("G:\\", "--depth", "9", "--max", "3")
+        self.assertEqual((r.returncode, self.count(r)), (0, 3), r.stderr)
+        self.assertIn("at most 3 folders", r.stdout)
+        for bad in (("--max", "0"), ("--depth", "-1"), ("--depth", "x")):
+            self.assertEqual(self.warm("G:\\", *bad).returncode, 2, bad)
+
+    def test_a_pause_after_each_cloud_only_folder(self):
+        real_lstat, real_sleep = os.lstat, g.time.sleep
+        naps = []
+
+        class St:
+            def __init__(self, st):
+                self.st = st
+
+            def __getattr__(self, n):
+                return g.SF_DATALESS if n == "st_flags" else getattr(self.st, n)
+
+        g.os.lstat = lambda p, *a, **k: St(real_lstat(p, *a, **k)) if "Team" in str(p) else real_lstat(p, *a, **k)
+        g.time.sleep = naps.append
+        try:
+            self.assertEqual(g.warm(self.b, "G:\\Shared drives\\Team", "2027", out=io.StringIO()), 0)
+        finally:
+            g.os.lstat, g.time.sleep = real_lstat, real_sleep
+        self.assertEqual(naps, [g.PAUSE, g.PAUSE])   # Team and Work: cloud-only here; one pause after each
 
     def test_mac_path(self):
         r = self.warm(os.path.join(self.a, "Shared drives", "Team"))
@@ -652,7 +687,7 @@ class Warm(Fake):
             return real(p)
         g.os.scandir = fake
         try:
-            code = g.warm(self.b, "G:\\Shared drives\\Team\\Work", "2027", out=io.StringIO(), every=0)
+            code = g.warm(self.b, "G:\\Shared drives\\Team\\Work", "2027", out=io.StringIO(), every=0, depth=9, pause=0)
         finally:
             g.os.scandir = real
         self.assertEqual(code, 0)
@@ -670,7 +705,7 @@ class Warm(Fake):
                     "spec = importlib.util.spec_from_file_location('gdrive', sys.argv[1]); g = importlib.util.module_from_spec(spec)\n"
                     "spec.loader.exec_module(g); real, acc = g.os.scandir, os.path.realpath(sys.argv[3])\n"
                     "g.os.scandir = lambda p: time.sleep(60) if str(p).startswith(acc) else real(p)\n"
-                    "sys.exit(g.warm(sys.argv[2], 'G:\\\\Shared drives\\\\Team', '2027'))\n")
+                    "sys.exit(g.warm(sys.argv[2], 'G:\\\\Shared drives\\\\Team', '2027', depth=9, pause=0))\n")
         p = subprocess.Popen([sys.executable, "-I", run, os.path.join(TOOLS, "gdrive.py"), self.b, self.a],
                              env=dict(os.environ, HOME=self.home), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         beat = os.path.join(state, "gdrive-warm-%d" % p.pid)
@@ -710,7 +745,7 @@ class Warm(Fake):
         g.os.scandir = fake
         out = io.StringIO()
         try:
-            code = g.warm(self.b, "G:\\Shared drives\\Team\\Work", "2027", out=out)
+            code = g.warm(self.b, "G:\\Shared drives\\Team\\Work", "2027", out=out, depth=9, pause=0)
         finally:
             g.os.scandir = real
         self.assertEqual(code, 1)
@@ -734,7 +769,7 @@ class Warm(Fake):
             return St(st, g.SF_DATALESS) if p.endswith("p2") else st
         g.os.lstat = fake
         try:
-            code = g.warm(self.b, work, "2027", out=out)
+            code = g.warm(self.b, work, "2027", out=out, depth=9, pause=0)
         finally:
             g.os.lstat = real
         self.assertEqual(code, 0)
@@ -742,7 +777,7 @@ class Warm(Fake):
         os.chmod(os.path.join(work, "p2"), 0)
         try:
             out = io.StringIO()
-            self.assertEqual(g.warm(self.b, work, "2027", out=out), 1)
+            self.assertEqual(g.warm(self.b, work, "2027", out=out, depth=9, pause=0), 1)
             self.assertIn("1 folders could not be listed", out.getvalue())
         finally:
             os.chmod(os.path.join(work, "p2"), 0o755)
