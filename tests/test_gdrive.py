@@ -2,7 +2,7 @@
 """Tests for tools/gdrive.py (the G: drive: Google Drive in a bottle). Run: python3 -I -m unittest tests.test_gdrive
 A fake home with Library/CloudStorage/GoogleDrive-<account> and a fake bottle live in a temporary folder; nothing
 touches the real Google Drive."""
-import importlib.util, io, json, os, subprocess, sys, tempfile, unicodedata, unittest
+import importlib.util, io, json, os, subprocess, sys, tempfile, time, unicodedata, unittest
 
 TOOLS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools")
 EMAIL = "someone@example.com"
@@ -660,6 +660,29 @@ class Warm(Fake):
         self.assertTrue(all(d["pid"] == os.getpid() for d in seen))
         self.assertTrue(seen[0]["started"] <= seen[0]["progress"] <= seen[-1]["progress"])
         self.assertEqual(os.listdir(state), [])   # deleted at the end
+
+    def test_term_ends_the_walk_and_its_heartbeat(self):
+        state = os.path.join(self.b, "revit-macos")
+        os.makedirs(state)
+        run = os.path.join(self.tmp.name, "hang.py")   # a walk whose first Google Drive listing never returns
+        with open(run, "w") as f:
+            f.write("import importlib.util, os, sys, time\n"
+                    "spec = importlib.util.spec_from_file_location('gdrive', sys.argv[1]); g = importlib.util.module_from_spec(spec)\n"
+                    "spec.loader.exec_module(g); real, acc = g.os.scandir, os.path.realpath(sys.argv[3])\n"
+                    "g.os.scandir = lambda p: time.sleep(60) if str(p).startswith(acc) else real(p)\n"
+                    "sys.exit(g.warm(sys.argv[2], 'G:\\\\Shared drives\\\\Team', '2027'))\n")
+        p = subprocess.Popen([sys.executable, "-I", run, os.path.join(TOOLS, "gdrive.py"), self.b, self.a],
+                             env=dict(os.environ, HOME=self.home), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        beat = os.path.join(state, "gdrive-warm-%d" % p.pid)
+        for _ in range(100):
+            if os.path.exists(beat):
+                break
+            time.sleep(0.05)
+        self.assertTrue(os.path.exists(beat))
+        time.sleep(0.2)   # inside the listing
+        p.terminate()
+        self.assertEqual(p.wait(10), 143)
+        self.assertEqual(os.listdir(state), [])
 
     def test_no_heartbeat_without_its_folder_or_through_a_link(self):
         r = self.warm("G:\\Shared drives\\Team\\Work")

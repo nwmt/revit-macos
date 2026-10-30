@@ -14,22 +14,24 @@ func statusWith(running: Bool) -> EngineOutput {
     return EngineOutput(stdout: Data(json.utf8), stderr: "", exitCode: 0)
 }
 
-let leftoverJSON = #"{"items":[{"pid":24030,"kind":"wine","reason":"bottle_gone","bottle":"probe-drag","name":"winedevice.exe","cpu":99.6,"age_s":30600,"start":1761641129},{"pid":38935,"kind":"helper","reason":"parent_gone","bottle":null,"name":"T Trackpad","cpu":1.0,"age_s":150000,"start":1761500000}],"skipped":[{"bottle":"rvt2027-a","why":"revit_running"}]"#
+let leftoverJSON = #"{"items":[{"pid":24030,"kind":"wine","reason":"bottle_gone","bottle":"probe-drag","name":"winedevice.exe","cpu":99.6,"age_s":30600,"start":1761641129000000,"revit":false},{"pid":38935,"kind":"helper","reason":"parent_gone","bottle":null,"name":"T Trackpad","cpu":1.0,"age_s":150000,"start":1761500000123456,"revit":false}],"skipped":[{"bottle":"rvt2027-a","why":"revit_running"}]"#
 
 @MainActor @Suite(.serialized) struct CleanupTests {
 
     @Test func reportDecodesAndReadsAsLines() throws {
         let r = try JSONDecoder.engine.decode(CleanupReport.self, from: Data((leftoverJSON + "}").utf8))
         #expect(r.items.count == 2 && r.closed == nil && r.left == nil)
-        #expect(r.planLines == ["winedevice.exe · probe-drag (deleted) · 100% CPU · 8 h 30 min",
-                                "T Trackpad · 1% CPU · 1 d 17 h", "Left alone: rvt2027-a (Revit runs there)"])
+        #expect(r.planLines == ["winedevice.exe · probe-drag (deleted) · 100% CPU · 8 h 30 min", "T Trackpad · 1% CPU · 1 d 17 h"])
         #expect(Leftover.age(59) == "0 min")
+        let revit = Leftover(pid: 1, kind: "wine", reason: "all", bottle: "rvt2027-a", name: "Revit.exe", cpu: 3, ageS: 60,
+                             start: 1, revit: true)
+        #expect(CleanupReport(items: [revit], skipped: []).planLines.last == "Revit closes without saving: unsaved changes are lost.")
     }
 
     @Test func closeAllPassesTheExactArgsAndReportsWhatIsLeft() async {
         let h = Harness()
         await h.fake.set(query: ["cleanup", "--all", "--dry-run", "--json"], EngineOutput(stdout: Data((leftoverJSON + "}").utf8), stderr: "", exitCode: 0))
-        await h.fake.set(query: ["cleanup", "--all", "--targets", "24030:1761641129,38935:1761500000", "--json"],
+        await h.fake.set(query: ["cleanup", "--all", "--targets", "24030:1761641129000000,38935:1761500000123456", "--json"],
                          EngineOutput(stdout: Data((leftoverJSON + #","closed":[38935],"left":[24030]}"#).utf8), stderr: "", exitCode: 1))
         guard case let .report(p) = await h.model.cleanup(all: true, dryRun: true) else { Issue.record("no plan"); return }
         #expect(p.items.map(\.pid) == [24030, 38935])
@@ -69,32 +71,41 @@ let leftoverJSON = #"{"items":[{"pid":24030,"kind":"wine","reason":"bottle_gone"
         #expect(h.notifier.posts.count == posts)
     }
 
-    @Test func theRealEngineClosesALeftoverOfADeletedBottle() async throws {
+    /// A Wine process as the engine tells one: its executable inside the CrossOver folder (a copy of perl there),
+    /// argv[0] as Wine sets it, WINEPREFIX its bottle. It ignores TERM, as winedevice.exe does.
+    func wine(_ cx: URL, _ name: String, prefix: String) throws -> Process {
+        let exe = cx.appending(path: "lib/wine/x86_64-unix/wine")
+        if !FileManager.default.fileExists(atPath: exe.path) {
+            try FileManager.default.createDirectory(at: exe.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.copyItem(atPath: "/usr/bin/perl", toPath: exe.path)
+        }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/bash")
+        p.arguments = ["-c", #"exec -a "$2" "$1" -e '$SIG{TERM} = "IGNORE"; sleep 60'"#, "x", exe.path, name]
+        p.environment = ["WINEPREFIX": prefix, "PATH": "/usr/bin:/bin"]
+        try p.run()
+        return p
+    }
+
+    @Test func theRealEngineClosesAllOfWineButOnlyWhatWasShown() async throws {
         let root = tempDir()
         var env = TestEnv.make(root: root)
-        env["REVIT_CLEANUP_ONLY"] = root.path; env["REVIT_CLEANUP_AGE"] = "0"   // only this test's fake counts
-        let held = root.appending(path: "home/Library/Application Support/CrossOver/Bottles/gone/drive_c/windows")
-        try FileManager.default.createDirectory(at: held, withIntermediateDirectories: true)
-        let fake = Process()   // a Windows program that ignores TERM, as winedevice.exe does, in a bottle then deleted
-        fake.executableURL = URL(fileURLWithPath: "/bin/bash")
-        fake.arguments = ["-c", #"cd "$1" && exec -a 'C:\windows\system32\winedevice.exe' perl -e '$SIG{TERM} = "IGNORE"; sleep 60' "$1""#, "x", held.path]
-        try fake.run()
-        defer { if fake.isRunning { kill(fake.processIdentifier, SIGKILL) } }
+        env["REVIT_CLEANUP_ONLY"] = root.path; env["REVIT_CLEANUP_AGE"] = "0"   // only this test's fakes count
+        let cx = URL(fileURLWithPath: env["REVIT_CX"]!), bottle = root.appending(path: "home/Library/Application Support/CrossOver/Bottles/rvt2027-a")
+        try FileManager.default.createDirectory(at: bottle, withIntermediateDirectories: true)
+        let revit = try wine(cx, #"C:\Program Files\Autodesk\Revit 2027\Revit.exe"#, prefix: bottle.path)
+        defer { if revit.isRunning { kill(revit.processIdentifier, SIGKILL) } }
         try await Task.sleep(for: .milliseconds(500))
-        try FileManager.default.removeItem(at: held.deletingLastPathComponent().deletingLastPathComponent())
         let m = AppModel(engine: ProcessEngine(engine: repoEngine, environment: env), defaults: TestDefaults.make(), notifier: FakeNotifier())
         guard case let .report(p) = await m.cleanup(all: true, dryRun: true) else { Issue.record("no plan"); return }
-        #expect(p.items.map(\.pid) == [fake.processIdentifier] && p.items.first?.reason == "bottle_gone")
-        let later = Process()   // found after the list was shown: Close all does not end it without asking
-        later.executableURL = URL(fileURLWithPath: "/bin/bash")
-        later.arguments = ["-c", #"exec -a 'C:\windows\system32\conhost.exe' perl -e 'sleep 60' "$1""#, "x", root.path]
-        try later.run()
+        #expect(p.items.map(\.pid) == [revit.processIdentifier] && p.items.first?.revit == true && p.items.first?.bottle == "rvt2027-a")
+        let later = try wine(cx, #"C:\windows\system32\conhost.exe"#, prefix: bottle.path)   // after the list was shown
         defer { if later.isRunning { kill(later.processIdentifier, SIGKILL) } }
         try await Task.sleep(for: .milliseconds(300))
         guard case let .report(r) = await m.cleanup(all: true, dryRun: false, targets: p.items) else { Issue.record("no report"); return }
-        #expect(r.closed == [fake.processIdentifier] && r.left == [])
+        #expect(r.closed == [revit.processIdentifier] && r.left == [])
         #expect(later.isRunning)
-        fake.waitUntilExit()
-        #expect(fake.terminationReason == .uncaughtSignal)
+        revit.waitUntilExit()
+        #expect(revit.terminationReason == .uncaughtSignal)
     }
 }

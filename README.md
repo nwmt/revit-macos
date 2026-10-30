@@ -87,7 +87,7 @@ Run them in Terminal, in the project folder. In a new Terminal window, first typ
 | `./revit gdrive warm 2025 "G:\Shared drives\Team"` | List the folders on G: once, so Revit's Open dialog does not wait on each |
 | `./revit mcp 2027` | Connect an AI assistant to a running Revit, through Autodesk's Revit MCP Server or, with `--server pyrevit`, pyRevit's agent; on Revit 2020 `--server python`, the MCP server for Revit (Python) ([how](docs/mcp.md)) |
 | `./revit stop 2025` | Quit a Revit that hangs |
-| `./revit cleanup` | Close programs left running after Revit or Wine ended (`--dry-run` lists them; `--all` also closes bottles that run without Revit) ([more](docs/troubleshooting.md#programs-keep-running-after-revit-quit)) |
+| `./revit cleanup` | Close programs Wine or the app left running (`--dry-run` lists them; `--all` closes all of Wine, Revit too, without saving) ([more](docs/troubleshooting.md#programs-keep-running-after-revit-quit)) |
 | `./revit logs 2025` | List the newest logs |
 | `./revit debug 2025` | Start Revit and record a log |
 | `./revit report 2025` | Make a report for a GitHub issue, with personal data removed |

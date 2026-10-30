@@ -43,8 +43,8 @@ import AppKit
         await start(app: app, env: env, r)
     }
 
-    /// Close all: the programs cleanup --all would end (left over, and bottles running without Revit), then the close
-    /// on a yes. Bottles where Revit runs are left alone, so no unsaved work is lost.
+    /// Close all: what cleanup --all would end (all of Wine, Revit too, and what the app left), then the close on a yes:
+    /// only what was shown, so a program that started since stays.
     static func closeAll(app: AppModel) async {
         let p: CleanupReport
         switch await app.cleanup(all: true, dryRun: true) {

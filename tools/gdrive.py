@@ -26,6 +26,7 @@ import os
 import time
 import re
 import secrets
+import signal
 import stat
 import subprocess
 import sys
@@ -580,6 +581,10 @@ def warm(b, folder, where="<year>", out=sys.stdout, every=5.0):
     last = time.monotonic()
     queue = [start for _, start in roots]
     beat = Beat(b, every)
+
+    def term(*_):   # TERM (./revit cleanup) ends the walk through the finally below: the heartbeat goes too
+        raise SystemExit(143)
+    old = signal.signal(signal.SIGTERM, term)
     try:
         while queue:
             d = queue.pop(0)
@@ -609,6 +614,7 @@ def warm(b, folder, where="<year>", out=sys.stdout, every=5.0):
         return 130
     finally:
         beat.end()
+        signal.signal(signal.SIGTERM, old)
     print(f"{listed} folders listed, {cloud_only} were cloud-only", file=out)
     if failed:
         print(f"{failed} folders could not be listed", file=out)

@@ -45,8 +45,10 @@ CrossOver no longer reach them. A `gdrive.py warm` can also wait for hours on a 
 answer.
 
 **Solution:** `./revit cleanup --dry-run` lists what is left, with its bottle, CPU and age; `./revit cleanup` closes it.
-A bottle where Revit runs is left alone: `./revit stop <year>` ends it. The menu bar app closes what is left when Revit
-or the app quits; its **Close all…** also closes the bottles that run only Autodesk's background services.
+It leaves alone everything that still has its wineserver, and a bottle where Revit is among what is left.
+`./revit cleanup --all` closes all of Wine on this Mac, Revit too, without saving: use it when Revit hangs and
+`./revit stop` does not help. The menu bar app closes what is left when Revit or the app quits; its **Close all…** is
+`--all` and lists what it closes first.
 
 ### Report a problem
 

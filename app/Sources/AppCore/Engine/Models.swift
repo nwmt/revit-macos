@@ -149,28 +149,28 @@ public struct CleanupReport: Decodable, Equatable, Sendable {
         self.items = items; self.skipped = skipped; self.closed = closed; self.left = left
     }
 
-    /// The lines of Close all's confirmation: one per program, then the bottles left alone.
+    /// The lines of Close all's confirmation: one per program, then the warning when Revit is among them.
     public var planLines: [String] {
-        items.map(\.line) + skipped.map { s in
-            s.why == "wineserver_unknown" ? String(localized: "Left alone: \(s.bottle) (whether Wine runs there is not known)")
-                : String(localized: "Left alone: \(s.bottle) (Revit runs there)")
-        }
+        items.map(\.line) + (items.contains(where: \.revit)
+            ? [String(localized: "Revit closes without saving: unsaved changes are lost.")] : [])
     }
 }
 
 public struct Leftover: Decodable, Equatable, Sendable {
     public let pid: Int32
     public let kind: String                 // wine, helper, gdrive
-    public let reason: String               // no_wineserver, bottle_gone, idle, parent_gone, stuck
+    public let reason: String               // no_wineserver, bottle_gone, parent_gone, stuck; all (--all)
     public let bottle: String?
     public let name: String
     public let cpu: Double
     public let ageS: Int
-    public let start: Int64                 // the process's start (epoch seconds): with pid, the process approved
+    public let start: Int64                 // the process's start (microseconds since 1970): with pid, the process approved
+    public let revit: Bool                  // Revit.exe: it closes without saving
 
-    public init(pid: Int32, kind: String, reason: String, bottle: String?, name: String, cpu: Double, ageS: Int, start: Int64) {
+    public init(pid: Int32, kind: String, reason: String, bottle: String?, name: String, cpu: Double, ageS: Int, start: Int64,
+                revit: Bool = false) {
         self.pid = pid; self.kind = kind; self.reason = reason; self.bottle = bottle; self.name = name; self.cpu = cpu
-        self.ageS = ageS; self.start = start
+        self.ageS = ageS; self.start = start; self.revit = revit
     }
 
     /// <pid>:<start>, as cleanup --targets takes it.
@@ -194,6 +194,6 @@ public struct Leftover: Decodable, Equatable, Sendable {
 
 public struct SkippedBottle: Decodable, Equatable, Sendable {
     public let bottle: String
-    public let why: String                  // revit_running, wineserver_unknown, revit_started
+    public let why: String                  // revit_running: Revit is among what Wine left there
     public init(bottle: String, why: String) { self.bottle = bottle; self.why = why }
 }
