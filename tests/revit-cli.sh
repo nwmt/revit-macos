@@ -1050,10 +1050,12 @@ case "\$(cat "$T/mcp-mode" 2>/dev/null)" in
 esac
 d="$BOTTLES/\$name/drive_c/users/crossover/AppData/Local/Temp/revit-macos-mcp"; mkdir -p "\$d"
 if [ "\$(cat "$T/mcp-mode" 2>/dev/null)" = delayconfirm ]; then
-  exec 6<&0; cat <&6 & c=\$!
+  exec 6<&0; "$T/rpc-echo" <&6 & c=\$!
   until [ -e "$T/mcp-go" ]; do sleep 0.1; done; echo \$\$ > "\$d/launch-\$tok"; wait "\$c"
 else
-  echo \$\$ > "\$d/launch-\$tok"; cat
+  echo \$\$ > "\$d/launch-\$tok"
+  [ "\$(cat "$T/mcp-mode" 2>/dev/null)" != stuck ] || sleep 60   # a server that no longer reads its stdin
+  "$T/rpc-echo"
 fi
 exit "\$(cat "$T/mcp-rc" 2>/dev/null || echo 0)"
 EOF
@@ -1061,17 +1063,29 @@ EOF
 }
 mcp_world() { reset; bottle rvt2027-a 2027 2027; mcp_install rvt2027-a "${1:-$MCPW}"; mcp_cx; fake_revit rvt2027-a 2027; }
 MCP_ENV=()
+MCP_TIER=read; MCP_TOKEN=test-token-of-the-sandbox
+rq() { printf '{"jsonrpc":"2.0","id":"%s","method":"ping"}\n' "$1"; }   # a request; rs: the fake server's answer to it
+rs() { printf '{"jsonrpc":"2.0","id":"%s","result":{}}\n' "$1"; }
+mcp_seed() { # what a server gets: a fake MCP server, and tools/mcp_gate.py a token for the bottles and servers used here
+  printf '#!/usr/bin/perl\n$|=1; while(<STDIN>){ print qq({"jsonrpc":"2.0","id":"$1","result":{}}\\n) if /"id":"([^"]*)"/ }\n' > "$T/rpc-echo"
+  chmod +x "$T/rpc-echo"; mkdir -p "$R/mcp"
+  python3 -I -c 'import hashlib, json, sys
+sha = hashlib.sha256(sys.argv[1].encode()).hexdigest()
+json.dump([{"name": b + s, "sha256": sha, "tier": sys.argv[2], "bottle": b, "server": s}
+           for b in ("rvt2027-a", "rvt2020-a", "rvt2021-a") for s in ("autodesk", "pyrevit", "python")], open(sys.argv[3], "w"))' \
+    "$MCP_TOKEN" "$MCP_TIER" "$R/mcp/tokens.json"
+}
 run_mcp() { # stdin from $MCP_IN (default: nothing), rest = ./revit arguments; OUT = stdout only, ERR = stderr, RC
-  : > "$CALLS"
-  (cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" ${MCP_ENV[@]+"${MCP_ENV[@]}"} /bin/bash "$R/revit" "$@" \
+  : > "$CALLS"; mcp_seed
+  (cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" REVIT_MCP_TOKEN="$MCP_TOKEN" ${MCP_ENV[@]+"${MCP_ENV[@]}"} /bin/bash "$R/revit" "$@" \
     < "${MCP_IN:-/dev/null}" > "$T/mcp-out" 2> "$T/mcp-err"); RC=$?
   OUT="$(cat "$T/mcp-out")"; ERR="$(cat "$T/mcp-err")"; MCP_IN=""
 }
 mcp_bg() { # $1 = connection a | b, rest = ./revit arguments: in the background with a held-open stdin (fd 5 writes a's,
   # fd 6 b's) and INT at its default; sets LPID_<id>, output in $T/mcp-out-<id> and $T/mcp-err-<id>
   local id="$1" fd; shift; [ "$id" = a ] && fd=5 || fd=6
-  rm -f "$T/mcp-in-$id"; mkfifo "$T/mcp-in-$id"; : > "$T/mcp-out-$id"; : > "$T/mcp-err-$id"
-  (exec 5>&- 6>&-; cd / && exec env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" ${MCP_ENV[@]+"${MCP_ENV[@]}"} \
+  rm -f "$T/mcp-in-$id"; mkfifo "$T/mcp-in-$id"; : > "$T/mcp-out-$id"; : > "$T/mcp-err-$id"; mcp_seed
+  (exec 5>&- 6>&-; cd / && exec env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" REVIT_MCP_TOKEN="$MCP_TOKEN" ${MCP_ENV[@]+"${MCP_ENV[@]}"} \
     perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV' /bin/bash "$R/revit" "$@" < "$T/mcp-in-$id" > "$T/mcp-out-$id" 2> "$T/mcp-err-$id") &
   eval "LPID_$id=\$!"; eval "exec $fd>\"\$T/mcp-in-\$id\""
 }
@@ -1099,19 +1113,19 @@ reset; bottle rvt2027-a 2027 2027; mcp_cx; fake_revit rvt2027-a 2027; run_mcp mc
 check "mcp: not installed → the install command" eval '[ "$RC" != 0 ] && grep -qF "Install it: ./revit addins 2027 --only revitmcp --accept-eula revitmcp" <<<"$ERR" && mcp_stdout_empty'
 reset; bottle rvt2027-a 2027 2027; run_mcp status --write; check "--write on another command" eval '[ "$RC" != 0 ] && grep -qx "Unknown option: --write" <<<"$ERR"'
 reset; run_mcp mcp 2027 rvt2027-a extra; check "mcp: extra arguments" eval '[ "$RC" != 0 ] && grep -q "Too many arguments" <<<"$ERR" && mcp_stdout_empty'
-reset; run "" --help; check "mcp is in the help" grep -qx "  mcp       connect an AI assistant to a running Revit (--server pyrevit|python; docs/mcp.md)" <<<"$OUT"
-for c in "$MCPW||--tool-permission=StableReadOnly" "$MCPW|--write|--tool-permission=Stable --tool-min-permission=StableReadOnly" \
-  "$MCPE||--tool-permission=StableReadOnly" "$MCPE|--write|--tool-permission=Experimental --tool-min-permission=StableReadOnly"; do
+reset; run "" --help; check "mcp is in the help" grep -qF "  mcp       connect an AI assistant to a running Revit (--server pyrevit|python; docs/mcp.md); first give it a token:" <<<"$OUT"
+for c in "$MCPW|read|--tool-permission=StableReadOnly" "$MCPW|write|--tool-permission=Stable --tool-min-permission=StableReadOnly" \
+  "$MCPE|read|--tool-permission=StableReadOnly" "$MCPE|write|--tool-permission=Experimental --tool-min-permission=StableReadOnly"; do
   v="${c%%|*}"; f="$(cut -d'|' -f2 <<<"$c")"; want="${c##*|}"
-  mcp_world "$v"; printf 'hello\n{"jsonrpc":"2.0"}\n' > "$T/in"; MCP_IN="$T/in"; run_mcp mcp 2027 $f
-  check "mcp ${v#Revit 2027 MCP Server } ${f:-read-only}: exit 0, stdout is the server's alone" eval '[ "$RC" = 0 ] && [ "$OUT" = "$(cat "$T/in")" ] && [ -z "$ERR" ]'
+  mcp_world "$v"; rq 1 > "$T/in"; MCP_IN="$T/in"; MCP_TIER="$f"; run_mcp mcp 2027; MCP_TIER=read
+  check "mcp ${v#Revit 2027 MCP Server } ${f:-read-only}: exit 0, stdout is the server's alone" eval '[ "$RC" = 0 ] && [ "$OUT" = "$(rs 1)" ] && [ -z "$ERR" ]'
   check "mcp ${v#Revit 2027 MCP Server } ${f:-read-only}: launcher, token, server and $want" eval '[ "$(sed -n "1p;4p;5p" "$T/mcp-argv" | tr "\n" "|")" = "C:\\Program Files\\Autodesk\\$v\\mcphost.exe|--|C:\\Program Files\\Autodesk\\$v\\Autodesk.RevitMcpServer.Stdio.exe|" ] && [ "$(sed -n "6,\$p" "$T/mcp-argv" | tr "\n" " ")" = "$want " ]'
 done
 check "mcp: neither the lock (fd 9) nor fd 8 reaches the launcher" eval '! grep -qx -e FD9 -e FD8 "$T/mcp-argv"'
 mcp_world; echo 5 > "$T/mcp-rc"; run_mcp mcp 2027; check "mcp: EOF → the launcher's exit code" test "$RC" = 5
 mcp_world; mcp_bg a mcp 2027; mcp_wait confirmed 100; mcp_wait 'lock_is_free' 50
 check "mcp: the lock is released after the handoff" lock_is_free
-echo ping >&5; mcp_wait 'grep -qx ping "$T/mcp-out-a"' 50; check "mcp: input after the handoff still reaches the server" grep -qx ping "$T/mcp-out-a"
+rq ping >&5; mcp_wait 'grep -qF "\"ping\"" "$T/mcp-out-a"' 50; check "mcp: input after the handoff still reaches the server" grep -qF '"ping"' "$T/mcp-out-a"
 exec 5>&-; wait "$LPID_a"; check "mcp: EOF after the handoff → exit 0" test "$?" = 0
 for p in 'rm "$D/Autodesk.RevitMcpServer.Stdio.exe"|the MCP Server files' 'rm "$M"|the MCP add-in manifest' 'rm "$D/mcphost.exe"|mcphost.exe' \
   'rm "$D/mcppipes.dll"|mcppipes.dll' 'echo x >> "$D/mcphost.exe"|the current mcphost.exe' 'echo x >> "$D/mcppipes.dll"|the current mcppipes.dll' \
@@ -1152,9 +1166,8 @@ check "mcp: a loader that ignores TERM → killed; Revit and the other client al
   eval '[ "$RC" = 1 ] && ! own_alive && kill -0 "$other" 2>/dev/null && revit_alive'
 mcp_world; echo orphan > "$T/mcp-mode"; MCP_ENV=(MCP_HANDOFF_S=2); run_mcp mcp 2027; MCP_ENV=()
 check "mcp: a child that ignores TERM after its parent ended is killed too" eval '[ "$RC" = 1 ] && ! pgrep -f "^sleep 61" >/dev/null'
-pkill -9 -f "^sleep 61" 2>/dev/null
 mcp_world; echo holdclose > "$T/mcp-mode"; MCP_ENV=(MCP_HANDOFF_S=6); mcp_bg a mcp 2027; MCP_ENV=(); mcp_wait '[ -s "$T/mcp-argv" ]' 100; sleep 2
-pkill -f "Revit 2027.Revit.exe"; sleep 0.5; run "2027" remove 2027   # Revit closed, the loader's bottle file closed: only the lock stops it
+stop_fakes; sleep 0.5; run "2027" remove 2027   # Revit closed, the loader's bottle file closed: only the lock stops it
 check "mcp: while the launcher starts (its bottle file closed, no confirmation), remove is refused" eval '[ "$RC" != 0 ] && grep -q "Another task is running: ./revit mcp 2027 rvt2027-a" <<<"$OUT" && [ -d "$BOTTLES/rvt2027-a" ]'
 wait "$LPID_a"; exec 5>&-; check "mcp: then the lock is free and nothing of it is left" eval 'lock_is_free && ! own_alive'
 reset; for a in "2027 rvt2027-a 0" "2027 rvt2027-a 2 autodesk" "27 rvt2027-a 0 autodesk" "2027 rvt2027-a 0 foo" "2027 rvt2027-a 0 autodesk x"; do
@@ -1187,7 +1200,7 @@ pyrevit_world; run_mcp mcp 2027 --server foo; check "mcp --server foo → the kn
 pyrevit_world; run_mcp addins 2027 --server pyrevit
 check "--server on another command → refused" eval '[ "$RC" != 0 ] && grep -qxF -- "--server is for ./revit mcp only." <<<"$ERR"'
 pyrevit_world; run_mcp mcp 2027 --server pyrevit --write
-check "mcp --server pyrevit --write → refused" refused "pyRevit decides what an agent may change: pyRevit → Settings → Agent Runtime."
+check "mcp --server pyrevit --write → refused" refused "comes with its token"
 pyrevit_world 2021; run_mcp mcp 2021 --server pyrevit; check "pyrevit on 2021 → not offered here" refused "pyRevit is not available for Revit 2021 here."
 pyrevit_world; rm -rf "$PYA/pyRevit-Master"; run_mcp mcp 2027 --server pyrevit
 check "pyrevit not installed → the install command" refused "pyRevit is not installed in rvt2027-a. Install it: ./revit addins 2027 --only pyrevit"
@@ -1206,8 +1219,8 @@ done
 pyrevit_world; rm "$PYA/pyRevit/agent/instances/416.json"; run_mcp mcp 2027 --server pyrevit
 check "pyrevit agent not running in Revit → reload pyRevit" refused "pyRevit's agent is on but not running in this Revit: reload pyRevit or restart Revit."
 pyrevit_world; stop_fakes; run_mcp mcp 2027 --server pyrevit; check "pyrevit without Revit → open Revit first" refused "Open Revit 2027 with a model first."
-pyrevit_world; printf 'hello\n{"jsonrpc":"2.0"}\n' > "$T/in"; MCP_IN="$T/in"; run_mcp mcp 2027 --server pyrevit
-check "pyrevit: exit 0, stdout is the server's alone, stderr empty" eval '[ "$RC" = 0 ] && [ "$OUT" = "$(cat "$T/in")" ] && [ -z "$ERR" ]'
+pyrevit_world; rq 1 > "$T/in"; MCP_IN="$T/in"; run_mcp mcp 2027 --server pyrevit
+check "pyrevit: exit 0, stdout is the server's alone, stderr empty" eval '[ "$RC" = 0 ] && [ "$OUT" = "$(rs 1)" ] && [ -z "$ERR" ]'
 check "pyrevit: mcphost --plain starts pyrevit.exe mcp --revit=2027" eval '[ "$(sed -n "1p;2p;4,8p" "$T/mcp-argv" | tr "\n" "|")" = "$PLAINH|--launch|--plain|--|$PYEXE|mcp|--revit=2027|" ]'
 check "pyrevit: a launch token, nothing after the server's arguments" eval 'sed -n 3p "$T/mcp-argv" | grep -Eqx "revit-mcp-[0-9a-f-]{36}" && [ "$(wc -l < "$T/mcp-argv")" -eq 8 ]'
 check "pyrevit: mcphost.exe delivered from build/" cmp -s "$PYH" "$R/build/mcphost/mcphost.exe"
@@ -1218,25 +1231,52 @@ check "pyrevit: the same mcphost.exe is not rewritten" eval '[ "$RC" = 0 ] && [ 
 pyrevit_world; rm -rf "$R/build/mcphost"; run_mcp mcp 2027 --server pyrevit; check "pyrevit: no mcphost.exe to deliver → refused" refused "Cannot get mcphost.exe"
 mcp_world; run_mcp mcp 2027; cp "$T/mcp-argv" "$TOP/argv-plain"; mcp_world; run_mcp mcp 2027 --server autodesk
 check "mcp --server autodesk = no flag (read-only)" eval '[ "$(sed 3d "$T/mcp-argv")" = "$(sed 3d "$TOP/argv-plain")" ]'
-mcp_world; run_mcp mcp 2027 --write; cp "$T/mcp-argv" "$TOP/argv-plain"; mcp_world; run_mcp mcp 2027 --server autodesk --write
-check "mcp --server autodesk = no flag (--write)" eval '[ "$(sed 3d "$T/mcp-argv")" = "$(sed 3d "$TOP/argv-plain")" ]'
+MCP_TIER=write; mcp_world; run_mcp mcp 2027; cp "$T/mcp-argv" "$TOP/argv-plain"; mcp_world; run_mcp mcp 2027 --server autodesk; MCP_TIER=read
+check "mcp --server autodesk = no flag (tier write)" eval '[ "$(sed 3d "$T/mcp-argv")" = "$(sed 3d "$TOP/argv-plain")" ]'
+# the gate in front: no token, the launcher never starts; a stuck server after EOF; the commands of tokens
+mcp_world; MCP_TOKEN=wrong-token; mcp_seed; MCP_TOKEN=test-token-of-the-sandbox
+(cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" /bin/bash "$R/revit" mcp 2027 </dev/null >"$T/mcp-out" 2>"$T/mcp-err"); RC=$?
+check "mcp without a token → the command to get one, wine never started" eval '[ "$RC" = 1 ] && [ ! -s "$T/mcp-out" ] && [ ! -e "$T/mcp-argv" ] && grep -qF "./revit mcp token 2027 rvt2027-a --server autodesk" "$T/mcp-err"'
+mcp_world; run_mcp mcp 2027; check "a session is in the log of its bottle" eval 'grep -q "\"event\": \"session_end\"" "$R/mcp/audit/rvt2027-a.jsonl" && ! grep -q "$MCP_TOKEN" "$R/mcp/audit/rvt2027-a.jsonl"'
+mcp_world; run_mcp mcp token 2027; check "mcp token without a terminal → refused" eval '[ "$RC" = 1 ] && grep -qF "Run this in Terminal" <<<"$ERR"'
+mcp_world; (cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" script -q /dev/null /bin/bash "$R/revit" mcp token 2027 --tier write --name mine </dev/null >"$T/tok" 2>&1)
+check "mcp token in a terminal: shown once, with the command to connect" eval 'grep -qF "tier write" "$T/tok" && grep -qF "claude mcp add revit-2027 -e REVIT_MCP_TOKEN=" "$T/tok" && grep -q "\"name\": \"mine\"" "$R/mcp/tokens.json"'
+cp "$R/mcp/tokens.json" "$T/keep"; mcp_cli() { (cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" /bin/bash "$R/revit" "$@" </dev/null >"$T/mcp-out" 2>"$T/mcp-err"); RC=$?; OUT="$(cat "$T/mcp-out")"; ERR="$(cat "$T/mcp-err")"; }
+mcp_cli mcp tokens; check "mcp tokens lists without secrets" eval 'grep -q "^mine" <<<"$OUT" && ! grep -q sha256 <<<"$OUT"'
+mcp_cli mcp revoke mine; check "mcp revoke" eval '[ "$RC" = 0 ] && grep -qF "Token mine is revoked" <<<"$OUT"'
+(cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" script -q /dev/null /bin/bash "$R/revit" mcp token 2027 --tier code </dev/null >"$T/tok" 2>&1)
+check "mcp token: Write-Tools have no code tier" grep -qF "Autodesk's Write-Tools have no code tier" "$T/tok"
+mcp_world "$MCPE"; (cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" script -q /dev/null /bin/bash "$R/revit" mcp token 2027 --tier code </dev/null >"$T/tok" 2>&1)
+check "mcp token: Experimental may have the top tier" grep -qF "tier code" "$T/tok"
+pyrevit_world; (cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" script -q /dev/null /bin/bash "$R/revit" mcp bundle 2027 --server pyrevit --tier code </dev/null >"$T/tok" 2>&1)
+check "mcp bundle: a .mcpb in Downloads, its token shown, not inside" eval 'f="$H/Downloads/revit-rvt2027-a-pyrevit.mcpb"; [ -f "$f" ] && t="$(sed -n "s/^  \([A-Za-z0-9_-]\{40,\}\).*/\1/p" "$T/tok" | head -1)" && [ -n "$t" ] && ! unzip -p "$f" | grep -qF "$t"'
+run_mcp mcp 2027 --tier write; check "--tier is for token and bundle" refused "--tier and --name are for ./revit mcp token and bundle only."
+# the client goes: a stuck server gets TERM from the gate; before the handoff the launcher's own cleanup still decides
+mcp_world; fake_mcphost rvt2027-a; other=$!; echo stuck > "$T/mcp-mode"; mcp_bg a mcp 2027; mcp_wait confirmed 100; mcp_wait lock_is_free 50
+exec 5>&-; t0=$SECONDS; wait "$LPID_a"
+check "mcp: client gone, server stuck after the handoff → ended by the gate; Revit and the other client alive" \
+  eval '[ $((SECONDS - t0)) -le 12 ] && ! own_alive && kill -0 "$other" 2>/dev/null && revit_alive && lock_is_free'
+mcp_world; fake_mcphost rvt2027-a; other=$!; echo ignoreterm > "$T/mcp-mode"; mcp_bg a mcp 2027; mcp_wait '[ -s "$T/mcp-argv" ]' 100
+exec 5>&-; wait "$LPID_a"
+check "mcp: client gone before the handoff, a loader that ignores TERM → cleaned up, lock free, Revit alive" \
+  eval '! own_alive && kill -0 "$other" 2>/dev/null && revit_alive && lock_is_free'
 # two connections at once: the file is not rewritten, each echoes its own, closing one leaves the other
 pyrevit_world; mcp_bg a mcp 2027 --server pyrevit; mcp_wait '[ "$(launches)" -ge 1 ]' 100; mcp_wait lock_is_free 50; m1="$(stat -f %m "$PYH")"; sleep 1.1
 mcp_bg b mcp 2027 --server pyrevit; mcp_wait '[ "$(launches)" -ge 2 ]' 100
-echo from-a >&5; echo from-b >&6; mcp_wait 'grep -qx from-a "$T/mcp-out-a" && grep -qx from-b "$T/mcp-out-b"' 50
-check "pyrevit: two connections live together, each answers its own" eval 'kill -0 "$LPID_a" && kill -0 "$LPID_b" && [ "$(cat "$T/mcp-out-a")" = from-a ] && [ "$(cat "$T/mcp-out-b")" = from-b ]'
+rq from-a >&5; rq from-b >&6; mcp_wait 'grep -q from-a "$T/mcp-out-a" && grep -q from-b "$T/mcp-out-b"' 50
+check "pyrevit: two connections live together, each answers its own" eval 'kill -0 "$LPID_a" && kill -0 "$LPID_b" && [ "$(cat "$T/mcp-out-a")" = "$(rs from-a)" ] && [ "$(cat "$T/mcp-out-b")" = "$(rs from-b)" ]'
 check "pyrevit: the second connection did not rewrite mcphost.exe" test "$(stat -f %m "$PYH")" = "$m1"
-exec 5>&-; wait "$LPID_a"; echo again-b >&6; mcp_wait 'grep -qx again-b "$T/mcp-out-b"' 50
-check "pyrevit: closing one connection leaves the other" eval 'kill -0 "$LPID_b" && grep -qx again-b "$T/mcp-out-b"'
+exec 5>&-; wait "$LPID_a"; rq again-b >&6; mcp_wait 'grep -q again-b "$T/mcp-out-b"' 50
+check "pyrevit: closing one connection leaves the other" eval 'kill -0 "$LPID_b" && grep -q again-b "$T/mcp-out-b"'
 exec 6>&-; wait "$LPID_b"
 # input sent before the handoff reaches the server byte for byte (both servers)
 for sv in pyrevit autodesk; do
   if [ "$sv" = pyrevit ]; then pyrevit_world; else mcp_world; fi
   echo delayconfirm > "$T/mcp-mode"; mcp_bg a mcp 2027 --server "$sv"; mcp_wait '[ -s "$T/mcp-argv" ]' 100
-  printf '{"jsonrpc":"2.0","id":1,"method":"initialize"}\n' >&5; sleep 0.5
+  rq first >&5; sleep 0.5
   check "$sv: not confirmed yet while the first input waits" eval '! confirmed'
-  touch "$T/mcp-go"; mcp_wait confirmed 100; mcp_wait 'grep -q initialize "$T/mcp-out-a"' 50
-  check "$sv: input sent before the handoff reaches the server unchanged" eval '[ "$(cat "$T/mcp-out-a")" = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}" ]'
+  touch "$T/mcp-go"; mcp_wait confirmed 100; mcp_wait 'grep -q first "$T/mcp-out-a"' 50
+  check "$sv: input sent before the handoff reaches the server" eval '[ "$(cat "$T/mcp-out-a")" = "$(rs first)" ]'
   exec 5>&-; wait "$LPID_a"; rm -f "$T/mcp-mode" "$T/mcp-go"
 done
 # the launcher's life cycle with pyRevit: signals with a second client alive, the deadline, a loader ignoring TERM
@@ -1282,7 +1322,7 @@ pm_install() { # $1 = bottle: what addin_is_installed and the launcher look at; 
 [ "\$1 \$2" != "-I -c" ] || exit 0   # the launcher's "does the venv work" probe
 { printf '%s\n' "\$@"; stat -f %HT /dev/fd/4; echo "token=\$(cat <&4)"; [ -e /dev/fd/9 ] && echo FD9; echo "host=\${REVIT_HOST:-}"; env | grep -q "$PMTOK" && echo TOKEN-IN-ENV; } > "$T/py-argv"
 if [ -n "\${PYMCP_TEST_HOLD:-}" ]; then touch "\$PYMCP_TEST_HOLD.reached"; while [ -e "\$PYMCP_TEST_HOLD" ]; do sleep 0.1; done; fi
-exec 9>&-; cat
+exec 9>&-; "$T/rpc-echo"
 EOF
   chmod +x "$v/python3"
 }
@@ -1353,13 +1393,13 @@ check "python: 2 pyRevit installed again over the patch → the install command"
 pm_world; printf '{"jsonrpc":"2.0"}\n' > "$T/in"; MCP_IN="$T/in"; PMX=(http_proxy=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 ALL_PROXY=http://127.0.0.1:9); pmr
 check "python: a proxy in the environment does not get the status check" eval '[ "$RC" = 0 ] && grep -qF "GET /revit_mcp/status/" "$T/routes-log"'
 pm_world; echo 503 > "$T/routes-mode"; t0=$SECONDS
-(cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" PYMCP_ROUTES_PORT="$PMPORT" PYMCP_DPAPI_S=8 PYMCP_STATUS_S=2 /bin/bash "$R/revit" mcp 2020 --server python </dev/null 2>/dev/null | cat >/dev/null)
+mcp_seed; (cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" REVIT_MCP_TOKEN="$MCP_TOKEN" PYMCP_ROUTES_PORT="$PMPORT" PYMCP_DPAPI_S=8 PYMCP_STATUS_S=2 /bin/bash "$R/revit" mcp 2020 --server python </dev/null 2>/dev/null | cat >/dev/null)
 check "python: a refusal after the token closes the client's stdout at once" eval '[ $((SECONDS - t0)) -le 5 ]'
 pm_world; MCP_ENV=(); run_mcp mcp 2020 --server python --write
-check "python: --write refused" eval '[ "$RC" != 0 ] && grep -qF "Changes are approved in Revit, one by one" <<<"$ERR" && mcp_stdout_empty'
+check "python: --write refused" eval '[ "$RC" != 0 ] && grep -qF "comes with its token" <<<"$ERR" && mcp_stdout_empty'
 pm_world; run_mcp mcp 2020 --server nope; check "mcp: unknown server names python" eval 'grep -qF "Known: autodesk, pyrevit, python" <<<"$ERR"'
-pm_world; printf '{"jsonrpc":"2.0"}\n' > "$T/in"; MCP_IN="$T/in"; PMX=(REVIT_HOST=10.0.0.1 REVIT_PORT=1); pmr
-check "python: connected, stdout is the server's alone" eval '[ "$RC" = 0 ] && [ "$OUT" = "$(cat "$T/in")" ] && [ -z "$ERR" ]'
+pm_world; rq 1 > "$T/in"; MCP_IN="$T/in"; PMX=(REVIT_HOST=10.0.0.1 REVIT_PORT=1); pmr
+check "python: connected, stdout is the server's alone" eval '[ "$RC" = 0 ] && [ "$OUT" = "$(rs 1)" ] && [ -z "$ERR" ]'
 check "python: the wrapper, its marker, the bottle, the sources, fds 4 and 9" eval '[ "$(sed -n "1,9p" "$T/py-argv" | tr "\n" "|")" = "-I|$R/tools/python_mcp_run.py|revit-macos-python-mcp|$(cd "$BOTTLES/rvt2020-a" && pwd -P)|$R/mcp/python-mcp/$PMC/src|--token-fd|4|--lock-fd|9|" ]'
 check "python: the token comes through a pipe on fd 4" eval 'grep -qx "Fifo File" "$T/py-argv" && grep -qx "token=$PMTOK" "$T/py-argv"'
 check "python: the lock fd reaches the wrapper" grep -qx FD9 "$T/py-argv"

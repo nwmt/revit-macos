@@ -5,7 +5,7 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"; . "$ROOT/scripts/lib/common.sh"
 YES=0; JSON=0; ALL=0; EVENTS_DIR=""; ONLY=""; EULA=""; REUSE_X=0; REEXTRACT=0; FLAG_ERR=""; SIG_GOT=""; END_DONE=0
-WRITE=0; SERVER=""   # ./revit mcp: --write, --server <autodesk|pyrevit>
+WRITE=0; SERVER=""; TIER=""; TOKEN_NAME=""   # ./revit mcp: --write (refused), --server, and for its token: --tier, --name
 DRY=0; LOG=0; KEEP=0   # --dry-run: remove and rebuild only. ./revit test: --log, and --keep (the maintainer's, not in the help)
 TARGETS=""   # ./revit cleanup: --targets <pid>:<start>,… (the app: what the person approved)
 RUN_ARG=""; EXCL=()   # ./revit report: --run <log_dir>, --exclude <file> (again for more files)
@@ -70,7 +70,9 @@ Usage: ./revit <command> <year> [bottle]
             all of Wine, Revit too, without saving; --targets <pid>:<start>,… only those of them)
   logs      list the newest logs
   debug     start Revit and record a log
-  mcp       connect an AI assistant to a running Revit (--server pyrevit|python; docs/mcp.md)
+  mcp       connect an AI assistant to a running Revit (--server pyrevit|python; docs/mcp.md); first give it a token:
+            mcp token <year> [bottle] [--tier read|write|code] [--name n], mcp bundle <year> for Claude Desktop,
+            mcp tokens (list), mcp revoke <name>
   hittest   for the app: the Windows window under a point (stdin/stdout)
   theme     for the app: Revit's theme follows the Mac's light or dark look now
   rebuild   delete the bottle and install Revit again
@@ -104,10 +106,10 @@ while [ $# -gt 0 ]; do
     --log) LOG=1 ;;
     --keep) KEEP=1 ;;
     --write) WRITE=1 ;;
-    --events|--only|--accept-eula|--run|--exclude|--server|--targets|--depth|--max)
+    --events|--only|--accept-eula|--run|--exclude|--server|--tier|--name|--targets|--depth|--max)
       if [ $# -lt 2 ]; then FLAG_ERR="$1 needs a value"
       else case "$1" in --events) EVENTS_DIR="$2" ;; --only) ONLY="$2" ;; --accept-eula) EULA="$2" ;;
-        --run) RUN_ARG="$2" ;; --exclude) EXCL+=("$2") ;; --server) SERVER="$2" ;; --depth|--max) WARM_OPTS+=("$1" "$2") ;; --targets) TARGETS="$2" ;; esac; shift; fi ;;
+        --run) RUN_ARG="$2" ;; --exclude) EXCL+=("$2") ;; --server) SERVER="$2" ;; --tier) TIER="$2" ;; --name) TOKEN_NAME="$2" ;; --depth|--max) WARM_OPTS+=("$1" "$2") ;; --targets) TARGETS="$2" ;; esac; shift; fi ;;
     -h|--help) POS+=(help) ;;
     --*) FLAG_ERR="Unknown option: $1" ;;
     *) POS+=("$1") ;;
@@ -115,6 +117,12 @@ while [ $# -gt 0 ]; do
   shift
 done
 CMD="${POS[0]:-}"; YEAR_ARG="${POS[1]:-}"; NAME="${POS[2]:-}"
+MCPSUB=""   # ./revit mcp token|bundle|tokens|revoke
+if [ "$CMD" = mcp ]; then
+  case "$YEAR_ARG" in
+    token|bundle|tokens|revoke) MCPSUB="$YEAR_ARG"; POS=(mcp ${POS[@]+"${POS[@]:2}"}); YEAR_ARG="${POS[1]:-}"; NAME="${POS[2]:-}" ;;
+  esac
+fi
 GPATH=""   # ./revit gdrive warm <year> [bottle] <folder> [--depth N] [--max N]: the folder (WARM_OPTS: the options)
 [ ${#WARM_OPTS[@]} = 0 ] || [ "$CMD" = gdrive ] || FLAG_ERR="--depth and --max are for ./revit gdrive warm only."
 if [ "$CMD" = gdrive ]; then
@@ -139,18 +147,18 @@ fi
 [ -z "$RUN_ARG" ] || [ "$CMD" = report ] || FLAG_ERR="--run is for ./revit report only."
 [ ${#EXCL[@]} = 0 ] || [ "$CMD" = report ] || FLAG_ERR="--exclude is for ./revit report only."
 [ "$WRITE" = 0 ] || [ "$CMD" = mcp ] || FLAG_ERR="Unknown option: --write"
+[ -z "$TIER$TOKEN_NAME" ] || [ "$MCPSUB" = token ] || [ "$MCPSUB" = bundle ] || FLAG_ERR="--tier and --name are for ./revit mcp token and bundle only."
 [ -z "$SERVER" ] || [ "$CMD" = mcp ] || FLAG_ERR="--server is for ./revit mcp only."
 [ -z "$TARGETS" ] || [ "$CMD" = cleanup ] || FLAG_ERR="--targets is for ./revit cleanup only."
 [ -z "$TARGETS" ] || [[ "$TARGETS" =~ ^[0-9]+:[0-9]+(,[0-9]+:[0-9]+)*$ ]] || FLAG_ERR="--targets takes <pid>:<start>,… as cleanup --dry-run --json lists them."
 if [ "$CMD" = mcp ]; then   # stdout belongs to the MCP client: no events, no more words than year and bottle
-  [ ${#POS[@]} -le 3 ] || FLAG_ERR="Too many arguments. Example: ./revit mcp 2027 [bottle] [--write]"
+  [ ${#POS[@]} -le 3 ] || FLAG_ERR="Too many arguments. Example: ./revit mcp 2027 [bottle]"
   [ -z "$EVENTS_DIR" ] || FLAG_ERR="--events is not for ./revit mcp."
   case "${SERVER:=autodesk}" in
-    autodesk) ;;
-    pyrevit) [ "$WRITE" = 0 ] || FLAG_ERR="pyRevit decides what an agent may change: pyRevit → Settings → Agent Runtime." ;;
-    python) [ "$WRITE" = 0 ] || FLAG_ERR="Changes are approved in Revit, one by one: the extension asks before every change." ;;
+    autodesk|pyrevit|python) ;;
     *) FLAG_ERR="Unknown MCP server: $SERVER. Known: autodesk, pyrevit, python" ;;
   esac
+  [ "$WRITE" = 0 ] || FLAG_ERR="What a connection may do now comes with its token: ./revit mcp token ${YEAR_ARG:-<year>} --tier write (docs/mcp.md)."
 fi
 if [ "$CMD" = hittest ]; then   # the app's: stdout is the protocol; a year and a bottle, no options
   [ "$ARGC" = "${#POS[@]}" ] && [ ${#POS[@]} -le 3 ] && [[ "${POS[1]:-}" =~ ^[0-9]{4}$ ]] \
@@ -184,6 +192,11 @@ if [ -n "$EVENTS_DIR" ]; then
   emit start run_id "$(json_str "$REVIT_RUN_ID")" command "$(json_str "$CMD")" year "$y" bottle "$b" pid "$$"
 fi
 [ -z "$FLAG_ERR" ] || die "$FLAG_ERR"
+case "$MCPSUB" in   # no year, no bottle to check
+  tokens) exec python3 -I -B "$ROOT/tools/mcp_gate.py" token-list --data "$DATA" ;;
+  revoke) [ -n "$YEAR_ARG" ] || die "Usage: ./revit mcp revoke <name> (./revit mcp tokens lists them)"
+    exec python3 -I -B "$ROOT/tools/mcp_gate.py" token-revoke --data "$DATA" --name "$YEAR_ARG" ;;
+esac
 case "$CMD" in
   install|check|doctor|report|addins|import|cache|stop|cleanup|logs|debug|rebuild|remove|status|find-installer|link-installer|test|mcp|set|hittest|theme|gdrive) ;;
   ""|help|-h|--help) usage; exit 0 ;;
@@ -541,7 +554,19 @@ case "$CMD" in
     while IFS= read -r f; do f="${f%/}"; echo "  logs/${f#"$DATA/logs/"}"; done <<<"$found"
     echo "Open the folder: open \"$DATA/logs/$NAME\""
     echo "To report a problem, see \"Report a problem\" in docs/troubleshooting.md." ;;
-  mcp) need_crossover; exec "$ROOT/scripts/mcp-launch.sh" "$YEAR" "$NAME" "$WRITE" "$SERVER" ;;
+  mcp)
+    if [ -n "$MCPSUB" ]; then   # a token for a connection: docs/mcp.md
+      gate=(--root "$ROOT" --data "$DATA" --year "$YEAR" --bottle "$NAME" --server "$SERVER" --tier "${TIER:-read}")
+      [ "$(mcp_installed_variant)" != revitmcp-experimental ] || gate+=(--experimental)
+      case "$MCPSUB" in
+        token) exec python3 -I -B "$ROOT/tools/mcp_gate.py" token-create "${gate[@]}" ${TOKEN_NAME:+--name "$TOKEN_NAME"} ;;
+        bundle) [ -z "$TOKEN_NAME" ] || die "--name is for ./revit mcp token only."
+          exec python3 -I -B "$ROOT/tools/mcp_gate.py" bundle "${gate[@]}" --out-dir "$HOME/Downloads" ;;
+      esac
+    fi
+    need_crossover
+    exec python3 -I -B "$ROOT/tools/mcp_gate.py" serve revit-macos-mcp-gate "$(cd "$B" 2>/dev/null && pwd -P || echo "$B")" \
+      --root "$ROOT" --data "$DATA" --year "$YEAR" --bottle "$NAME" --server "$SERVER" --policy "$(pyrevit_agent_policy)" ;;
   hittest) need_crossover; exec "$ROOT/scripts/hittest-launch.sh" "$YEAR" "$NAME" ;;
   theme) need_crossover; exec "$ROOT/scripts/theme-launch.sh" "$YEAR" "$NAME" ;;
   gdrive)   # lists folders ahead (tools/gdrive.py): Mac files only, no Wine, no lock; Revit may be open

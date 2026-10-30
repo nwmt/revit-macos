@@ -85,7 +85,7 @@ Run them in Terminal, in the project folder. In a new Terminal window, first typ
 | `./revit set 2027 retina=off` | Turn Retina off for faster views (`retina=compact`: smaller text, more room; `retina=on`), `keys=windows`: Cmd works as Alt again, or `theme=dark`/`light`: one theme instead of the Mac's (`theme=mac`) (2020, 2027; theme: 2027) |
 | `./revit set 2025 gdrive=off` | Change G: from Google Drive: `gdrive=auto` (the one account on this Mac), `gdrive=<email>` (one of several), `gdrive=off`; `gdrive_names=ru` adds the folder names of a Russian Windows ([more](docs/troubleshooting.md#google-drive)) |
 | `./revit gdrive warm 2025 "G:\Shared drives\Team"` | List a folder on G: and its subfolders once, so Revit's Open dialog does not wait on each (`--depth 2` for more levels) |
-| `./revit mcp 2027` | Connect an AI assistant to a running Revit, through Autodesk's Revit MCP Server or, with `--server pyrevit`, pyRevit's agent; on Revit 2020 `--server python`, the MCP server for Revit (Python) ([how](docs/mcp.md)) |
+| `./revit mcp 2027` | Connect an AI assistant to a running Revit, through Autodesk's Revit MCP Server or, with `--server pyrevit`, pyRevit's agent; on Revit 2020 `--server python`, the MCP server for Revit (Python). Needs a token: `./revit mcp token 2027`, or `./revit mcp bundle 2027` for Claude Desktop ([how](docs/mcp.md)) |
 | `./revit stop 2025` | Quit a Revit that hangs |
 | `./revit cleanup` | Close programs Wine or the app left running (`--dry-run` lists them; `--all` closes all of Wine, Revit too, without saving) ([more](docs/troubleshooting.md#programs-keep-running-after-revit-quit)) |
 | `./revit logs 2025` | List the newest logs |

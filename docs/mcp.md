@@ -14,9 +14,61 @@ What has been tried on which version is on the [version pages](../versions/).
 For all of them:
 
 - **Your AI assistant sends what it reads from the model to its provider** (Anthropic, OpenAI and so on).
-- **Anyone who uses this Mac under your macOS account can connect** to the Revit you have open.
+- A connection needs a token, and the token sets what it may do: see [Tokens and tiers](#tokens-and-tiers).
 - While an assistant is connected, `./revit addins`, `rebuild` and `remove` refuse to run. Close the assistant first.
 - **Stop:** close the assistant, or run `./revit stop <year>` (it quits Revit too).
+
+## Tokens and tiers
+
+`./revit mcp` starts only with a token. You make one in Terminal, once for each assistant:
+
+```bash
+./revit mcp token 2027 --server pyrevit --tier code --name my-assistant
+```
+
+It is shown once, with the command that connects Claude Code. For Claude Desktop, see
+[Claude Desktop](#claude-desktop). The assistant passes it in the environment variable `REVIT_MCP_TOKEN`; Revit-side
+add-ins never see it. A token is for one bottle and one server. `./revit mcp tokens` lists them;
+`./revit mcp revoke <name>` ends that assistant's connection within two seconds. What Revit is already doing goes on.
+
+| Tier | What the assistant may do |
+|---|---|
+| `read` (the default) | Read the model, show and select elements, take pictures of views |
+| `write` | Also change the model with the server's ready-made tools. pyRevit has no such tier: it changes the model by running code |
+| `code` | Everything the server offers, running code included. Python runs with your rights and can reach your files. Autodesk's server has this tier only with Experimental-Tools |
+
+Below `code`, a tool this project has not sorted into a tier stays hidden, so a new tool of a new server version needs
+an update here first.
+
+Every connection is logged in `mcp/audit/<bottle>.jsonl`, under the project folder (under
+`~/Library/Application Support/` for the app): when, which token, which tool, allowed or refused, and how it went.
+It keeps the first 4 KB of what the assistant sent, so it may hold anything the assistant put in a script. It keeps no
+answers, and `./revit report` leaves it out. If the log cannot be written, the call is not made.
+
+**What a token does not do.** It says what a connection may do; it is not a lock. A program that runs under your macOS
+account and sets out to get around it can: it can start Wine itself, edit the token file or read your models from disk.
+Connect only assistants you trust, and let only those run commands on your Mac.
+
+## Claude Desktop
+
+Make a bundle for the server you want:
+
+```bash
+./revit mcp bundle 2027 --server pyrevit --tier code
+```
+
+It puts `revit-<bottle>-<server>.mcpb` in `~/Downloads` and shows a token. In Claude Desktop, open **Settings →
+Extensions → Advanced settings → Install Extension**, choose the file and paste the token: Claude Desktop keeps it in
+your Keychain. The file holds no token, and it points at this folder, so make it again if you move the project.
+
+## When it refuses
+
+- **"This connection needs a token":** make one, as above, then reconnect the assistant. Connections made before tokens
+  existed need this once.
+- **"This token is not valid for…":** the token is for another bottle or server, or it was revoked or replaced.
+- **"What a connection may do now comes with its token":** remove `--write` and make a token with `--tier write`.
+- **The assistant says it may not use a tool:** its token's tier does not cover it.
+- **"Cannot write the log of MCP calls":** free disk space, or check `mcp/audit`.
 
 ## Autodesk Revit MCP Server
 
@@ -45,31 +97,24 @@ Before you install it:
 
 ### Connect
 
-Open Revit 2027 with a model. Your assistant starts `./revit mcp 2027` itself; give it the full path to `revit` in
-this project folder (`pwd` in Terminal shows the folder).
+Open Revit 2027 with a model and make a token: `./revit mcp token 2027` for reading, `--tier write` to allow changes.
 
-- **Claude Code:**
-  ```bash
-  claude mcp add revit-2027 -- /full/path/to/revit-macos/revit mcp 2027
-  ```
-- **Claude Desktop:** in `~/Library/Application Support/Claude/claude_desktop_config.json`, then restart Claude:
-  ```json
-  {"mcpServers": {"revit-2027": {"command": "/full/path/to/revit-macos/revit", "args": ["mcp", "2027"]}}}
-  ```
+- **Claude Code:** run the `claude mcp add` command it prints. The token then sits in plain text in `~/.claude.json`,
+  and in your shell history.
+- **Claude Desktop:** [make a bundle](#claude-desktop).
 
 The model's tools appear once the server has found Revit, a few seconds after the start. If your assistant lists only
 `get_running_revit_instances`, reconnect it.
 
 ### Read only, or changes too
 
-`./revit mcp 2027` lets the assistant only read: query the model, read elements, open, show and select views and
-elements, export views. To let it change the model, add `--write` (`"args": ["mcp", "2027", "--write"]`): it can then
-change parameters and move or rotate elements. Ask it to review the changes: Autodesk's review lists the elements its
+A `read` token lets the assistant query the model, read elements, open, show and select views and elements, and export
+views. A `write` token also lets it change parameters and move or rotate elements. Ask it to review the changes: Autodesk's review lists the elements its
 last change added, modified or deleted.
 
 **Experimental-Tools** is a second installer from the same page (`PublicMcpServerExperimental.exe`) with about 40 tools:
 sheets, views, schedules, deleting elements, exports. Autodesk offers it at your own risk. Install it the same way
-with `revitmcp-experimental` in place of `revitmcp`. A bottle holds one of the two; to switch, run
+with `revitmcp-experimental` in place of `revitmcp`; its extra tools need a `code` token. A bottle holds one of the two; to switch, run
 `./revit rebuild 2027` and install the other.
 
 ### Troubleshoot
@@ -86,7 +131,8 @@ pyRevit 7, which `./revit addins` installs for Revit 2023 to 2027, has an agent:
 runs it inside Revit. It can read anything in the model, build walls, floors and roofs, and take a picture of a view.
 
 Before you turn it on: the scripts run with your rights in the bottle, and the bottle reaches your home folder, so they
-can read and write your files too. Connect only assistants you trust.
+can read and write your files too. pyRevit's `readonly` policy stops changes to the model, not this. Connect only
+assistants you trust.
 
 ### Turn it on
 
@@ -101,19 +147,17 @@ With "Ask for my approval", Revit asks before every change; "Auto" applies chang
 
 ### Connect
 
-Open Revit with a model, then give your assistant the full path to `revit` in this project folder:
+Open Revit with a model and make a token. Reading a model needs Python, so most of this server needs `--tier code`:
 
-- **Claude Code:**
-  ```bash
-  claude mcp add --scope user pyrevit -- /full/path/to/revit-macos/revit mcp 2027 --server pyrevit
-  ```
-- **Claude Desktop** (not tried yet): in `~/Library/Application Support/Claude/claude_desktop_config.json`, then
-  restart Claude:
-  ```json
-  {"mcpServers": {"pyrevit": {"command": "/full/path/to/revit-macos/revit", "args": ["mcp", "2027", "--server", "pyrevit"]}}}
-  ```
+```bash
+./revit mcp token 2027 --server pyrevit --tier code
+```
 
-What the assistant may change is set in pyRevit's settings, not here: `--write` is for Autodesk's server only.
+Then run the `claude mcp add` command it prints, or [make a bundle](#claude-desktop) for Claude Desktop (not tried yet).
+A `read` token gives the tools that run no code: context, element details, pictures of views.
+
+pyRevit's own setting still applies on top: with **Ask**, Revit asks before every change. With **Auto**, `./revit mcp`
+warns you when it starts.
 
 ### Troubleshoot
 
@@ -133,8 +177,8 @@ Before you install it:
 
 - **It turns on pyRevit Routes**, a small web server inside Revit, reachable from this Mac only.
 - **It changes one file of pyRevit 4.8** so that Routes passes on the pairing and serves one request at a time.
-- **The assistant can run Python inside Revit without a sandbox.** Revit shows every change and every script before
-  it runs, and runs it only if you click **Yes**.
+- **With a `code` token, the assistant can run Python inside Revit without a sandbox.** Revit shows every change and
+  every script before it runs, and runs it only if you click **Yes**.
 
 ### Install
 
@@ -151,21 +195,13 @@ Before you install it:
 
 ### Connect
 
-Open Revit with a model, then give your assistant the full path to `revit` in this project folder:
-
-- **Claude Code:**
-  ```bash
-  claude mcp add --scope user revit-python -- /full/path/to/revit-macos/revit mcp 2020 --server python
-  ```
-- **Claude Desktop** (not tried yet): in `~/Library/Application Support/Claude/claude_desktop_config.json`, then
-  restart Claude:
-  ```json
-  {"mcpServers": {"revit-python": {"command": "/full/path/to/revit-macos/revit", "args": ["mcp", "2020", "--server", "python"]}}}
-  ```
+Open Revit with a model and make a token: `./revit mcp token 2020 --server python`, with `--tier write` for changes or
+`--tier code` for Python. Then run the `claude mcp add` command it prints, or [make a bundle](#claude-desktop) for Claude
+Desktop (not tried yet).
 
 When the assistant asks to change the model or run Python, Revit shows **Revit MCP request review**. Answer within 30
 seconds (60 for Python and pictures of views): after that the assistant stops waiting, though Revit still does what you
-allowed. `--write` is for Autodesk's server only.
+allowed.
 
 Two of its tools do nothing on a Mac: `launch_revit` and `list_revit_installations` look for Revit in Windows, outside
 the bottle. Start Revit from `~/Applications` instead. Close documents in Revit yourself:

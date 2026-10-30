@@ -676,6 +676,12 @@ class LeftoversTest(Tmp):
         items, skipped = self.L.classify(procs, self.b, self.CX, now=self.now, mine=set(), **kw)
         return {i["pid"]: i["reason"] for i in items}, skipped
 
+    def test_an_mcp_gate_whose_client_is_gone(self):
+        argv = ["python3", "mcp_gate.py", "serve", "revit-macos-mcp-gate", "/b"]
+        procs = [self.proc(50, argv, exe="/usr/bin/python3"), self.proc(51, argv, exe="/usr/bin/python3", ppid=700)]
+        self.assertEqual(self.classify(procs)[0], {50: "parent_gone"})
+        self.assertEqual(self.L.name_of(procs[0]), "MCP gate")
+
     def test_orphans_of_a_bottle_without_wineserver_or_folder(self):
         procs = [self.win(10, "winedevice.exe", "probe-drag"), self.win(11, "services.exe", "live"),
                  self.proc(12, [self.SERVER], exe=self.SERVER, prefix=os.path.join(self.b, "live"))]

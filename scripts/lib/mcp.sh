@@ -67,6 +67,13 @@ pyrevit_agent_enabled() { # $1 = pyRevit_config.ini: 0 when its [agent] section 
             gsub(/[[:space:]]/, "", v); if (tolower(k) == "enabled") on = (tolower(v) == "true") }
     END { exit !on }'
 }
+pyrevit_agent_policy() { # readonly, ask or auto from [agent] in pyRevit_config.ini; nothing when there is none
+  { tr -d '\r"' < "$B/$PYREVIT_CONFIG_REL"; } 2>/dev/null | awk '
+    /^[[:space:]]*\[/ { s = $0; gsub(/[[:space:]]/, "", s); agent = (tolower(s) == "[agent]"); next }
+    agent { k = $0; sub(/=.*/, "", k); gsub(/[[:space:]]/, "", k); v = $0; if (!sub(/^[^=]*=/, "", v)) next
+            gsub(/[[:space:]]/, "", v); if (tolower(k) == "policy") p = tolower(v) }
+    END { print p }'
+}
 pyrevit_mcp_missing() { # $1 = year: the first missing piece, nothing when ready: not-offered (this project has no
   # pyRevit for the year), no-agent-runtime (the year's or the installed pyRevit is before 7), not-installed, agent-off,
   # not-registered (the agent has no instance file: not running in Revit). An instance file left by an ended Revit

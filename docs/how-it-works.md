@@ -166,6 +166,13 @@ schedules keep scrolling. Checked on Revit 2020 and 2027; in other years the ges
 
 Each shim builds with `scripts/build-shims.sh <name>` into `build/<name>/`.
 
+## Between the assistant and Revit
+
+`./revit mcp` does not hand the assistant to the server directly. `tools/mcp_gate.py` sits between them on the Mac, for all
+three servers: it checks the token, passes on only the tools of the token's tier and writes the log. It reads the MCP
+messages line by line and starts the server through `scripts/mcp-launch.sh`, which keeps the project lock and ends its own
+processes. See [docs/mcp.md](mcp.md#tokens-and-tiers).
+
 ## Advanced: one step at a time
 
 For normal use, `./revit rebuild <year>` runs everything again from scratch. To rerun single steps in an existing

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ./revit mcp <year> [bottle] [--write] [--server pyrevit]: connects an AI assistant on this Mac to the Revit running in
+# ./revit mcp <year> [bottle] [--server pyrevit], through tools/mcp_gate.py: connects an AI assistant on this Mac to the Revit running in
 # a bottle, through Autodesk's Revit MCP Server (scripts/addins/revitmcp.sh) or pyRevit's agent (pyrevit.exe mcp), and
 # our launcher mcphost.exe (tools/shims/mcphost; --plain for pyRevit, which finds Revit without the pipe listing). The MCP
 # client starts this command and talks to the server over stdin/stdout, so stdout carries MCP only: everything of this
@@ -8,7 +8,7 @@
 # may delete or change the bottle; afterwards a running mcphost.exe counts as activity for bottle_guard, as Revit does.
 # On a signal, the deadline or an error, only this connection's own processes are ended (never wineserver -k: Revit and
 # other clients keep running).
-# Usage: scripts/mcp-launch.sh <year> <bottle> <0|1: --write> <autodesk|pyrevit>
+# Usage: scripts/mcp-launch.sh <year> <bottle> <0|1: the tier allows writing> <autodesk|pyrevit|python>
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/scripts/lib/common.sh"; . "$ROOT/scripts/lib/addins.sh"; . "$ROOT/scripts/lib/shims.sh"

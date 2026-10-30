@@ -167,6 +167,9 @@ check "bundle: engine scripts stay executable" [ -z "$miss" ]
 extra=""; for f in tests docs .git internal app scripts/get-toolchain.sh scripts/build-shims.sh scripts/build-release.sh; do
   [ ! -e "$E/$f" ] || extra+=" $f"; done
 check "bundle: no tests, docs, git, app sources or dev-only scripts" [ -z "$extra" ]
+in_sandbox env REVIT_DATA="$T/appdata" script -q /dev/null /bin/bash "$E/revit" mcp token 2027 --server python
+expect "bundle: an MCP token" 0 "claude mcp add revit-2027"
+check "bundle: tokens live in the app's data folder, not in the app" eval '[ -f "$T/appdata/mcp/tokens.json" ] && [ ! -e "$E/mcp" ]'
 check "bundle: the shims are release v$SHIMS_VERSION" eval '[ "$(cat "$E/build/.prebuilt")" = "$SHIMS_VERSION" ] && [ -f "$E/build/rvtfix/rvtfix.dll" ]'
 check "bundle: the marker names the app and the tools" eval 'grep -qx "app_name=Test App" "$E/.app-bundle" &&
   grep -qx "app_version=0.0.1" "$E/.app-bundle" && grep -qx "sevenzip=26.04" "$E/.app-bundle" && grep -qx "shims=$SHIMS_VERSION" "$E/.app-bundle"'
