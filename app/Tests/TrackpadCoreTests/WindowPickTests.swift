@@ -24,15 +24,17 @@ let p = CGPoint(x: 100, y: 100)
     let cursor = WinInfo(pid: 608, bounds: CGRect(x: 95, y: 95, width: 32, height: 32), alpha: 1, layer: WindowPick.cursorLayer)
     #expect(WindowPick.target(at: p, frontToBack: [cursor, revit], revitPids: [500]) == 500)
 }
-@Test func anInvisibleFullDisplayWindowOfAnotherAppIsNotOverRevit() {
+@Test func anInvisibleFullDisplayWindowOfMacOSIsNotOverRevit() {
     let screen = CGRect(x: 0, y: 0, width: 1000, height: 800)
-    let overlay = WinInfo(pid: 77, bounds: screen, alpha: 1, layer: 24, owner: "Screenshot")
+    let overlay = WinInfo(pid: 77, bounds: screen, alpha: 1, layer: 24, owner: "Screenshot", system: true)
     #expect(WindowPick.target(at: p, frontToBack: [overlay, revit], revitPids: [500], displays: [screen]) == 500)
     #expect(WindowPick.target(at: p, frontToBack: [overlay, revit], revitPids: [500]) == nil)   // displays unknown: as before
-    let dock = WinInfo(pid: 78, bounds: CGRect(x: 0, y: 700, width: 1000, height: 100), alpha: 1, layer: 20)
+    let dock = WinInfo(pid: 78, bounds: CGRect(x: 0, y: 700, width: 1000, height: 100), alpha: 1, layer: 20, system: true)
     #expect(WindowPick.target(at: CGPoint(x: 100, y: 750), frontToBack: [dock, revit], revitPids: [500], displays: [screen]) == nil)
     let normal = WinInfo(pid: 79, bounds: screen, alpha: 1, layer: 0)   // a real window filling the screen stays over Revit
     #expect(WindowPick.target(at: p, frontToBack: [normal, revit], revitPids: [500], displays: [screen]) == nil)
+    let app = WinInfo(pid: 80, bounds: screen, alpha: 1, layer: 24)     // another app's overlay may be a real one
+    #expect(WindowPick.target(at: p, frontToBack: [app, revit], revitPids: [500], displays: [screen]) == nil)
 }
 
 @Test func anUnknownRevit() { #expect(WindowPick.target(at: p, frontToBack: [revit], revitPids: [501]) == nil) }

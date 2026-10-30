@@ -165,6 +165,12 @@ final class TapThread: @unchecked Sendable {
                               displays: buttons ? [] : displays())
     }
 
+    private func isSystem(_ pid: Int32) -> Bool {
+        var path = [CChar](repeating: 0, count: 4096)   // PROC_PIDPATHINFO_MAXSIZE
+        guard proc_pidpath(pid, &path, 4096) > 0 else { return false }
+        return String(cString: path).hasPrefix("/System/")
+    }
+
     private func displays() -> [CGRect] {
         var ids = [CGDirectDisplayID](repeating: 0, count: 16), n: UInt32 = 0
         guard CGGetActiveDisplayList(16, &ids, &n) == .success else { return [] }
@@ -177,9 +183,10 @@ final class TapThread: @unchecked Sendable {
         return list.compactMap { w in
             guard let pid = w[kCGWindowOwnerPID as String] as? Int32, let b = w[kCGWindowBounds as String] as? NSDictionary,
                   let r = CGRect(dictionaryRepresentation: b as CFDictionary) else { return nil }
-            return WinInfo(pid: pid, bounds: r, alpha: w[kCGWindowAlpha as String] as? Double ?? 1,
-                           layer: w[kCGWindowLayer as String] as? Int ?? 0,
-                           owner: w[kCGWindowOwnerName as String] as? String ?? "")
+            let layer = w[kCGWindowLayer as String] as? Int ?? 0
+            return WinInfo(pid: pid, bounds: r, alpha: w[kCGWindowAlpha as String] as? Double ?? 1, layer: layer,
+                           owner: w[kCGWindowOwnerName as String] as? String ?? "",
+                           system: layer > 0 && isSystem(pid))
         }
     }
 

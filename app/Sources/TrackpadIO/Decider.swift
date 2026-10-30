@@ -37,6 +37,7 @@ public enum Decider {
             log?.lineOnChange("pass: \(w.owner.isEmpty ? "another app" : w.owner)'s window over the point (layer \(w.layer))")
             return nil
         }
+        log?.lineOnChange("")   // the same reason after this gesture is news again
         let pid = w.pid
         guard case .ready(let s) = r.client.status else { log?.line("pass: \(r.bottle) not ready"); return nil }
         guard let reply = r.client.query(DisplayMap.toWine(p, scale: s)) else { log?.line("pass: \(r.bottle) no answer"); return nil }

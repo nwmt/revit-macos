@@ -115,10 +115,14 @@ import TrackpadState
     for _ in 0..<3 { #expect(Decider.decide(at: p, windows: [other, revit], buttonsDown: false, context: ctx, log: log) == nil) }
     #expect(Decider.decide(at: p, windows: [revit], buttonsDown: true, context: ctx, log: log) == nil)
     #expect(Decider.decide(at: CGPoint(x: 900, y: 50), windows: [revit], buttonsDown: false, context: ctx, log: log) == nil)
+    _ = Decider.decide(at: p, windows: [revit], buttonsDown: false, context: ctx, log: log)   // Revit there: a line of its own
+    #expect(Decider.decide(at: CGPoint(x: 900, y: 50), windows: [revit], buttonsDown: false, context: ctx, log: log) == nil)
     log.flush()
     let lines = try String(contentsOf: url, encoding: .utf8).split(separator: "\n").map { $0.split(separator: " ", maxSplits: 1)[1] }
-    #expect(lines == ["pass: Panel's window over the point (layer 3)", "pass: a mouse button is held", "pass: no window there"])
-    #expect(a.asked.isEmpty)
+    #expect(lines.filter { $0.hasPrefix("pass: ") && !$0.hasSuffix("not ready") && !$0.hasSuffix("no answer") } ==
+            ["pass: Panel's window over the point (layer 3)", "pass: a mouse button is held", "pass: no window there",
+             "pass: no window there"])
+    #expect(a.asked.count == 1)   // only the gesture over Revit got to hittest
 }
 
 @MainActor @Test func twoBottlesTwoClients() async {

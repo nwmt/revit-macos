@@ -16,13 +16,14 @@ public final class TrackpadLog: Sendable {
         queue.async { self.append(now, s) }
     }
 
-    /// A line that may come with every gesture: written only when it differs from the last one given this way.
+    /// A line that may come with every gesture: written only when it differs from the last one given this way. An
+    /// empty one writes nothing and forgets the last.
     public func lineOnChange(_ s: String) {
         let now = Date()
         queue.async {
             guard s != self.lastChange else { return }
             self.lastChange = s
-            self.append(now, s)
+            if !s.isEmpty { self.append(now, s) }
         }
     }
 
