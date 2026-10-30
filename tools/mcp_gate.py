@@ -57,6 +57,7 @@ TOOLS = {
                           "lookup_pyrevit_api show_elements navigate_revit_link capture_view get_run "
                           "list_automation".split()),
         "write": frozenset(),
+        "code": frozenset("run_query run_modify run_automation".split()),
     },
     "python": {
         "read": frozenset("get_revit_status get_revit_model_info get_current_view_info get_current_view_elements "
@@ -64,6 +65,7 @@ TOOLS = {
                           "list_category_parameters list_revit_installations".split()),
         "write": frozenset("clear_colors close_document color_splash launch_revit open_document place_family "
                            "save_document sync_with_central".split()),
+        "code": frozenset(("execute_revit_code",)),
     },
 }
 CLIENT_REQUESTS = frozenset(("initialize", "ping", "tools/list", "tools/call", "logging/setLevel"))

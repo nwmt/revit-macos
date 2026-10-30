@@ -251,7 +251,17 @@ class Tiers(World):
             self.assertTrue(gate.tool_allowed(server, "code", no))
 
     def test_python_tables_cover_the_twenty_tools(self):
-        self.assertEqual(sum(len(s) for s in gate.TOOLS["python"].values()), 19)
+        self.assertEqual(sum(len(s) for s in gate.TOOLS["python"].values()), 20)
+
+    def test_pyrevit_tables_cover_the_fifteen_tools_seen_live(self):
+        self.assertEqual(sum(len(s) for s in gate.TOOLS["pyrevit"].values()), 15)
+
+    def test_a_known_tool_of_a_higher_tier_is_not_reported_as_unknown(self):
+        p = self.start(self.token("read", "pyrevit"), "pyrevit", tools="get_context run_query")
+        self.send(p, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        self.assertEqual([t["name"] for t in self.recv(p)["result"]["tools"]], ["get_context"])
+        p.stdin.close(); p.wait(20)
+        self.assertNotIn("hidden", [e["event"] for e in self.audit()])
 
     def test_launcher_gets_the_write_flag_of_the_tier(self):
         for tier, flag in (("read", "0"), ("write", "1")):
