@@ -638,6 +638,33 @@ class Warm(Fake):
         for bad in (("--max", "0"), ("--depth", "-1"), ("--depth", "x")):
             self.assertEqual(self.warm("G:\\", *bad).returncode, 2, bad)
 
+    def test_failed_folders_count_in_the_limit_and_pause(self):
+        work = os.path.join(self.a, "Shared drives", "Team", "Work")
+        for i in range(20):
+            os.makedirs(os.path.join(work, "c%02d" % i))
+        real_scandir, real_sleep = g.os.scandir, g.time.sleep
+        acc, asked, naps = os.path.realpath(self.a), [], []
+
+        def fake(p):
+            if str(p).startswith(acc) and os.path.basename(str(p)).startswith("c"):
+                asked.append(p)
+                raise OSError(5, "Input/output error")
+            return real_scandir(p)
+        g.os.scandir, g.time.sleep = fake, naps.append
+        out = io.StringIO()
+        try:
+            code = g.warm(self.b, "G:\\Shared drives\\Team\\Work", "2027", out=out, limit=5)
+        finally:
+            g.os.scandir, g.time.sleep = real_scandir, real_sleep
+        self.assertEqual(code, 1)
+        self.assertLessEqual(len(asked), 4)   # Work and at most 4 more: 5 requests in all
+        self.assertEqual(len(naps), len(asked))   # a pause after each failed request, none after local folders
+
+    def test_flags_once_with_a_number(self):
+        for bad in (("--max", "5", "--max", "1"), ("--depth", "1", "--depth", "0"), ("--depth",), ("--wide",),
+                    ("--max", "-1")):
+            self.assertEqual(self.run_tool("warm", self.b, "G:\\", "2027", *bad).returncode, 2, bad)
+
     def test_a_pause_after_each_cloud_only_folder(self):
         real_lstat, real_sleep = os.lstat, g.time.sleep
         naps = []

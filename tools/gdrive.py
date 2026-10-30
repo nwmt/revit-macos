@@ -594,11 +594,14 @@ def warm(b, folder, where="<year>", out=sys.stdout, every=5.0, depth=DEPTH, limi
         raise SystemExit(143)
     old = signal.signal(signal.SIGTERM, term)
     try:
+        tried = 0   # folders asked for, listed or not: the limit and the pauses count every request
         while queue:
-            if listed >= limit:
+            if tried >= limit:
                 more = True
                 break
             d, level = queue.pop(0)
+            tried += 1
+            remote = errored = False
             try:
                 remote = bool(os.lstat(d).st_flags & SF_DATALESS)
                 cloud_only += remote
@@ -613,15 +616,16 @@ def warm(b, folder, where="<year>", out=sys.stdout, every=5.0, depth=DEPTH, limi
                 listed += 1
                 timeouts = 0
                 beat.tick()
-                if remote and pause:
-                    time.sleep(pause)
             except OSError as e:
                 failed += 1
+                errored = True
                 timeouts = timeouts + 1 if e.errno == errno.ETIMEDOUT else 0
                 if timeouts >= TIMEOUTS:
                     print(f"{listed} folders listed; Google Drive does not answer: is Google Drive for desktop "
                           "running and online? Then run this again", file=out)
                     return 1
+            if (remote or errored) and pause:   # each request to Google Drive, answered or not, is followed by one
+                time.sleep(pause)
             if time.monotonic() - last >= every:
                 last = time.monotonic()
                 print(f"{listed} folders listed, {cloud_only} were cloud-only", file=out, flush=True)
@@ -681,15 +685,21 @@ def main(argv):
             print(sanitize(line), file=sys.stderr if code else sys.stdout)
         return code
     if len(argv) >= 3 and argv[0] == "warm":
-        rest, opts = argv[3:], {}
-        while len(rest) >= 2 and rest[-2] in ("--depth", "--max"):
-            try:
-                opts["depth" if rest[-2] == "--depth" else "limit"] = int(rest[-1])
-            except ValueError:
-                print(f"warm: {rest[-2]} takes a number", file=sys.stderr)
+        rest, opts, args = [], {}, argv[3:]
+        while args:
+            a = args.pop(0)
+            if a in ("--depth", "--max"):
+                k = "depth" if a == "--depth" else "limit"
+                if k in opts or not args or not args[0].isdigit():
+                    print(f"warm: {a} takes a number, once", file=sys.stderr)
+                    return 2
+                opts[k] = int(args.pop(0))
+            elif a.startswith("--"):
+                print(f"warm: unknown option {a}", file=sys.stderr)
                 return 2
-            rest = rest[:-2]
-        if len(rest) > 1 or any(v < 0 for v in opts.values()) or opts.get("limit") == 0:
+            else:
+                rest.append(a)
+        if len(rest) > 1 or opts.get("limit") == 0:
             print("warm: bad arguments", file=sys.stderr)
             return 2
         try:
