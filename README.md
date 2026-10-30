@@ -20,7 +20,8 @@ No virtual machine, no Windows installation.
   common exports. What is left are minor issues with workarounds.
 - **Mostly works:** Revit runs and modeling works, but some important features are broken or not tested yet.
 
-Worksharing is not tested on any version yet.
+Worksharing works on Revit 2027 with the central model on the same Mac ([details](versions/2027.md)). Network drives,
+Autodesk Construction Cloud and the other versions are not tested.
 
 Tested on an Apple M5 MacBook (16 GB), macOS 26, CrossOver 26.3. Modeling takes about 1.3–2× as long as on a
 fast Windows PC ([benchmarks](docs/benchmarks.md)).
