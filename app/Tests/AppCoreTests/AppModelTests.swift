@@ -38,6 +38,11 @@ let endOK = #"{"event":"end","exit_code":0,"result":"ok","failed_action":"","fai
         #expect(install.arguments == ["install", "2025", "rvt2025-a", "--yes"])
         #expect(install.with(.reextract).arguments == ["install", "2025", "rvt2025-a", "--yes", "--reextract"])
         #expect(RunRequest.rebuild(year: 2025, bottle: "b", source: .reuseExtracted).arguments == ["rebuild", "2025", "b", "--yes", "--reuse-extracted"])
+        let none = RunRequest.rebuild(year: 2025, bottle: "b", source: .reextract).withPlan(restorePoint: false)
+        #expect(none.arguments == ["rebuild", "2025", "b", "--yes", "--reextract", "--no-point"])
+        #expect(none.withPlan(restorePoint: true).arguments == ["rebuild", "2025", "b", "--yes", "--reextract"])   // a retry, room again
+        let old = try! JSONDecoder().decode(RunRequest.self, from: Data(#"{"rebuild":{"year":2025,"bottle":"b"}}"#.utf8))
+        #expect(old == .rebuild(year: 2025, bottle: "b", source: nil))
         #expect(RunRequest.check(year: 2025, bottle: "b", source: nil).with(.reuseExtracted).arguments == ["check", "2025", "b", "--reuse-extracted"])
         #expect(RunRequest.addins(year: 2025, bottle: "b", ids: ["pyrevit", "revitlookup"], eula: []).arguments == ["addins", "2025", "b", "--only", "pyrevit,revitlookup"])
         #expect(RunRequest.addins(year: 2027, bottle: "b", ids: ["enscape"], eula: ["enscape"]).arguments == ["addins", "2027", "b", "--only", "enscape", "--accept-eula", "enscape"])

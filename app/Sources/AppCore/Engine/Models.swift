@@ -129,6 +129,7 @@ public struct RemovePlan: Decodable, Equatable, Sendable {
     public let delete: [PlanItem]
     public let kept: [String]?              // remove only
     public let addinsReset: Bool?           // rebuild only
+    public let restorePoint: Bool?          // rebuild only: the run keeps a restore point; false from an older engine is nil
     public let notes: [String]
 }
 

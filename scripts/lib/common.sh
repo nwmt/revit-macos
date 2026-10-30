@@ -277,19 +277,20 @@ mcp_running() { # $1 = bottle path: our MCP launcher (mcphost.exe, scripts/mcp-l
   return 1
 }
 bottle_guard() { # $1 = must_exist | running_ok (like must_exist, Revit may run: ./revit stop) | allow_missing
-  # (creating, removing leftovers), $2 = year, $3 = bottle. Dies with the reason. A wrong year/bottle pair would
+  # (creating, removing leftovers) | allow_broken (like allow_missing, also a bottle with no Revit year yet: ./revit
+  # rollback brings back one that a cut-short install left), $2 = year, $3 = bottle. Dies with the reason. A wrong year/bottle pair would
   # rebuild or delete another Revit; CrossOver follows a link to the real bottle, so checks and actions could differ
   local mode="$1" year="$2" name="$3" b ys sfx
   b="$(bottle_path "$name")"; sfx="$(bottle_sfx "$name" "$year")"
   [ ! -L "$b" ] || die "Bottle $name is a link to another bottle. Use the real bottle name."
   ! is_smoke_clone "$b" || die "Bottle $name is a temporary copy made by ./revit test, not a bottle to use."
   if [ ! -d "$b" ]; then
-    [ "$mode" = allow_missing ] && return 0
+    [ "$mode" = allow_missing ] || [ "$mode" = allow_broken ] && return 0
     die "There is no bottle $name. To install Revit $year: ./revit install $year$sfx"
   fi
   ys="$(bottle_years "$b" | sort -u | tr '\n' ' ')"; ys="${ys% }"
-  [ -n "$ys" ] || die "Bottle $name does not look like a Revit bottle. If you do not need it, delete it in CrossOver."
-  [ "$ys" = "$year" ] || die "Bottle $name is for Revit $ys, not $year. Check the year and the bottle name."
+  [ -n "$ys" ] || [ "$mode" = allow_broken ] || die "Bottle $name does not look like a Revit bottle. If you do not need it, delete it in CrossOver."
+  [ -z "$ys" ] || [ "$ys" = "$year" ] || die "Bottle $name is for Revit $ys, not $year. Check the year and the bottle name."
   [ "$mode" = running_ok ] || ! revit_running "$b" "$year" \
     || die "Revit $year is running in $name. Save your work and quit Revit, then try again. If it hangs: ./revit stop $year$sfx"
   [ "$mode" = running_ok ] || ! mcp_running "$b" \
@@ -373,6 +374,7 @@ cx_bottle_lock() { # $1 = bottle path: holds CrossOver's own lock of that bottle
     open(my $l, ">", $path) or exit 5;
     my $until = time + 30;
     until (flock($l, LOCK_EX | LOCK_NB)) { exit 6 if time > $until || !kill(0, $parent); select(undef, undef, undef, 0.2) }
+    $SIG{$_} = "IGNORE" for qw(INT TERM HUP);   # ends with its parent or by KILL (cx_bottle_unlock), never by a Ctrl-C meant for a copy
     open(my $r, ">", $ready) or exit 7; print $r "locked\n"; close $r;
     select(undef, undef, undef, 0.2) while kill(0, $parent);' "$1" "$(cx_lock_dir)" "$$" "$ready" \
     </dev/null >/dev/null 2>&1 7>&- 9>&- &
@@ -386,13 +388,48 @@ cx_bottle_lock() { # $1 = bottle path: holds CrossOver's own lock of that bottle
 }
 cx_bottle_unlock() { # ends the holder of cx_bottle_lock: the kernel drops the lock with it
   [ -n "$CX_LOCK_PID" ] || return 0
-  kill "$CX_LOCK_PID" 2>/dev/null; wait "$CX_LOCK_PID" 2>/dev/null; CX_LOCK_PID=""; return 0
+  kill -KILL "$CX_LOCK_PID" 2>/dev/null; wait "$CX_LOCK_PID" 2>/dev/null; CX_LOCK_PID=""; return 0
+}
+wait_stopped() { # $1 = bottle path, $2 = seconds: 0 once nothing runs in it
+  local t=$SECONDS
+  while [ "$(bottle_activity "$1")" != stopped ]; do
+    [ $((SECONDS - t)) -lt "$2" ] || return 1
+    sleep 1
+  done
+}
+COPY_WHY=""   # why bottle_copy_at_rest failed: busy (CrossOver's lock), prepare, active, copy, active_after
+bottle_copy_at_rest() { # $1 = bottle path, $2 = an existing folder, rest = a command to run first, under the lock: an APFS
+  # clone of the bottle's contents in that folder, under CrossOver's lock, so nothing starts in the bottle meanwhile and it
+  # is at rest before and after. 1 with COPY_WHY
+  local src="$1" dst="$2"; shift 2
+  COPY_WHY=""
+  cx_bottle_lock "$src" || { COPY_WHY=busy; return 1; }
+  if [ $# -gt 0 ] && ! "$@"; then COPY_WHY=prepare; cx_bottle_unlock; return 1; fi
+  if [ "$(bottle_activity "$src")" != stopped ]; then COPY_WHY=active; cx_bottle_unlock; return 1; fi
+  run_child cp -cR "$src/" "$dst" || COPY_WHY=copy
+  [ -n "$COPY_WHY" ] || [ "$(bottle_activity "$src")" = stopped ] || COPY_WHY=active_after
+  cx_bottle_unlock
+  [ -z "$COPY_WHY" ]
+}
+bottles_on_apfs() { # $1 = bottle path: cp -c makes APFS clones, which take almost no space, within one APFS volume;
+  # anywhere else it copies every byte (7–30 GB). -L: the volume of the folder itself, not of a link to it (Bottles moved
+  # to a disk, linked back)
+  local dev; dev="$(stat -L -f %Sd "$BOTTLES" 2>/dev/null)" && [ -n "$dev" ] || return 1
+  [ "$(stat -L -f %Sd "$1" 2>/dev/null)" = "$dev" ] || return 1   # the bottle on that volume too, not mounted there
+  [ "$(diskutil info -plist "$dev" 2>/dev/null | plutil -extract FilesystemType raw -o - - 2>/dev/null)" = apfs ]
 }
 cx_menu_apps() { # $1 = bottle name: the apps CrossOver made for its Start Menu entries; deleting a bottle leaves them
   local a
   find "$HOME/Applications/CrossOver" -type d -name '*.app' -prune 2>/dev/null | while IFS= read -r a; do
     [ "$(plutil -extract CXHelperAppBottleName raw -o - "$a/Contents/Info.plist" 2>/dev/null)" = "$1" ] && echo "$a"
   done
+  return 0
+}
+
+menu_apps_remove() { # $1 = bottle name: its CrossOver menu apps, then the folders they leave empty
+  local a any=0
+  while IFS= read -r a; do [ -n "$a" ] && rm -rf "$a" && any=1; done < <(cx_menu_apps "$1")
+  [ $any = 0 ] || find "$HOME/Applications/CrossOver" -mindepth 1 -type d -empty -delete 2>/dev/null
   return 0
 }
 
