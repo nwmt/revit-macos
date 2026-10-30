@@ -96,6 +96,15 @@
  *    enable it) also enables an owner that was disabled when the drag began. Only owners of the same thread that
  *    have our procedure too. Only in Revit.exe. RVTFIX_DRAGOWNER set and empty disables.
  *
+ * 12. Docked panels squeezed into a corner on white (2027 on Retina: a file opened after the last one closed, Properties and
+ *    Project Browser): with the last project closed, WPF parks the panels' windows in its hidden
+ *    SystemResourceNotifyWindow, which it creates in an unaware thread context. Wine's SetParent gives a window the DPI
+ *    context of its new parent, and windows created under it inherit that: a panel back in Revit gets 192 again, its new
+ *    children stay at 96 and are laid out at the wrong scale. Fix: that one window, when asked for in an unaware
+ *    context, is created system aware (CreateWindowExW export), so a parked window keeps its context. WPF looks these
+ *    windows up by awareness, so per-monitor and system requests stay as they are. Only in Revit 2027's Revit.exe, the
+ *    one tested. RVTFIX_DPIPARK set and empty disables.
+ *
  * 4, 5 and 10 run when the DLL loads (LdrRegisterDllNotification), or at once if it is already loaded.
  *
  * Diagnostics: OutputDebugString with the "[rvtfix]" prefix (CX_DEBUGMSG=+debugstr).
@@ -974,6 +983,51 @@ static void fix_dragowner(HINSTANCE inst)
         trace("drag: no WinEvent hook (%lu)\n", GetLastError());
 }
 
+/* --- 12. WPF's parking window has the process's DPI awareness --- */
+typedef HWND (WINAPI *create_ex_fn)(DWORD, LPCWSTR, LPCWSTR, DWORD, int, int, int, int, HWND, HMENU, HINSTANCE, void *);
+static create_ex_fn orig_create_ex;
+/* Windows 10: not in the headers at our target */
+DPI_AWARENESS_CONTEXT WINAPI GetThreadDpiAwarenessContext(void);
+DPI_AWARENESS_CONTEXT WINAPI SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT);
+DPI_AWARENESS WINAPI GetAwarenessFromDpiAwarenessContext(DPI_AWARENESS_CONTEXT);
+
+static HWND WINAPI hook_create_ex(DWORD ex, LPCWSTR cls, LPCWSTR name, DWORD style, int x, int y, int w, int h, HWND parent,
+                                  HMENU menu, HINSTANCE inst, void *param)
+{
+    DPI_AWARENESS_CONTEXT old;
+    HWND hwnd;
+    if (!name || IS_INTRESOURCE(name) || lstrcmpW(name, L"SystemResourceNotifyWindow") ||
+        GetAwarenessFromDpiAwarenessContext(old = GetThreadDpiAwarenessContext()) != DPI_AWARENESS_UNAWARE)
+        return orig_create_ex(ex, cls, name, style, x, y, w, h, parent, menu, inst, param);
+    SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_SYSTEM_AWARE);
+    hwnd = orig_create_ex(ex, cls, name, style, x, y, w, h, parent, menu, inst, param);
+    SetThreadDpiAwarenessContext(old);
+    trace("WPF parking window %p: system aware\n", hwnd);
+    return hwnd;
+}
+
+static void fix_dpipark(void)
+{
+    WCHAR path[MAX_PATH], *slash, *folder, env[8];
+    HMODULE user = GetModuleHandleW(L"user32.dll");
+    BYTE *thunk;
+    if (!GetModuleFileNameW(NULL, path, MAX_PATH) || !(slash = wcsrchr(path, L'\\')) || lstrcmpiW(slash + 1, L"Revit.exe"))
+        return;
+    *slash = 0;
+    if (!(folder = wcsrchr(path, L'\\')) || lstrcmpiW(folder + 1, L"Revit 2027")) return;
+    SetLastError(0);   /* an empty variable leaves the last error as it was */
+    if (!GetEnvironmentVariableW(L"RVTFIX_DPIPARK", env, 8) && GetLastError() != ERROR_ENVVAR_NOT_FOUND) {
+        trace("dpipark: disabled (RVTFIX_DPIPARK is empty)\n");
+        return;
+    }
+    if (!user || !(thunk = alloc_near((BYTE *)user, 0x1000))) { trace("user32: no thunk\n"); return; }
+    if (patch_export(user, "CreateWindowExW", (void *)hook_create_ex, (void **)&orig_create_ex, thunk))
+        trace("user32!CreateWindowExW: WPF's parking window keeps the process's awareness\n");
+    else
+        trace("user32: CreateWindowExW not found\n");
+    FlushInstructionCache(GetCurrentProcess(), thunk, 16);
+}
+
 static void fix_dragdrop(void)
 {
     HMODULE ole = LoadLibraryW(L"ole32.dll");
@@ -1002,6 +1056,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
         fix_opaque(inst);
         fix_statusbar();
         fix_dragowner(inst);
+        fix_dpipark();
         watch_dlls(); /* under the loader lock: no DLL loads between the checks above and this */
     }
     return TRUE;
