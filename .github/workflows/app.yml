@@ -37,7 +37,10 @@ jobs:
         run: |
           if [ "$GITHUB_REF_TYPE" = tag ]; then echo "VER=${GITHUB_REF_NAME#app-v}" >> "$GITHUB_ENV"; else echo "VER=0.0.0" >> "$GITHUB_ENV"; fi
       - name: Build, sign, smoke test, DMG
-        run: app/build.sh "$VER"
+        run: |
+          # only a tag's build has to match the recorded CDHash of the trackpad helper; the others keep their DMG to compare
+          [ "$GITHUB_REF_TYPE" = tag ] || export TRACKPAD_HELPER_CDHASH_CHECK=0
+          app/build.sh "$VER"
       - name: Keep the DMG and its sources (pull request, manual run)
         if: github.ref_type != 'tag'
         uses: actions/upload-artifact@v4
