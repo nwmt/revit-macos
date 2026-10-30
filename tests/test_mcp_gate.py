@@ -139,7 +139,7 @@ class Tokens(World):
         self.assertEqual(rows[0]["sha256"], gate.token_sha(t2))
 
     def test_refusals(self):
-        for bad in ("[", '{"a": 1}', '[{"name": "x"}]', '[{"sha256": "\\u00e9"}]'):
+        for bad in ("[", '{"a": 1}', '[{"name": "x"}]', '[{"sha256": "\\u00e9"}]', '[{"sha256": %s}]' % ("1" * 64)):
             open(os.path.join(gate.mcp_dir(self.data), "tokens.json"), "w").write(bad)
             with self.assertRaises(gate.GateError):
                 gate.load_tokens(self.data)
@@ -397,9 +397,33 @@ class Protocol(World):
                 s.ending = "revoked"
             return item
         s.to_child.get = get
-        s.send_child(None)
+        s.to_child.put(None)
         s.write_child()
         self.assertEqual(child.stdin.getvalue(), b"first\n")
+
+    def test_revoking_cuts_the_drain_short(self):
+        p = self.start(self.token(name="n"), mode="answer-and-leave")
+        self.send(p, {"jsonrpc": "2.0", "id": 1, "method": "ping"})
+        self.assertTrue(self.wait_for(lambda: not subprocess.run(["pgrep", "-P", str(p.pid)], capture_output=True).stdout))
+        gate.save_tokens(self.data, [])
+        self.assertEqual(p.wait(gate.WATCH_S + 5), 1)
+
+    def test_a_side_that_stops_reading_cannot_fill_the_memory(self):
+        class Child:
+            stdin = None
+            def poll(self):
+                return 0
+        a = argparse.Namespace(server="autodesk", data=self.data, bottle="b")
+        s = gate.Session(a, None, "", {"tier": "read"}, Child(), "x")
+        limit, gate.QUEUED_MAX = gate.QUEUED_MAX, 100
+        try:
+            s.send_client(b"x" * 60)
+            self.assertIsNone(s.ending)
+            s.send_client(b"x" * 60)
+        finally:
+            gate.QUEUED_MAX = limit
+        self.assertEqual(s.ending, "overflow")
+        self.assertEqual(s.to_client.qsize(), 1)
 
     def test_a_late_reader_gets_the_whole_answer(self):
         p = self.start(self.token(), mode="answer-and-leave")
@@ -483,6 +507,12 @@ class Lifecycle(World):
         p = self.start(self.token())
         self.assertTrue(self.wait_for(lambda: os.path.exists(self.d + "/env")))
         open(os.path.join(self.data, "mcp", "tokens.json"), "w").write("[")
+        self.assertEqual(p.wait(gate.WATCH_S + 8), 1)
+
+    def test_a_hash_of_the_wrong_type_ends_the_session(self):
+        p = self.start(self.token())
+        self.assertTrue(self.wait_for(lambda: os.path.exists(self.d + "/env")))
+        open(os.path.join(self.data, "mcp", "tokens.json"), "w").write('[{"sha256": %s}]' % ("1" * 64))
         self.assertEqual(p.wait(gate.WATCH_S + 8), 1)
 
     def test_closed_client_stdout(self):

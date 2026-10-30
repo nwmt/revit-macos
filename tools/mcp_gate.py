@@ -42,6 +42,7 @@ WATCH_S = 2          # how often a live session looks whether its token is still
 EOF_GRACE_S = 5      # after the client is gone, how long the server may take to leave by itself before TERM
 ARGS_KEPT = 4096     # characters of a call's arguments kept in the log
 DRAIN_S = 30         # after the server ended, how long a slow client gets to take what is already here
+QUEUED_MAX = 256 << 20   # bytes waiting for a side that stopped reading; beyond it the session ends
 AUDIT_MAX = 10 << 20
 AUDIT_KEEP = 3
 
@@ -132,8 +133,8 @@ def load_tokens(data):
         return []
     except (OSError, ValueError) as e:
         raise GateError("Cannot read the MCP tokens: %s" % e)
-    if not isinstance(rows, list) or not all(isinstance(r, dict) and re.fullmatch(r"[0-9a-f]{64}", str(r.get("sha256")))
-                                             for r in rows):
+    if not isinstance(rows, list) or not all(isinstance(r, dict) and isinstance(r.get("sha256"), str)
+                                             and re.fullmatch(r"[0-9a-f]{64}", r["sha256"]) for r in rows):
         raise GateError("The file of MCP tokens is damaged.")
     return rows
 
@@ -270,6 +271,7 @@ class Session:
         self.waiting = {}            # our client's open requests: key -> (method, tool, started)
         self.seen_client, self.seen_server, self.server_open = set(), set(), set()
         self.hidden = set()
+        self.queued = 0
         self.calls = self.denied = 0
         self.ending, self.gone = None, False
 
@@ -284,21 +286,37 @@ class Session:
         except OSError as e:
             sys.stderr.write("MCP log: %s\n" % e)
 
+    def enqueue(self, q, data):
+        with self.state:
+            self.queued += len(data)
+            over = self.queued > QUEUED_MAX
+        if over:
+            self.end("overflow")
+        else:
+            q.put(data)
+
+    def written(self, data):
+        with self.state:
+            self.queued -= len(data)
+
     def send_client(self, data):
-        self.to_client.put(data)
+        self.enqueue(self.to_client, data)
 
     def send_child(self, data):
-        self.to_child.put(data)
+        self.enqueue(self.to_child, data)
 
     def write_client(self):
         out = sys.stdout.buffer
         for data in iter(self.to_client.get, None):
+            if self.ending:   # nothing more goes out of a session that was revoked
+                return
             try:
                 out.write(data)
                 out.flush()
             except (OSError, ValueError):
                 self.client_gone()
                 return
+            self.written(data)
 
     def write_child(self):
         f = self.child.stdin
@@ -308,6 +326,7 @@ class Session:
                     break
                 f.write(data)
                 f.flush()
+                self.written(data)
         except (OSError, ValueError):
             pass
         with contextlib.suppress(OSError, ValueError):
@@ -559,7 +578,9 @@ def serve(a):
     code = child.wait()
     reader.join(3)   # a descendant may keep the pipe open
     s.to_client.put(None)
-    client_writer.join(1 if s.ending or s.gone else DRAIN_S)   # a revoked session owes the client nothing more
+    drain_until = time.monotonic() + DRAIN_S
+    while client_writer.is_alive() and not s.ending and not s.gone and time.monotonic() < drain_until:
+        client_writer.join(0.2)   # a revoked session owes the client nothing more
     code = code if code >= 0 else 128 - code
     s.log_soft("session_end", code=code, calls=s.calls, denied=s.denied, reason=s.ending or ("client" if s.gone else "server"))
     sys.stderr.flush()
