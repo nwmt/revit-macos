@@ -23,6 +23,7 @@ import hmac
 import io
 import json
 import os
+import queue
 import re
 import secrets
 import shlex
@@ -40,6 +41,7 @@ TOKEN_ENV = "REVIT_MCP_TOKEN"
 WATCH_S = 2          # how often a live session looks whether its token is still there
 EOF_GRACE_S = 5      # after the client is gone, how long the server may take to leave by itself before TERM
 ARGS_KEPT = 4096     # characters of a call's arguments kept in the log
+DRAIN_S = 30         # after the server ended, how long a slow client gets to take what is already here
 AUDIT_MAX = 10 << 20
 AUDIT_KEEP = 3
 
@@ -128,7 +130,8 @@ def load_tokens(data):
         return []
     except (OSError, ValueError) as e:
         raise GateError("Cannot read the MCP tokens: %s" % e)
-    if not isinstance(rows, list) or not all(isinstance(r, dict) and isinstance(r.get("sha256"), str) for r in rows):
+    if not isinstance(rows, list) or not all(isinstance(r, dict) and re.fullmatch(r"[0-9a-f]{64}", str(r.get("sha256")))
+                                             for r in rows):
         raise GateError("The file of MCP tokens is damaged.")
     return rows
 
@@ -260,9 +263,8 @@ class Session:
         self.a, self.audit, self.sha, self.child, self.id = a, audit, sha, child, session
         self.tier, self.server = record["tier"], a.server
         self.state = threading.Lock()
-        self.to_client = threading.Lock()
-        self.to_child = threading.Lock()
-        self.child_in = child.stdin
+        self.to_client, self.to_child = queue.Queue(), queue.Queue()   # each drained by its own writer: a pipe that is
+        # full never stops a pump, and ending never waits for a write
         self.waiting = {}            # our client's open requests: key -> (method, tool, started)
         self.seen_client, self.seen_server, self.server_open = set(), set(), set()
         self.hidden = set()
@@ -281,30 +283,31 @@ class Session:
             sys.stderr.write("MCP log: %s\n" % e)
 
     def send_client(self, data):
-        with self.to_client:
+        self.to_client.put(data)
+
+    def send_child(self, data):
+        self.to_child.put(data)
+
+    def write_client(self):
+        out = sys.stdout.buffer
+        for data in iter(self.to_client.get, None):
             try:
-                out = sys.stdout.buffer
                 out.write(data)
                 out.flush()
             except (OSError, ValueError):
                 self.client_gone()
-
-    def send_child(self, data):
-        with self.to_child:
-            if self.child_in is None:
                 return
-            try:
-                self.child_in.write(data)
-                self.child_in.flush()
-            except (OSError, ValueError):
-                pass
 
-    def close_child_stdin(self):
-        with self.to_child:
-            f, self.child_in = self.child_in, None
-        if f is not None:
-            with contextlib.suppress(OSError, ValueError):
-                f.close()
+    def write_child(self):
+        f = self.child.stdin
+        try:
+            for data in iter(self.to_child.get, None):
+                f.write(data)
+                f.flush()
+        except (OSError, ValueError):
+            pass
+        with contextlib.suppress(OSError, ValueError):
+            f.close()
 
     def term_child(self):
         if self.child.poll() is None:
@@ -317,16 +320,18 @@ class Session:
             if self.gone:
                 return
             self.gone = True
-        self.close_child_stdin()
-        threading.Timer(EOF_GRACE_S, self.term_child).start()
+        self.to_child.put(None)
+        t = threading.Timer(EOF_GRACE_S, self.term_child)
+        t.daemon = True
+        t.start()
 
     def end(self, reason):
         with self.state:
             if self.ending:
                 return
             self.ending = reason
-        self.close_child_stdin()
         self.term_child()
+        self.to_child.put(None)
 
     def token_good(self):
         try:
@@ -528,17 +533,29 @@ def serve(a):
         raise GateError("Cannot write the log of MCP calls, so no connection: %s" % e)
     if a.server == "pyrevit" and record["tier"] == "code" and a.policy == "auto":
         sys.stderr.write("pyRevit applies changes without asking (policy auto). Choose Ask in pyRevit's settings.\n")
+    early = []   # a signal before the child exists goes to it as soon as it does
+    child = None
+    def forward(n, _frame):
+        if child is None:
+            early.append(n)
+        elif child.poll() is None:
+            child.send_signal(n)
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, forward)
     child = subprocess.Popen([script, a.year, a.bottle, write, a.server], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                              start_new_session=True)
+    for n in early:
+        forward(n, None)
     s = Session(a, audit, sha, record, child, session)
-    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
-        signal.signal(sig, lambda n, _f: child.poll() is None and child.send_signal(n))
-    threading.Thread(target=s.pump_client, daemon=True).start()
     reader = threading.Thread(target=s.pump_server, daemon=True)
-    reader.start()
-    threading.Thread(target=s.watch, daemon=True).start()
+    client_writer = threading.Thread(target=s.write_client, daemon=True)
+    for t in (threading.Thread(target=s.pump_client, daemon=True), reader, client_writer,
+              threading.Thread(target=s.write_child, daemon=True), threading.Thread(target=s.watch, daemon=True)):
+        t.start()
     code = child.wait()
-    reader.join(1)   # a descendant may keep the pipe open
+    reader.join(3)   # a descendant may keep the pipe open
+    s.to_client.put(None)
+    client_writer.join(1 if s.ending or s.gone else DRAIN_S)   # a revoked session owes the client nothing more
     code = code if code >= 0 else 128 - code
     s.log_soft("session_end", code=code, calls=s.calls, denied=s.denied, reason=s.ending or ("client" if s.gone else "server"))
     sys.stderr.flush()

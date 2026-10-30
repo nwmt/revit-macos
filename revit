@@ -153,6 +153,10 @@ fi
 [ -z "$TARGETS" ] || [[ "$TARGETS" =~ ^[0-9]+:[0-9]+(,[0-9]+:[0-9]+)*$ ]] || FLAG_ERR="--targets takes <pid>:<start>,… as cleanup --dry-run --json lists them."
 if [ "$CMD" = mcp ]; then   # stdout belongs to the MCP client: no events, no more words than year and bottle
   [ ${#POS[@]} -le 3 ] || FLAG_ERR="Too many arguments. Example: ./revit mcp 2027 [bottle]"
+  case "$MCPSUB" in
+    tokens) [ ${#POS[@]} = 1 ] || FLAG_ERR="Too many arguments. Example: ./revit mcp tokens" ;;
+    revoke) [ ${#POS[@]} -le 2 ] || FLAG_ERR="Too many arguments. Example: ./revit mcp revoke <name>" ;;
+  esac
   [ -z "$EVENTS_DIR" ] || FLAG_ERR="--events is not for ./revit mcp."
   case "${SERVER:=autodesk}" in
     autodesk|pyrevit|python) ;;

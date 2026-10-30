@@ -1243,6 +1243,8 @@ mcp_world; (cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" script -q /d
 check "mcp token in a terminal: shown once, with the command to connect" eval 'grep -qF "tier write" "$T/tok" && grep -qF "claude mcp add revit-2027 -e REVIT_MCP_TOKEN=" "$T/tok" && grep -q "\"name\": \"mine\"" "$R/mcp/tokens.json"'
 cp "$R/mcp/tokens.json" "$T/keep"; mcp_cli() { (cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" /bin/bash "$R/revit" "$@" </dev/null >"$T/mcp-out" 2>"$T/mcp-err"); RC=$?; OUT="$(cat "$T/mcp-out")"; ERR="$(cat "$T/mcp-err")"; }
 mcp_cli mcp tokens; check "mcp tokens lists without secrets" eval 'grep -q "^mine" <<<"$OUT" && ! grep -q sha256 <<<"$OUT"'
+mcp_cli mcp tokens extra; check "mcp tokens: no extra arguments" eval '[ "$RC" != 0 ] && grep -q "Too many arguments" <<<"$ERR"'
+mcp_cli mcp revoke mine other; check "mcp revoke: no extra arguments, nothing revoked" eval '[ "$RC" != 0 ] && grep -q "\"name\": \"mine\"" "$R/mcp/tokens.json"'
 mcp_cli mcp revoke mine; check "mcp revoke" eval '[ "$RC" = 0 ] && grep -qF "Token mine is revoked" <<<"$OUT"'
 (cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" script -q /dev/null /bin/bash "$R/revit" mcp token 2027 --tier code </dev/null >"$T/tok" 2>&1)
 check "mcp token: Write-Tools have no code tier" grep -qF "Autodesk's Write-Tools have no code tier" "$T/tok"

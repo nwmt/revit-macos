@@ -17,6 +17,14 @@ def out(m):
     sys.stdout.write(json.dumps(m) + "\\n"); sys.stdout.flush()
 if mode == "noise":
     print("banner of a server"); sys.stdout.flush()
+if mode == "flood":   # writes before it reads: both pipes fill up
+    out({"jsonrpc": "2.0", "id": 900, "method": "sampling/createMessage", "params": {}})
+    for n in range(40):
+        out({"jsonrpc": "2.0", "method": "notifications/message", "params": {"data": "z" * (1 << 20)}})
+if mode == "answer-and-leave":
+    m = json.loads(sys.stdin.readline())
+    out({"jsonrpc": "2.0", "id": m["id"], "result": {"blob": "q" * (5 << 20)}})
+    sys.exit(0)
 if mode == "ignore-term":
     signal.signal(signal.SIGTERM, lambda *a: None)
 for line in sys.stdin:
@@ -131,7 +139,7 @@ class Tokens(World):
         self.assertEqual(rows[0]["sha256"], gate.token_sha(t2))
 
     def test_refusals(self):
-        for bad in ("[", '{"a": 1}', '[{"name": "x"}]'):
+        for bad in ("[", '{"a": 1}', '[{"name": "x"}]', '[{"sha256": "\\u00e9"}]'):
             open(os.path.join(gate.mcp_dir(self.data), "tokens.json"), "w").write(bad)
             with self.assertRaises(gate.GateError):
                 gate.load_tokens(self.data)
@@ -349,6 +357,26 @@ class Protocol(World):
         p = self.start(self.token("write"), mode="big", tools="query_model")
         self.init(p)
         self.assertGreater(len(self.call(p, 2, "query_model")["result"]["content"][0]["text"]), 5 << 20 - 1)
+
+    def test_full_pipes_both_ways_do_not_block(self):
+        p = self.start(self.token(), mode="flood")
+        self.send(p, {"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {"pad": "p" * (3 << 20)}})
+        got = [self.recv(p, 30) for _ in range(41)]
+        self.assertEqual(got[-1]["id"], 1)
+
+    def test_revoking_does_not_wait_for_a_full_pipe(self):
+        p = self.start(self.token(name="n"), mode="flood")
+        self.send(p, {"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {"pad": "p" * (3 << 20)}})
+        time.sleep(0.5)
+        gate.save_tokens(self.data, [])
+        self.assertEqual(p.wait(gate.WATCH_S + 8), 1)
+
+    def test_a_late_reader_gets_the_whole_answer(self):
+        p = self.start(self.token(), mode="answer-and-leave")
+        self.send(p, {"jsonrpc": "2.0", "id": 1, "method": "ping"})
+        time.sleep(4)
+        self.assertEqual(len(self.recv(p, 20)["result"]["blob"]), 5 << 20)
+        self.assertEqual(p.wait(20), 0)
 
     def test_no_log_no_call(self):
         p = self.start(self.token())
