@@ -1640,7 +1640,7 @@ mkdir -p "$T/lie"; cat > "$T/lie/cp" <<EOF
 perl -e 'open(my \$f, "<", \$ARGV[0]) or die; sleep 20' "$BOTTLES/rvt2024-a/cxbottle.conf" "C:\\\\Program Files\\\\Autodesk\\\\Revit 2024\\\\Revit.exe" </dev/null >/dev/null 2>&1 7>&- 9>&- &
 echo \$! > "$T/lie/pid"; sleep 1; exit \$rc
 EOF
-POINT_ENV=(PATH="$T/lie:$PATH"); run "" rollback 2024 --yes; POINT_ENV=(); kill "$(cat "$T/lie/pid")" 2>/dev/null
+chmod +x "$T/lie/cp"; POINT_ENV=(PATH="$T/lie:$PATH"); run "" rollback 2024 --yes; POINT_ENV=(); kill "$(cat "$T/lie/pid")" 2>/dev/null
 expect "Revit started during the copy stops the rollback" 1 "Save your work and quit Revit"
 check "started during the copy: not killed, bottle stays" eval 'not_called "wineserver -k" && grep -qx current "$BOTTLES/rvt2024-a/mark"'
 check "started during the copy: the clone is gone" eval '[ "$(pt_ids rvt2024-a)" = "20260101-000000 " ]'
