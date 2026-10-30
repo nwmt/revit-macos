@@ -114,6 +114,7 @@ final class TapThread: @unchecked Sendable {
     /// Called by the tap: true = let the event through.
     fileprivate func handle(_ type: CGEventType, _ e: CGEvent) -> Bool {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            log.line(type == .tapDisabledByTimeout ? "tap: too slow for macOS" : "tap: off by user input")
             if let t = tap { CGEvent.tapEnable(tap: t, enable: true) }
             _ = feed(.cancel(.tapDisabled))
             onDisabled?()
@@ -160,7 +161,14 @@ final class TapThread: @unchecked Sendable {
         let buttons = Decider.userButtonsDown(left: CGEventSource.buttonState(s, button: .left),
                                               right: CGEventSource.buttonState(s, button: .right),
                                               center: CGEventSource.buttonState(s, button: .center), ownCenterDown: ownDown)
-        return Decider.decide(at: p, windows: buttons ? [] : windows(), buttonsDown: buttons, context: context, log: log)
+        return Decider.decide(at: p, windows: buttons ? [] : windows(), buttonsDown: buttons, context: context, log: log,
+                              displays: buttons ? [] : displays())
+    }
+
+    private func displays() -> [CGRect] {
+        var ids = [CGDirectDisplayID](repeating: 0, count: 16), n: UInt32 = 0
+        guard CGGetActiveDisplayList(16, &ids, &n) == .success else { return [] }
+        return ids.prefix(Int(n)).map { CGDisplayBounds($0) }
     }
 
     /// The windows on screen from front to back, all layers (spec §3).
@@ -170,7 +178,8 @@ final class TapThread: @unchecked Sendable {
             guard let pid = w[kCGWindowOwnerPID as String] as? Int32, let b = w[kCGWindowBounds as String] as? NSDictionary,
                   let r = CGRect(dictionaryRepresentation: b as CFDictionary) else { return nil }
             return WinInfo(pid: pid, bounds: r, alpha: w[kCGWindowAlpha as String] as? Double ?? 1,
-                           layer: w[kCGWindowLayer as String] as? Int ?? 0)
+                           layer: w[kCGWindowLayer as String] as? Int ?? 0,
+                           owner: w[kCGWindowOwnerName as String] as? String ?? "")
         }
     }
 

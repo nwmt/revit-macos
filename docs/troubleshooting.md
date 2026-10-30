@@ -296,6 +296,12 @@ Check that **Trackpad in Revit** is on in the app's Settings and that its line s
 System Settings → Privacy & Security → Device Control and Data Access, turn on **<app name> Trackpad**. The gestures
 work in Revit 2020's and 2027's views; in other years and in schedules, lists and Properties scrolling stays scrolling.
 
+### Gestures stopped, and Revit works as usual
+
+`logs/trackpad.log` in the app's data folder says why a gesture was passed on. `pass: <app>'s window over the point`:
+another app has a window there, often an invisible one. A stuck screenshot tool does that:
+`killall screencaptureui` (it starts again by itself; do not run it during a screen recording).
+
 ### The trackpad stopped working after an update
 
 macOS ties the permission to the helper, and a new helper needs it again; the old entry stays in the list but does

@@ -7,12 +7,23 @@ import Foundation
 public final class TrackpadLog: Sendable {
     let url: URL, limit: Int
     private let queue = DispatchQueue(label: "trackpad.log")
+    nonisolated(unsafe) private var lastChange = ""   // only on the queue
 
     public init(url: URL, limit: Int = 1_000_000) { self.url = url; self.limit = limit }
 
     public func line(_ s: String) {
         let now = Date()
         queue.async { self.append(now, s) }
+    }
+
+    /// A line that may come with every gesture: written only when it differs from the last one given this way.
+    public func lineOnChange(_ s: String) {
+        let now = Date()
+        queue.async {
+            guard s != self.lastChange else { return }
+            self.lastChange = s
+            self.append(now, s)
+        }
     }
 
     /// Waits until every line given so far is written (tests, and before the helper exits).

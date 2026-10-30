@@ -1,6 +1,7 @@
 // The decision at the start of a gesture (spec §6), on the event tap's thread: no mouse button down, the Mac window
 // under the point is a known Revit's, its bottle's hittest is ready and answers in time, and the window there is a
-// view (ViewRule). The log gets the class of the window and the decision: never its title, never the point.
+// view (ViewRule). The log gets the class of the window and the decision: never its title, never the point. A pass
+// before hittest is asked gets a line too, once until the reason changes: a gesture that does nothing must say why.
 import CoreGraphics
 import Foundation
 import TrackpadCore
@@ -25,10 +26,18 @@ public enum Decider {
     }
 
     public static func decide(at p: CGPoint, windows: [WinInfo], buttonsDown: Bool, context: DecideContext,
-                              log: TrackpadLog? = nil) -> Target? {
-        guard !buttonsDown else { return nil }
-        guard let pid = WindowPick.target(at: p, frontToBack: windows, revitPids: Set(context.revits.keys)),
-              let r = context.revits[pid] else { return nil }
+                              log: TrackpadLog? = nil, displays: [CGRect] = []) -> Target? {
+        guard !buttonsDown else { log?.lineOnChange("pass: a mouse button is held"); return nil }
+        let pids = Set(context.revits.keys)
+        guard let w = WindowPick.top(at: p, frontToBack: windows, revitPids: pids, displays: displays) else {
+            log?.lineOnChange("pass: no window there")
+            return nil
+        }
+        guard let r = context.revits[w.pid] else {
+            log?.lineOnChange("pass: \(w.owner.isEmpty ? "another app" : w.owner)'s window over the point (layer \(w.layer))")
+            return nil
+        }
+        let pid = w.pid
         guard case .ready(let s) = r.client.status else { log?.line("pass: \(r.bottle) not ready"); return nil }
         guard let reply = r.client.query(DisplayMap.toWine(p, scale: s)) else { log?.line("pass: \(r.bottle) no answer"); return nil }
         let view = ViewRule.isView(year: r.year, reply: reply)

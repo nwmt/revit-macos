@@ -105,6 +105,22 @@ import TrackpadState
     #expect(Decider.decide(at: CGPoint(x: 100, y: 50), windows: wins, buttonsDown: false, context: ctx) == nil)
 }
 
+@MainActor @Test func aPassBeforeHittestSaysWhyOnce() throws {
+    let dir = tempDir(), url = dir.appending(path: "t.log"), log = TrackpadLog(url: url)
+    let a = FakeClient("rvt2027-a", Journal()); a.status = .ready(scale: 2)
+    let ctx = DecideContext(revits: [500: RevitTarget(bottle: "rvt2027-a", year: 2027, client: a)])
+    let revit = WinInfo(pid: 500, bounds: CGRect(x: 0, y: 0, width: 500, height: 500), alpha: 1)
+    let other = WinInfo(pid: 77, bounds: CGRect(x: 0, y: 0, width: 500, height: 500), alpha: 1, layer: 3, owner: "Panel")
+    let p = CGPoint(x: 100, y: 50)
+    for _ in 0..<3 { #expect(Decider.decide(at: p, windows: [other, revit], buttonsDown: false, context: ctx, log: log) == nil) }
+    #expect(Decider.decide(at: p, windows: [revit], buttonsDown: true, context: ctx, log: log) == nil)
+    #expect(Decider.decide(at: CGPoint(x: 900, y: 50), windows: [revit], buttonsDown: false, context: ctx, log: log) == nil)
+    log.flush()
+    let lines = try String(contentsOf: url, encoding: .utf8).split(separator: "\n").map { $0.split(separator: " ", maxSplits: 1)[1] }
+    #expect(lines == ["pass: Panel's window over the point (layer 3)", "pass: a mouse button is held", "pass: no window there"])
+    #expect(a.asked.isEmpty)
+}
+
 @MainActor @Test func twoBottlesTwoClients() async {
     let w = World(); let c = w.coordinator()
     w.ws.pids = [500, 600]
