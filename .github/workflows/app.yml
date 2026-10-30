@@ -26,6 +26,13 @@ jobs:
         run: command -v 7zz >/dev/null || brew install sevenzip
       - name: Bundle tests (/bin/bash 3.2)
         run: tests/app.sh
+      - name: Toolchain (the trackpad helper's CDHash depends on it)
+        run: |
+          ls -d /Applications/Xcode*
+          xcode-select -p
+          xcodebuild -version
+          swift --version
+          xcrun --show-sdk-version
       - name: Version
         run: |
           if [ "$GITHUB_REF_TYPE" = tag ]; then echo "VER=${GITHUB_REF_NAME#app-v}" >> "$GITHUB_ENV"; else echo "VER=0.0.0" >> "$GITHUB_ENV"; fi
