@@ -537,11 +537,49 @@ def warm_roots(b, folder, where="<year>"):
     return [(base, start)]
 
 
+class Beat:
+    """The walk's progress for ./revit cleanup (tools/leftovers.py tells a stuck walk by it): the file
+    <bottle>/revit-macos/gdrive-warm-<pid> with its pid, start and the time of its last progress (a folder or an entry
+    read), rewritten at most every `every` s, deleted at the end. Nothing when that folder is missing or a link."""
+    def __init__(self, b, every=5.0):
+        d = os.path.join(b, "revit-macos")
+        self.path = os.path.join(d, f"gdrive-warm-{os.getpid()}") if os.path.isdir(d) and not os.path.islink(d) else None
+        self.started = self.progress = time.time()
+        self.every, self.written = every, 0.0
+        self.write()
+
+    def tick(self):
+        self.progress = time.time()
+        if self.progress - self.written >= self.every:
+            self.write()
+
+    def write(self):
+        if self.path is None:
+            return
+        self.written = time.time()
+        tmp = self.path + ".new"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"pid": os.getpid(), "started": self.started, "progress": self.progress}, f)
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
+
+    def end(self):
+        for x in (self.path, self.path and self.path + ".new"):
+            try:
+                if x:
+                    os.unlink(x)
+            except OSError:
+                pass
+
+
 def warm(b, folder, where="<year>", out=sys.stdout, every=5.0):
     roots = warm_roots(b, folder, where)
     listed = cloud_only = failed = timeouts = 0
     last = time.monotonic()
     queue = [start for _, start in roots]
+    beat = Beat(b, every)
     try:
         while queue:
             d = queue.pop(0)
@@ -550,10 +588,12 @@ def warm(b, folder, where="<year>", out=sys.stdout, every=5.0):
                     cloud_only += 1
                 with os.scandir(d) as it:
                     for e in it:
+                        beat.tick()
                         if e.name not in SKIP and e.is_dir(follow_symlinks=False):
                             queue.append(e.path)
                 listed += 1
                 timeouts = 0
+                beat.tick()
             except OSError as e:
                 failed += 1
                 timeouts = timeouts + 1 if e.errno == errno.ETIMEDOUT else 0
@@ -567,6 +607,8 @@ def warm(b, folder, where="<year>", out=sys.stdout, every=5.0):
     except KeyboardInterrupt:
         print(f"stopped: {listed} folders listed, {cloud_only} were cloud-only", file=out, flush=True)
         return 130
+    finally:
+        beat.end()
     print(f"{listed} folders listed, {cloud_only} were cloud-only", file=out)
     if failed:
         print(f"{failed} folders could not be listed", file=out)

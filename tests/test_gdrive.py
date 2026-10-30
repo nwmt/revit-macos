@@ -639,6 +639,37 @@ class Warm(Fake):
         self.assertEqual(r.returncode, 1)
         self.assertIn("G: off", r.stderr)
 
+    def test_heartbeat_while_it_walks_and_gone_after(self):
+        state = os.path.join(self.b, "revit-macos")
+        os.makedirs(state)
+        beat = os.path.join(state, "gdrive-warm-%d" % os.getpid())
+        real, seen, acc = g.os.scandir, [], os.path.realpath(self.a)
+
+        def fake(p):   # the heartbeat as cleanup would read it, at each listing of Google Drive
+            if str(p).startswith(acc):
+                with open(beat, encoding="utf-8") as f:
+                    seen.append(json.load(f))
+            return real(p)
+        g.os.scandir = fake
+        try:
+            code = g.warm(self.b, "G:\\Shared drives\\Team\\Work", "2027", out=io.StringIO(), every=0)
+        finally:
+            g.os.scandir = real
+        self.assertEqual(code, 0)
+        self.assertEqual(len(seen), 5)
+        self.assertTrue(all(d["pid"] == os.getpid() for d in seen))
+        self.assertTrue(seen[0]["started"] <= seen[0]["progress"] <= seen[-1]["progress"])
+        self.assertEqual(os.listdir(state), [])   # deleted at the end
+
+    def test_no_heartbeat_without_its_folder_or_through_a_link(self):
+        r = self.warm("G:\\Shared drives\\Team\\Work")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.b, "revit-macos")))
+        elsewhere = os.path.join(self.tmp.name, "elsewhere")
+        os.makedirs(elsewhere)
+        os.symlink(elsewhere, os.path.join(self.b, "revit-macos"))
+        self.assertEqual(g.Beat(self.b).path, None)
+
     def test_stops_when_google_drive_does_not_answer(self):
         real = g.os.scandir
         calls = []
