@@ -397,14 +397,17 @@ wait_stopped() { # $1 = bottle path, $2 = seconds: 0 once nothing runs in it
     sleep 1
   done
 }
-COPY_WHY=""   # why bottle_copy_at_rest failed: busy (CrossOver's lock), active, copy, active_after
-bottle_copy_at_rest() { # $1 = bottle path, $2 = an existing folder: an APFS clone of the bottle's contents in it, under
-  # CrossOver's lock, so nothing starts in the bottle meanwhile and it is at rest before and after. 1 with COPY_WHY
+COPY_WHY=""   # why bottle_copy_at_rest failed: busy (CrossOver's lock), prepare, active, copy, active_after
+bottle_copy_at_rest() { # $1 = bottle path, $2 = an existing folder, rest = a command to run first, under the lock: an APFS
+  # clone of the bottle's contents in that folder, under CrossOver's lock, so nothing starts in the bottle meanwhile and it
+  # is at rest before and after. 1 with COPY_WHY
+  local src="$1" dst="$2"; shift 2
   COPY_WHY=""
-  cx_bottle_lock "$1" || { COPY_WHY=busy; return 1; }
-  if [ "$(bottle_activity "$1")" != stopped ]; then COPY_WHY=active; cx_bottle_unlock; return 1; fi
-  run_child cp -cR "$1/" "$2" || COPY_WHY=copy
-  [ -n "$COPY_WHY" ] || [ "$(bottle_activity "$1")" = stopped ] || COPY_WHY=active_after
+  cx_bottle_lock "$src" || { COPY_WHY=busy; return 1; }
+  if [ $# -gt 0 ] && ! "$@"; then COPY_WHY=prepare; cx_bottle_unlock; return 1; fi
+  if [ "$(bottle_activity "$src")" != stopped ]; then COPY_WHY=active; cx_bottle_unlock; return 1; fi
+  run_child cp -cR "$src/" "$dst" || COPY_WHY=copy
+  [ -n "$COPY_WHY" ] || [ "$(bottle_activity "$src")" = stopped ] || COPY_WHY=active_after
   cx_bottle_unlock
   [ -z "$COPY_WHY" ]
 }

@@ -1585,6 +1585,21 @@ echo apfs > "$T/fstype"; run_racing 'echo hfs > "$T/fstype"' 2024 rebuild 2024
 expect "a promised point that became impossible stops the rebuild" 1 "Nothing was deleted"
 check "stopped before install.sh and wineserver" eval 'not_called "install.sh" && not_called "wineserver"'
 unfake_fs
+reset; fake_fs; pt_bottle rvt2024-a 2024
+cat > "$T/bin/diskutil" <<EOF
+#!/bin/bash
+n=\$(cat "$T/du-calls" 2>/dev/null || echo 0); echo \$((n + 1)) > "$T/du-calls"
+if [ "\$n" = 1 ]; then   # the second look, under the lock: Revit starts right now
+  perl -e 'open(my \$f, "<", \$ARGV[0]) or die; sleep 20' "$BOTTLES/rvt2024-a/cxbottle.conf" "C:\\\\Program Files\\\\Autodesk\\\\Revit 2024\\\\Revit.exe" </dev/null >/dev/null 2>&1 7>&- 9>&- &
+  echo \$! > "$T/rv-pid"; sleep 1
+fi
+printf '<plist version="1.0"><dict><key>FilesystemType</key><string>apfs</string></dict></plist>'
+EOF
+run "" rebuild 2024 --yes; kill "$(cat "$T/rv-pid")" 2>/dev/null; unfake_fs
+expect "Revit started after the check stops the rebuild" 1 "Nothing was deleted"
+check "started after the check: not killed, no install, no point" eval 'not_called "wineserver -k" && not_called "install.sh" && [ -z "$(pt_ids rvt2024-a)" ]'
+reset; pt_bottle rvt2024-a 2024; POINT_ENV=(TZ=Pacific/Kiritimati); run "" rebuild 2024 --yes; POINT_ENV=()
+check "a point's id is in UTC, in any time zone" eval '[ "$(pt_ids rvt2024-a | cut -c1-11)" = "$(date -u +%Y%m%d-%H)" ]'
 reset; bottle rvt2024-a 2024 2024; run "2024" rebuild 2024; expect "no Revit in the bottle: no point needed" 0 ""
 check "no Revit: none made" eval '[ -z "$(pt_ids rvt2024-a)" ]'
 reset; pt_bottle rvt2024-a 2024; mkdir -p "$PR/rvt2024-a/20260101-000000.partial"; run "" rebuild 2024 --yes --no-point

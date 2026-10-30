@@ -1,6 +1,7 @@
 # Restore points of ./revit: an exact APFS clone of a bottle, kept beside the Bottles folder, that ./revit rollback brings
 # back to the same name. Wine never runs in one, so its BottleID, links and menu records stay as they are. Sourced by
-# ./revit after common.sh. <root>/<bottle>/<id>/{point.conf,bottle/}; <id> is YYYYMMDD-HHMMSS. In <root>/<bottle>/ also
+# ./revit after common.sh. <root>/<bottle>/<id>/{point.conf,bottle/}; <id> is YYYYMMDD-HHMMSS in UTC, so the newest sorts
+# first also across a change of the clocks. In <root>/<bottle>/ also
 # what a run cut short left: <id>.partial, restoring.<id>, replaced.<id>. A finished point appears and goes by one rename.
 # REVIT_FREE_GB, REVIT_SWAP_FAIL_AT: tests only.
 POINT_NEED_GB=25         # a new bottle (install.sh: space_for "$BOTTLES"): the point keeps the old one's space taken
@@ -65,18 +66,21 @@ point_why_not() { # $1 = bottle path, $2 = year: 0 when a point can be made now;
   [ "$free" -ge "$need" ] && return 0
   POINT_WHY="only $free GB free, and a rebuild that keeps the old bottle needs about $need GB"; POINT_NO_SPACE=1; return 1
 }
-point_take() { # $1 = bottle, $2 = year, $3 = bottle path: ends what runs in the bottle (the licensing services run for
-  # hours) and clones it; sets POINT_ID. 1 with POINT_WHY; nothing of it stays. Under the lock only
-  local dir id tmp b; dir="$(points_dir "$1")"; id="$(date +%Y%m%d-%H%M%S)"; tmp="$dir/$id.partial"
+point_quiet() { # $1 = bottle, $2 = year, $3 = bottle path, under CrossOver's lock: a Revit that started since the last check
+  # stops here and is not killed; then the rest (the licensing services run for hours) ends
+  ( bottle_guard must_exist "$2" "$1" ) || return 1
+  WINEPREFIX="$3" "$CX/bin/wineserver" -k 2>/dev/null </dev/null 7>&- 9>&-
+  wait_stopped "$3" 30
+}
+point_take() { # $1 = bottle, $2 = year, $3 = bottle path: ends what runs in the bottle and clones it; sets POINT_ID. 1 with
+  # POINT_WHY; nothing of it stays. Under the lock only
+  local dir id tmp b; dir="$(points_dir "$1")"; id="$(date -u +%Y%m%d-%H%M%S)"; tmp="$dir/$id.partial"
   [ ! -e "$dir/$id" ] || { POINT_WHY="a restore point of this second is there"; return 1; }
   mkdir -p "$tmp/bottle" || { POINT_WHY="cannot write to $(tilde "$dir")"; return 1; }
-  WINEPREFIX="$3" "$CX/bin/wineserver" -k 2>/dev/null </dev/null 7>&- 9>&-
-  if ! wait_stopped "$3" 30; then
-    POINT_WHY="programs still run in $1: quit them with ./revit stop $2$(bottle_sfx "$1" "$2")"; point_rm "$tmp"; return 1
-  fi
-  if ! bottle_copy_at_rest "$3" "$tmp/bottle"; then
+  if ! bottle_copy_at_rest "$3" "$tmp/bottle" point_quiet "$1" "$2" "$3"; then
     case "$COPY_WHY" in
       busy) POINT_WHY="CrossOver is busy with $1; try again in a minute" ;;
+      prepare) POINT_WHY="programs run in $1: quit them, then run ./revit stop $2$(bottle_sfx "$1" "$2")" ;;
       copy) POINT_WHY="copying the bottle failed" ;;
       *) POINT_WHY="programs started in $1 while it was copied" ;;
     esac
