@@ -153,7 +153,7 @@ Open Revit with a model and make a token. Reading a model needs Python, so most 
 ./revit mcp token 2027 --server pyrevit --tier code
 ```
 
-Then run the `claude mcp add` command it prints, or [make a bundle](#claude-desktop) for Claude Desktop (not tried yet).
+Then run the `claude mcp add` command it prints, or [make a bundle](#claude-desktop) for Claude Desktop.
 A `read` token gives the tools that run no code: context, element details, pictures of views.
 
 pyRevit's own setting still applies on top: with **Ask**, Revit asks before every change. With **Auto**, `./revit mcp`
