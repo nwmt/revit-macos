@@ -17,8 +17,11 @@ mv "$D/tools/sources" "$D/sources"   # published next to the DMG (GPL/LGPL sourc
 for s in "$(basename "$SEVENZIP_SRC_URL")" "$(basename "$CABEXTRACT_URL")"; do [ -f "$D/sources/$s" ] || die "no $s in $D/sources"; done
 
 echo ">> building the app" >&2
-swift build --package-path "$ROOT/app" -c release --arch arm64
-BP="$(swift build --package-path "$ROOT/app" -c release --arch arm64 --show-bin-path)"
+# -S: no debug map. It holds the object files' times, and the UUID is made from it: every build would get another
+# CDHash, and a new helper CDHash makes users grant the trackpad permission again
+SWIFT=(swift build --package-path "$ROOT/app" -c release --arch arm64 -Xlinker -S)
+"${SWIFT[@]}"
+BP="$("${SWIFT[@]}" --show-bin-path)"
 "$ROOT/app/make-bundle.sh" "$APP" "$BP/AppMain" "$D/tools" "$VER" "$BP/TrackpadHelper"
 "$ROOT/app/sign.sh" "$APP" "$APP_MIN_MACOS" "$D/inventory.txt"
 "$ROOT/app/check-helper-cdhash.sh" "$D/inventory.txt.cdhash" "$ROOT/app/app.conf"
