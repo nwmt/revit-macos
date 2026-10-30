@@ -136,3 +136,57 @@ public struct PlanItem: Decodable, Equatable, Sendable {
     public let label: String
     public let bytes: Int64?                // nil: not measured (apps)
 }
+
+/// cleanup --json (tools/leftovers.py): the programs left running, the bottles left alone because Revit runs there, and
+/// after a close the PIDs that ended and those still running.
+public struct CleanupReport: Decodable, Equatable, Sendable {
+    public let items: [Leftover]
+    public let skipped: [SkippedBottle]
+    public let closed: [Int32]?             // close only
+    public let left: [Int32]?               // close only
+
+    public init(items: [Leftover], skipped: [SkippedBottle], closed: [Int32]? = nil, left: [Int32]? = nil) {
+        self.items = items; self.skipped = skipped; self.closed = closed; self.left = left
+    }
+
+    /// The lines of Close all's confirmation: one per program, then the bottles left alone.
+    public var planLines: [String] {
+        items.map(\.line) + skipped.map { String(localized: "Left alone: \($0.bottle) (Revit runs there)") }
+    }
+}
+
+public struct Leftover: Decodable, Equatable, Sendable {
+    public let pid: Int32
+    public let kind: String                 // wine, helper, gdrive
+    public let reason: String               // no_wineserver, bottle_gone, idle, parent_gone, stuck
+    public let bottle: String?
+    public let name: String
+    public let cpu: Double
+    public let ageS: Int
+
+    public init(pid: Int32, kind: String, reason: String, bottle: String?, name: String, cpu: Double, ageS: Int) {
+        self.pid = pid; self.kind = kind; self.reason = reason; self.bottle = bottle; self.name = name; self.cpu = cpu
+        self.ageS = ageS
+    }
+
+    /// winedevice.exe · probe-drag (deleted) · 98% CPU · 8 h 37 min
+    public var line: String {
+        var w = [name]
+        if let b = bottle { w.append(reason == "bottle_gone" ? String(localized: "\(b) (deleted)") : b) }
+        w.append(String(localized: "\(Int(cpu.rounded()))% CPU"))
+        w.append(Self.age(ageS))
+        return w.joined(separator: " · ")
+    }
+
+    static func age(_ s: Int) -> String {
+        if s >= 86400 { return String(localized: "\(s / 86400) d \(s % 86400 / 3600) h") }
+        if s >= 3600 { return String(localized: "\(s / 3600) h \(s % 3600 / 60) min") }
+        return String(localized: "\(s / 60) min")
+    }
+}
+
+public struct SkippedBottle: Decodable, Equatable, Sendable {
+    public let bottle: String
+    public let why: String                  // revit_running
+    public init(bottle: String, why: String) { self.bottle = bottle; self.why = why }
+}

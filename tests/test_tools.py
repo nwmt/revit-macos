@@ -645,5 +645,73 @@ class PythonMcpRun(Tmp):
         self.assertEqual(p.stdout, '{"jsonrpc": "2.0"}\n')
 
 
+class LeftoversTest(Tmp):
+    """tools/leftovers.py: what is left over, from canned ps and lsof answers (no process is touched)."""
+    def setUp(self):
+        super().setUp()
+        self.L = load("leftovers")
+        self.b = self.path("Bottles")
+        os.makedirs(os.path.join(self.b, "live", "drive_c"))
+        os.environ.pop("REVIT_CLEANUP_ONLY", None)
+        os.environ["REVIT_CLEANUP_AGE"] = "60"; os.environ["REVIT_GDRIVE_STUCK_AGE"] = "1800"
+
+    def tearDown(self):
+        for k in ("REVIT_CLEANUP_AGE", "REVIT_GDRIVE_STUCK_AGE"):
+            os.environ.pop(k, None)
+        super().tearDown()
+
+    def proc(self, command, age=3600, comm="", ppid=1, cpu=0.0):
+        return {"ppid": ppid, "age": age, "cpu": cpu, "command": command, "comm": comm or command.split(" ")[0]}
+
+    def at(self, bottle):
+        return [("DIR", f"{self.b}/{bottle}/drive_c/windows")]
+
+    def classify(self, procs, files, **kw):
+        items, skipped = self.L.classify(procs, files, self.b, now_pid=1, **kw)
+        return {i["pid"]: i["reason"] for i in items}, skipped
+
+    def test_secs(self):
+        self.assertEqual(self.L.secs("05"), 5)
+        self.assertEqual(self.L.secs("08:37:59"), 31079)
+        self.assertEqual(self.L.secs("01-17:47:38"), 150458)
+
+    def test_no_wineserver_gone_bottle_and_idle(self):
+        procs = {10: self.proc("C:\\windows\\system32\\winedevice.exe"), 11: self.proc("C:\\windows\\system32\\services.exe"),
+                 12: self.proc("/cx/bin/wineserver", comm="/cx/bin/wineserver"), 13: self.proc("C:\\windows\\system32\\rpcss.exe")}
+        files = {10: self.at("probe-drag"), 11: self.at("live"), 12: self.at("live"), 13: self.at("live")}
+        self.assertEqual(self.classify(procs, files), ({10: "bottle_gone"}, []))
+        self.assertEqual(self.classify(procs, files, everything=True)[0], {10: "bottle_gone", 11: "idle", 12: "idle", 13: "idle"})
+        del procs[12]
+        self.assertEqual(self.classify(procs, files)[0], {10: "bottle_gone", 11: "no_wineserver", 13: "no_wineserver"})
+        self.assertEqual(self.classify(procs, files, bottle="probe-drag")[0], {10: "bottle_gone"})
+
+    def test_young_programs_and_revit_bottles_are_left_alone(self):
+        procs = {10: self.proc("C:\\windows\\system32\\winedevice.exe", age=5),
+                 20: self.proc("C:\\Program Files\\Autodesk\\Revit 2027\\Revit.exe"), 21: self.proc("C:\\windows\\system32\\services.exe")}
+        files = {10: self.at("live"), 20: self.at("probe-drag"), 21: self.at("probe-drag")}
+        self.assertEqual(self.classify(procs, files), ({}, [{"bottle": "probe-drag", "why": "revit_running"}]))
+
+    def test_programs_in_no_bottle_only_without_any_wineserver(self):
+        procs = {30: self.proc("C:\\windows\\system32\\conhost.exe --server 0x3c --headless"),
+                 31: self.proc("/cx/lib/wine/x86_64-windows/winewrapper.exe --run -- notepad"),
+                 32: self.proc("/usr/bin/vim notes-about-wine.txt")}
+        self.assertEqual(self.classify(procs, {})[0], {30: "no_wineserver", 31: "no_wineserver"})
+        procs[12] = self.proc("/cx/bin/wineserver", comm="/cx/bin/wineserver")
+        self.assertEqual(self.classify(procs, {12: self.at("live")})[0], {})
+
+    def test_helpers_and_a_stuck_warm(self):
+        tp = "/A/T.app/Contents/Helpers/T Trackpad.app/Contents/MacOS/T Trackpad --session S --parent 38111:Wed Oct 28 10:45:29 2026 --engine /e --data /d"
+        warm = f"/usr/bin/python3 -I /r/tools/gdrive.py warm {self.b}/live G:\\Shared 2027"
+        procs = {40: self.proc(tp), 41: self.proc("python3 /r/tools/python_mcp_run.py revit-macos-python-mcp /b x"),
+                 42: self.proc("python3 /r/tools/python_mcp_run.py revit-macos-python-mcp /b x", ppid=500), 43: self.proc(warm)}
+        alive = {38111: "Wed Oct 28 10:45:29 2026"}
+        got = self.classify(procs, {}, started=alive.get, stuck=lambda p: True)[0]
+        self.assertEqual(got, {41: "parent_gone", 43: "stuck"})
+        got = self.classify(procs, {}, started=lambda p: "Thu Oct 29 09:00:00 2026", stuck=lambda p: False)[0]
+        self.assertEqual(got, {40: "parent_gone", 41: "parent_gone"})   # pid 38111 was reused by another process
+        self.assertEqual(self.classify(procs, {}, bottle="live", started=alive.get, stuck=lambda p: True)[0], {43: "stuck"})
+        self.assertEqual(self.L.short(tp), "T Trackpad")
+
+
 if __name__ == "__main__":
     unittest.main()

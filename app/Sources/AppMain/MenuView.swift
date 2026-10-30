@@ -1,4 +1,4 @@
-// The menu (spec §3): one submenu per Revit bottle, the activity line, Add Revit version, Settings, Help, Quit.
+// The menu (spec §3): one submenu per Revit bottle, the activity line, Add Revit version, Close all, Settings, Help, Quit.
 // Items that change something are off while the engine is busy.
 import AppCore
 import AppKit
@@ -24,6 +24,7 @@ struct MenuView: View {
             Divider()
         }
         Button("Add Revit version…") { env.router.open(.wizard) }.disabled(!m.changesEnabled)
+        Button("Close all…") { Task { await Confirm.closeAll(app: app) } }.disabled(!m.changesEnabled)
         Divider()
         Button("Settings…") { env.router.open(.settings) }
         Button("Help") { if !env.repo.isEmpty { NSWorkspace.shared.open(AppLinks.readme(repo: env.repo)) } }
@@ -36,7 +37,7 @@ struct MenuView: View {
         if let w = app.watched, w.phase == .running, w.state.end == nil,
            !Confirm.ask(String(localized: "Quit \(env.name)?"), String(localized: "The task goes on in the background."),
                         button: String(localized: "Quit"), destructive: false) { return }
-        NSApplication.shared.terminate(nil)
+        Task { await app.sweep(notify: false); NSApplication.shared.terminate(nil) }   // what was left running goes too
     }
 }
 

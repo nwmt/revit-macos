@@ -46,6 +46,7 @@ func started(_ pid: Int32) -> String? {
     var coordinator: HelperCoordinator!
     var timers: [Timer] = []
     var term: DispatchSourceSignal?
+    var parentExit: DispatchSourceProcess?
     nonisolated(unsafe) static weak var current: Helper?
 
     func applicationDidFinishLaunching(_ n: Notification) {
@@ -95,6 +96,15 @@ func started(_ pid: Int32) -> String? {
                 await h.coordinator.checkPermission()
             }
         })
+        // the app's end, at once and for that process only (a pid reused later fires nothing); the 2 s check above is
+        // the fallback. A shutdown that hangs (the tap) must not keep the helper alive without its app: exit after 5 s
+        let pe = DispatchSource.makeProcessSource(identifier: args.parentPid, eventMask: .exit, queue: .main)
+        pe.setEventHandler {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { exit(0) }
+            Task { @MainActor in await Helper.current?.coordinator.shutdown(reason: "the app is gone") }
+        }
+        pe.resume(); parentExit = pe
+        if kill(args.parentPid, 0) != 0 { exit(0) }   // it ended between the check above and the watch
         signal(SIGTERM, SIG_IGN)
         let s = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
         s.setEventHandler { Task { @MainActor in await Helper.current?.coordinator.shutdown(reason: "TERM") } }

@@ -256,6 +256,76 @@ reset; rm -rf "$CXF"; bottle rvt2024-a 2024 2024; run "" stop 2024; expect "stop
 reset; bottle rvt2024-a 2024 2024; fake_lock "install.sh 2024 rvt2024-a"; run "" stop 2024
 expect "stop refuses while another task runs" 1 "Another task is running: install.sh 2024 rvt2024-a."
 check "busy: nothing stopped" not_called "wineserver"
+# ---- cleanup: programs left running (tools/leftovers.py); only the sandbox's fakes count (REVIT_CLEANUP_ONLY) ----
+cleanup() { REVIT_CLEANUP_ONLY="$T" REVIT_CLEANUP_AGE="${AGE:-0}" REVIT_GDRIVE_STUCK_AGE=0 REVIT_GDRIVE_SAMPLE=0.5 run "" cleanup "$@"; }
+fake_named() { # $1 = folder to run in, $2 = the process's name (argv[0]), rest = files it holds open: its PID in LEFT
+  local dir="$1" name="$2"; shift 2
+  (cd "$dir" && export RDY && exec -a "$name" perl -e '$SIG{TERM} = "IGNORE"; my @f; for (@ARGV) { open(my $f, "<", $_) or die; push @f, $f }
+    open(my $r, ">", $ENV{RDY}) and close $r; sleep 60' "$@") &
+  LEFT=$!; PIDS="$PIDS $LEFT"; fake_ready
+}
+fake_server() { # $1 = bottle: its wineserver alone (the background services' bottle without Revit); its PID in SRVP
+  touch "$BOTTLES/$1/drive_c/srv.tmp"
+  RDY="$RDY" "$SRV" -e 'open(my $f, "<", $ARGV[0]) or die; open(my $r, ">", $ENV{RDY}) and close $r; sleep 60' "$BOTTLES/$1/drive_c/srv.tmp" &
+  SRVP=$!; PIDS="$PIDS $SRVP"; fake_ready
+}
+fake_trackpad() { # $1 = the parent as --parent gives it (<pid>:<start>): the app's Trackpad helper (a script, so that
+  # its arguments follow its path as the real one's do); its PID in LEFT
+  local x="$H/Applications/T.app/Contents/Helpers/T Trackpad.app/Contents/MacOS/T Trackpad"
+  mkdir -p "${x%/*}"; printf '#!/bin/bash\n: > "$RDY"\nsleep 60 & wait\n' > "$x"; chmod +x "$x"
+  RDY="$RDY" "$x" --session S1 --parent "$1" --engine "$T/engine/revit" --data "$T/data" &
+  LEFT=$!; PIDS="$PIDS $LEFT"; fake_ready
+}
+fake_warm() { # $1 = stuck | moving | between: ./revit gdrive warm of rvt2027-a with one folder open, a new one each
+  # 0.1 s, or none (between two listings; its working folder stays the same)
+  mkdir -p "$T/drive/a" "$T/drive/b"
+  RDY="$RDY" M="$1" perl -e 'opendir(my $d, "$ARGV[0]/a") or die; open(my $r, ">", $ENV{RDY}) and close $r;
+    closedir $d if $ENV{M} eq "between";
+    if ($ENV{M} eq "moving") { for (1 .. 600) { closedir $d; opendir($d, "$ARGV[0]/" . ($_ % 2 ? "b" : "a")); select(undef, undef, undef, 0.1) } }
+    sleep 60' "$T/drive" "$R/tools/gdrive.py" warm "$BOTTLES/rvt2027-a" 'G:\Projects' 2027 &
+  LEFT=$!; PIDS="$PIDS $LEFT"; fake_ready
+}
+gone() { ! kill -0 "$1" 2>/dev/null || case "$(ps -o stat= -p "$1")" in Z*) true ;; *) false ;; esac; }
+reset; cleanup; expect "cleanup with nothing left" 0 "Nothing is left running."
+reset; bottle rvt2024-a 2024 2024; fake_leftover rvt2024-a; cleanup --dry-run
+expect "cleanup --dry-run lists a program Wine left behind" 0 "winedevice.exe"
+check "dry run: it still runs, no wineserver -k" eval 'kill -0 "$LEFT" && not_called "wineserver"'
+cleanup; expect "cleanup ends it" 0 "Closed 1 program(s)."
+check "cleanup: wineserver -k of its bottle first" called "wineserver -k | REVIT_YEAR= INSTALL_DRYRUN= CX_RECREATE= WINEPREFIX=$BOTTLES/rvt2024-a"
+check "cleanup: it is gone (SIGTERM would not do)" gone "$LEFT"
+reset; bottle probe 2027 2027; fake_named "$BOTTLES/probe/drive_c" 'C:\windows\system32\services.exe' "$T/calls"
+rm -rf "$BOTTLES/probe"; cleanup --dry-run --json
+check "a deleted bottle's program: bottle_gone, with its pid, CPU and age" eval 'python3 -c "import json, sys; d = json.load(sys.stdin)
+i = d[\"items\"][0]; assert (i[\"pid\"], i[\"bottle\"], i[\"reason\"], i[\"name\"]) == ($LEFT, \"probe\", \"bottle_gone\", \"services.exe\"), d
+assert isinstance(i[\"cpu\"], float) and i[\"age_s\"] >= 0" <<<"$OUT"'
+cleanup; check "a deleted bottle's program is ended, no wineserver -k for a bottle that is gone" eval 'gone "$LEFT" && not_called "wineserver -k"'
+reset; bottle rvt2024-a 2024 2024; fake_revit rvt2024-a 2024; REV=$!; fake_named / 'C:\windows\system32\conhost.exe' "$T/calls"; cleanup
+expect "a bottle where Revit runs is skipped and says how to end it" 0 "Skipped rvt2024-a: Revit runs there. To end it: ./revit stop 2024 rvt2024-a"
+check "skipped: Revit runs; a program in no bottle stays while a wineserver runs" eval 'kill -0 "$REV" && kill -0 "$LEFT" && not_called "wineserver"'
+cleanup --all; check "--all leaves a bottle where Revit runs alone too" eval 'kill -0 "$REV" && kill -0 "$LEFT"'
+reset; fake_named / 'C:\windows\system32\conhost.exe' "$T/calls"; cleanup
+check "a Windows program in no bottle while no wineserver runs is ended" eval '[ "$RC" = 0 ] && grep -q "conhost.exe .*no bottle" <<<"$OUT" && gone "$LEFT"'
+reset; bottle rvt2024-a 2024 2024; fake_server rvt2024-a; cleanup
+expect "a bottle that runs without Revit is not a leftover" 0 "Nothing is left running."
+cleanup --all --dry-run; expect "--all lists it" 0 "runs without Revit"
+cleanup --all; check "--all ends it: wineserver -k, then by PID" eval '[ "$RC" = 0 ] && called "wineserver -k | REVIT_YEAR= INSTALL_DRYRUN= CX_RECREATE= WINEPREFIX=$BOTTLES/rvt2024-a" && gone "$SRVP"'
+reset; bottle rvt2024-a 2024 2024; bottle rvt2024-b 2024 2024; fake_leftover rvt2024-a; A=$LEFT; fake_leftover rvt2024-b; cleanup 2024 rvt2024-b
+check "cleanup <year> <bottle> ends that bottle's programs only" eval '[ "$RC" = 0 ] && gone "$LEFT" && kill -0 "$A"'
+reset; bottle rvt2024-a 2024 2024; fake_leftover rvt2024-a; AGE=60 cleanup --dry-run
+expect "a program younger than 60 s is not counted (Revit may be starting)" 0 "Nothing is left running."
+reset; fake_trackpad "999999:Thu Jan  1 00:00:00 2026"; cleanup
+check "a Trackpad helper whose app is gone is ended" eval '[ "$RC" = 0 ] && grep -q "T Trackpad .*the program that started it is gone" <<<"$OUT" && gone "$LEFT"'
+reset; fake_trackpad "$$:$(ps -o lstart= -p $$)"; cleanup --dry-run; expect "a Trackpad helper whose app runs stays" 0 "Nothing is left running."
+reset; bottle rvt2027-a 2027 2027; fake_warm stuck; cleanup --dry-run
+expect "a gdrive warm with the same folder open is stuck" 0 "a Google Drive folder does not answer"
+cleanup 2027; check "cleanup 2027 ends the stuck warm of its bottle" eval '[ "$RC" = 0 ] && gone "$LEFT"'
+reset; bottle rvt2027-a 2027 2027; fake_warm moving; cleanup --dry-run; expect "a gdrive warm that moves on is not stuck" 0 "Nothing is left running."
+reset; bottle rvt2027-a 2027 2027; fake_warm between; cleanup --dry-run
+expect "a gdrive warm between two listings is not stuck (its working folder does not count)" 0 "Nothing is left running."
+reset; bottle rvt2024-a 2024 2024; fake_leftover rvt2024-a; fake_lock "install.sh 2025 rvt2025-a"; cleanup
+expect "cleanup refuses while another task runs" 1 "Another task is running: install.sh 2025 rvt2025-a."
+check "busy: nothing ended" eval 'kill -0 "$LEFT" && not_called "wineserver"'
+reset; cleanup 2022; expect "cleanup of an unsupported year" 1 "Revit 2022 is not supported yet"
 reset; run "" logs 2024;             expect "logs when there are none" 1 "No logs for rvt2024-a yet."
 reset; mkdir -p "$R/logs/rvt2024-a/20261011-100000-install" "$R/logs/rvt2024-a/20261011-110000-debug" \
   "$R/logs/rvt2025-a/20261011-120000-install" "$R/logs/rvt2024-a-2/20261011-140000-install"
@@ -832,7 +902,7 @@ reset; bottle rvt2027-a 2027 2027; run "" rebuild 2027 --dry-run --json
 check "rebuild --dry-run --json: add-ins reset in 2027" eval '[ "$RC" = 0 ] && grep -qF "\"addins_reset\":true" <<<"$OUT"'
 reset; bottle rvt2025-a 2025 2025; run "" rebuild 2025 --dry-run
 check "rebuild --dry-run: today's lines, then the dry-run line" eval '[ "$RC" = 0 ] && grep -qF "This deletes the bottle rvt2025-a" <<<"$OUT" && [ "$(tail -1 <<<"$OUT")" = "(dry run: nothing changed)" ] && not_called install.sh'
-reset; run "" install 2024 --dry-run; expect "--dry-run on install is refused" 1 "--dry-run is for ./revit remove and rebuild only."
+reset; run "" install 2024 --dry-run; expect "--dry-run on install is refused" 1 "--dry-run is for ./revit remove, rebuild and cleanup only."
 reset; bottle rvt2025-a 2025 2025; touch "$T/stamp"; sleep 1; run "" remove 2025 --dry-run --events "$T/ev"
 newer="$(find "$T" -mindepth 1 -newer "$T/stamp" ! -path "$T/ev" ! -path "$T/ev/*" ! -path "$CALLS")"
 if [ -s "$T/ev/events.ndjson" ] && [ -z "$newer" ]; then ok "remove --dry-run with --events writes only the events folder"

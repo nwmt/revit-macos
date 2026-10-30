@@ -1,5 +1,6 @@
 // Confirmations of the actions that delete or end something (spec §3; the engine says what goes):
-// Remove and Rebuild show the engine's dry-run plan with a red button; Force quit warns about unsaved work.
+// Remove and Rebuild show the engine's dry-run plan with a red button; Force quit warns about unsaved work; Close all
+// lists what it ends.
 import AppCore
 import AppKit
 
@@ -40,6 +41,29 @@ import AppKit
         let button = verb == "remove" ? String(localized: "Remove") : String(localized: "Rebuild")
         guard ask(title, lines.joined(separator: "\n"), button: button, destructive: true) else { return }
         await start(app: app, env: env, r)
+    }
+
+    /// Close all: the programs cleanup --all would end (left over, and bottles running without Revit), then the close
+    /// on a yes. Bottles where Revit runs are left alone, so no unsaved work is lost.
+    static func closeAll(app: AppModel) async {
+        let p: CleanupReport
+        switch await app.cleanup(all: true, dryRun: true) {
+        case let .refused(t): tell(String(localized: "Could not close the programs."), t); return
+        case let .report(r): p = r
+        }
+        guard !p.items.isEmpty else {
+            tell(String(localized: "Nothing to close."), p.planLines.joined(separator: "\n")); return
+        }
+        guard ask(String(localized: "Close \(p.items.count) program(s)?"), p.planLines.joined(separator: "\n"),
+                  button: String(localized: "Close all"), destructive: true) else { return }
+        switch await app.cleanup(all: true, dryRun: false) {
+        case let .refused(t): tell(String(localized: "Could not close the programs."), t)
+        case let .report(r):
+            let left = r.left ?? []
+            if left.isEmpty { tell(String(localized: "Closed \(r.closed?.count ?? 0) program(s)."), "") }
+            else { tell(String(localized: "\(left.count) program(s) could not be ended."), String(localized: "Restart the Mac to end them.")) }
+        }
+        await app.refresh()
     }
 
     /// Starts a run and shows its progress; a refusal (busy) or a start error says why.

@@ -64,6 +64,8 @@ Usage: ./revit <command> <year> [bottle]
   import    add a file the install needs from your Windows PC (import msls31 <file>)
   cache     show or clear downloaded and unpacked installer files (cache clear --yes)
   stop      quit a Revit that hangs
+  cleanup   close programs left running after Revit or Wine ended (no year: every bottle; --dry-run lists them;
+            --all also closes bottles that run without Revit)
   logs      list the newest logs
   debug     start Revit and record a log
   mcp       connect an AI assistant to a running Revit (--server pyrevit|python; docs/mcp.md)
@@ -129,7 +131,7 @@ if [ "$CMD" = set ]; then
 fi
 [ "$REUSE_X$REEXTRACT" != 11 ] || FLAG_ERR="Use --reuse-extracted or --reextract, not both."
 [ "$LOG" = 0 ] || [ "$CMD" = test ] || FLAG_ERR="--log is for ./revit test only."
-[ "$DRY" = 0 ] || [ "$CMD" = remove ] || [ "$CMD" = rebuild ] || FLAG_ERR="--dry-run is for ./revit remove and rebuild only."
+[ "$DRY" = 0 ] || [ "$CMD" = remove ] || [ "$CMD" = rebuild ] || [ "$CMD" = cleanup ] || FLAG_ERR="--dry-run is for ./revit remove, rebuild and cleanup only."
 [ "$KEEP" = 0 ] || [ "$CMD" = test ] || FLAG_ERR="Unknown option: --keep"
 [ -z "$RUN_ARG" ] || [ "$CMD" = report ] || FLAG_ERR="--run is for ./revit report only."
 [ ${#EXCL[@]} = 0 ] || [ "$CMD" = report ] || FLAG_ERR="--exclude is for ./revit report only."
@@ -178,7 +180,7 @@ if [ -n "$EVENTS_DIR" ]; then
 fi
 [ -z "$FLAG_ERR" ] || die "$FLAG_ERR"
 case "$CMD" in
-  install|check|doctor|report|addins|import|cache|stop|logs|debug|rebuild|remove|status|find-installer|link-installer|test|mcp|set|hittest|theme|gdrive) ;;
+  install|check|doctor|report|addins|import|cache|stop|cleanup|logs|debug|rebuild|remove|status|find-installer|link-installer|test|mcp|set|hittest|theme|gdrive) ;;
   ""|help|-h|--help) usage; exit 0 ;;
   *) echo "Unknown command: $CMD" >&2; echo >&2; usage >&2; exit 1 ;;
 esac
@@ -410,6 +412,23 @@ if [ "$CMD" = doctor ] || [ "$CMD" = report ]; then   # read files only: no lock
   if [ "$rc" != 0 ]; then rmdir "$out" 2>/dev/null; exit "$rc"; fi   # refused: nothing was written
   [ "$JSON" = 1 ] || echo "Read both before you post them."
   exit 0
+fi
+if [ "$CMD" = cleanup ]; then   # programs left running (tools/leftovers.py); no year: every bottle and the app's helpers.
+  # A bottle where Revit runs is left alone (./revit stop ends it)
+  RESULT_HINT=failed; la=(--bottles "$BOTTLES" --cx "$CX")
+  if [ -n "$YEAR_ARG" ]; then
+    if ! load_profile "$YEAR_ARG"; then
+      [[ "$YEAR_ARG" =~ ^[0-9]{4}$ ]] || die "\"$YEAR_ARG\" is not a Revit year. Example: ./revit cleanup 2025"
+      die "Revit $YEAR_ARG is not supported yet. Supported: ${REVIT_SUPPORTED[*]}."
+    fi
+    NAME="${NAME:-$(revit_bottle_default "$YEAR")}"
+    revit_bottle_name_ok "$NAME" || die "Bottle name may contain only letters, digits, - and _, and cannot be \"default\": \"$NAME\""
+    la+=(--bottle "$NAME")   # it may be gone: its programs are what is left of it
+  fi
+  [ "$ALL" = 0 ] || la+=(--all); [ "$JSON" = 0 ] || la+=(--json)
+  if [ "$DRY" = 1 ]; then python3 -I -B "$ROOT/tools/leftovers.py" scan "${la[@]}" </dev/null 7>&-; exit $?; fi
+  not_busy; lock_take "./revit cleanup"   # an install's Wine programs run in its bottle: --all would end them
+  python3 -I -B "$ROOT/tools/leftovers.py" close "${la[@]}" </dev/null 7>&- 9>&-; exit $?
 fi
 [ -n "$YEAR_ARG" ] || die "Which Revit year? Example: ./revit $CMD 2025"
 if ! load_profile "$YEAR_ARG"; then

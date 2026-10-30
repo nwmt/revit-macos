@@ -20,6 +20,9 @@ public enum CancelOutcome: Equatable, Sendable { case sent, refused(String) }
 
 public enum AppModelError: Error, Equatable { case busy, noDataFolder }
 
+/// cleanup's answer: its report, or the engine's words when it refused (busy) or could not start.
+public enum CleanupAnswer: Equatable, Sendable { case report(CleanupReport), refused(String) }
+
 @MainActor @Observable public final class AppModel {
     public private(set) var status: EngineStatus?
     public private(set) var watched: WatchedRun?
@@ -34,6 +37,9 @@ public enum AppModelError: Error, Equatable { case busy, noDataFolder }
     @ObservationIgnored private var supervisor: (pid: Int32, start: String)?
     @ObservationIgnored private var starting = false
     @ObservationIgnored private var lastStatus = Date.distantPast
+    @ObservationIgnored private var sweeping = false
+    /// The sweep started when a Revit quit (tests wait for it).
+    @ObservationIgnored public private(set) var sweepTask: Task<Void, Never>?
     static let recordKey = "lastRun"
 
     public init(engine: any EngineClient, defaults: UserDefaults, notifier: any Notifier, dataOverride: URL? = nil) {
@@ -68,8 +74,39 @@ public enum AppModelError: Error, Equatable { case busy, noDataFolder }
         lastStatus = Date()
         guard let out = await query(["status", "--json"]), out.exitCode == 0,
               let s = try? EngineStatus.decode(out.stdout) else { return false }
+        let wasRunning = Set((status?.bottles ?? []).filter(\.running).map(\.name))
         if status != s { status = s }   // an unchanged status is no change: the open menu must not rebuild
+        if !wasRunning.subtracting(s.bottles.filter(\.running).map(\.name)).isEmpty, sweepTask == nil {
+            sweepTask = Task { [weak self] in _ = await self?.sweep(notify: true); self?.sweepTask = nil }   // a Revit quit
+        }
         return true
+    }
+
+    // MARK: programs left running (./revit cleanup)
+
+    /// cleanup --json: all = also the bottles that run without Revit (Close all), dryRun = only list them.
+    public func cleanup(all: Bool, dryRun: Bool) async -> CleanupAnswer {
+        var a = ["cleanup"]
+        if all { a.append("--all") }
+        if dryRun { a.append("--dry-run") }
+        guard let out = await query(a + ["--json"]) else { return .refused(engineError ?? "") }
+        // exit 1 with a report: some program could not be ended (its PID is in left)
+        if let r = try? JSONDecoder.engine.decode(CleanupReport.self, from: out.stdout) { return .report(r) }
+        return .refused(out.stderr.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    /// After a Revit quits and when the app quits: ends what Wine, the app or a G: listing left running (never a bottle
+    /// that only runs without Revit). Nothing while a task runs. notify: one notification when something was ended.
+    @discardableResult public func sweep(notify: Bool) async -> CleanupReport? {
+        guard !sweeping, !isBusy else { return nil }
+        sweeping = true
+        defer { sweeping = false }
+        guard case let .report(r) = await cleanup(all: false, dryRun: false) else { return nil }
+        if notify, let c = r.closed, !c.isEmpty {
+            notifier.post(title: String(localized: "Closed programs left running"),
+                          body: r.items.filter { c.contains($0.pid) }.map(\.name).joined(separator: ", "), url: nil)
+        }
+        return r
     }
 
     public func query(_ args: [String]) async -> EngineOutput? {

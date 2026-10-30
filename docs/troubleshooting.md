@@ -35,6 +35,19 @@ or quits, and Windows programs of the bottle may keep running.
 **Solution:** `./revit stop <year>` ends what is left. Then [report the problem](#report-a-problem): the report
 includes the server's log. The warning stays until Wine next ends normally.
 
+### Programs keep running after Revit quit
+
+All versions
+
+Activity Monitor shows `winedevice.exe`, `services.exe`, `conhost.exe` or other Windows programs hours after Revit quit,
+some at 100% CPU, also of a bottle you deleted. Their wineserver ended without them, so `./revit stop` and quitting
+CrossOver no longer reach them. A `gdrive.py warm` can also wait for hours on a Google Drive folder that does not
+answer.
+
+**Solution:** `./revit cleanup --dry-run` lists what is left, with its bottle, CPU and age; `./revit cleanup` closes it.
+A bottle where Revit runs is left alone: `./revit stop <year>` ends it. The menu bar app closes what is left when Revit
+or the app quits; its **Close all…** also closes the bottles that run only Autodesk's background services.
+
 ### Report a problem
 
 All versions
