@@ -245,13 +245,7 @@ elif [ -e "$C" ] && [ "$(marker_get "$C" state)" = kept ]; then
   refuse failed 1 "The copy $CLONE was kept by an earlier test (--keep). Delete it first:
   \"$CX/bin/cxbottle\" --bottle \"$CLONE\" --delete --force"
 fi
-on_apfs() { # cp -c makes APFS clones, which take almost no space, within one APFS volume; anywhere else it copies every
-  # byte (7–30 GB). -L: the volume of the folder itself, not of a link to it (Bottles moved to a disk, linked back)
-  local dev; dev="$(stat -L -f %Sd "$BOTTLES" 2>/dev/null)" && [ -n "$dev" ] || return 1
-  [ "$(stat -L -f %Sd "$B" 2>/dev/null)" = "$dev" ] || return 1   # the bottle on that volume too, not mounted there
-  [ "$(diskutil info -plist "$dev" 2>/dev/null | plutil -extract FilesystemType raw -o - - 2>/dev/null)" = apfs ]
-}
-on_apfs || refuse failed 1 "The CrossOver bottles are not on an APFS volume, so a copy would take the full size of the bottle. ./revit test needs them on APFS."
+bottles_on_apfs "$B" || refuse failed 1 "The CrossOver bottles are not on an APFS volume, so a copy would take the full size of the bottle. ./revit test needs them on APFS."
 read -r s_in s_age s_days <<<"$(py signin "$B" "$YEAR" 2>/dev/null | shielded /usr/bin/perl -MJSON::PP -e '
   my $d = eval { decode_json(join "", <STDIN>) } || {};
   printf "%d %s %s\n", ($d->{signed_in} ? 1 : 0), $d->{journal_age_days} // "-", $d->{license_days_left} // "-"')"
@@ -288,13 +282,16 @@ mkdir "$C" 2>/dev/null || fail_run "could not make the folder of the copy"
 OURS=1   # from here the cleanup deletes the copy: the marker comes first, before anything is copied into it
 mkdir "$C/revit-macos" && marker_write creating || fail_run "could not write the marker of the copy"
 # CrossOver's lock of the bottle while it is copied: nothing starts in it meanwhile, and it must still be at rest
-cx_bottle_lock "$B" || fail_run "CrossOver is busy with $NAME; try again in a minute"
-[ "$(bottle_activity "$B")" = stopped ] || fail_run "programs started in $NAME; quit them with ./revit stop $YEAR$SFX and run the test again"
-run_child cp -cR "$B/" "$C"; rc=$?   # the contents into the folder that holds the marker
+bottle_copy_at_rest "$B" "$C"; rc=$?   # the contents into the folder that holds the marker
 stop_point
-[ $rc = 0 ] || fail_run "copying the bottle failed"
-[ "$(bottle_activity "$B")" = stopped ] || fail_run "programs started in $NAME while it was copied; quit them with ./revit stop $YEAR$SFX and run the test again"
-cx_bottle_unlock
+if [ $rc != 0 ]; then
+  case "$COPY_WHY" in
+    busy) fail_run "CrossOver is busy with $NAME; try again in a minute" ;;
+    active) fail_run "programs started in $NAME; quit them with ./revit stop $YEAR$SFX and run the test again" ;;
+    copy) fail_run "copying the bottle failed" ;;
+    *) fail_run "programs started in $NAME while it was copied; quit them with ./revit stop $YEAR$SFX and run the test again" ;;
+  esac
+fi
 rm -rf "$C/desktopdata" "$C/files"   # as cxbottle --copy: CrossOver's menu and association records of the bottle
 cut_links() { # the copy's links to the Mac's own folders (Documents, Desktop, …) become empty folders before any wine
   # call, so Revit in the copy writes nothing outside it; their paths go to result.json
