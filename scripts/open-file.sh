@@ -116,7 +116,7 @@ while :; do
        ro send "$WIN"; rc=$?
        case "$rc" in
          0) took "$size" && { echo "Opened in Revit $YEAR ($NAME)."; exit 0; }
-            die "Revit $YEAR got the file but did not open it. Close any dialog in Revit, then look before you try again." ;;
+            die "Revit $YEAR did not open the file: a dialog is in the way. Close the dialog in Revit, then open the file again." ;;
          3) ;;   # Revit has just left DDE: below
          4) die "Revit $YEAR is busy: close its open dialog, then try again." ;;
          5) die "Revit $YEAR did not answer. It may still open the file: look before you try again." ;;

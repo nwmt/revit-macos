@@ -1843,7 +1843,7 @@ expect "open: only an earlier Revit's journal says idle → nothing sent" 1 "did
 open_world; frevit; echo 3 > "$T/ro-ready"; run "" open "$H/Documents/p.rvt"
 expect "open: Revit runs, DDE never answers → gives up, nothing sent" 1 "did not take the file in time"
 check "open: no send without a server" eval '! grep -q " send " "$T/ro-log"'
-open_world; frevit; : > "$T/ro-swallow"; run "" open "$H/Documents/p.rvt"; expect "open: acked but a dialog swallowed it → said so, not sent twice" 1 "did not open it"
+open_world; frevit; : > "$T/ro-swallow"; run "" open "$H/Documents/p.rvt"; expect "open: acked but a dialog swallowed it → said so, not sent twice" 1 "a dialog is in the way"
 open_world; frevit; : > "$T/ro-swallow"; rvt "$H/Documents/old.rvt" 2025; printf '#!/bin/bash\necho "TaskDialog_Model_Upgrade" >> "%s"\nsleep 1\n' "$BOTTLES/rvt2027-a/drive_c/users/crossover/AppData/Local/Autodesk/Revit/Autodesk Revit 2027/Journals/journal.0002.txt" > "$T/ro-hook"; chmod +x "$T/ro-hook"
 sed -i '' 's|^case "\$2" in|[ "\$2" != send ] \|\| "'"$T"'/ro-hook"\ncase "\$2" in|' "$CXF/bin/wine"; run "" open "$H/Documents/old.rvt" --copy-for 2027
 expect "open: Revit asks about upgrading the copy → that is a yes" 0 "Opened in Revit 2027"
