@@ -143,6 +143,14 @@ under the cursor when a gesture starts: only Revit's views pan and zoom, lists, 
 schedules keep scrolling. Checked on Revit 2020 and 2027; in other years the gestures stay scrolling. The helper keeps a log in
 `<data>/logs/trackpad.log` (no window titles, no positions), which the diagnostic report includes.
 
+`./revit open <file>` reads the year from the file's `BasicFileInfo` stream (`tools/rvtfile.py`) and sends the file only
+to a Revit of that year; `--dry-run --json` gives the app the same decision. Revit answers DDE before it can take a
+command and drops what comes early, so the file waits for the first `appPriv idle` in the journal of this Revit. Revit
+also acknowledges a command that a dialog then swallows, so the file counts as opened when Revit holds it open or asks
+about upgrading it. The app declares its own imported types for the four extensions and a second document type by
+extension: when another app exports a type for `.rvt`, macOS resolves the extension to that type, and an app that
+names only its own type disappears even from Open With.
+
 ## Our shims in tools/
 
 | Tool | What it fixes |
@@ -156,6 +164,7 @@ schedules keep scrolling. Checked on Revit 2020 and 2027; in other years the ges
 | `tools/shims/wv2fix` | Revit 2024+: the built-in web browser (WebView2) crashes on clicks and resizes. The shim flushes pending drawing before such window changes and skips changes that change nothing. In Enscape 4.18 (2027) it loads `tools/shims/rvtfix` as soon as Enscape starts. |
 | `tools/shims/vkshim` | Enscape 3.4.4 in Revit 2020 and 4.18 in 2027: Enscape turns down the Mac GPU (it asks for a Windows memory-sharing extension and a blend feature that MoltenVK lacks), creates a query type that MoltenVK refuses, and under Wine its view never gets the keyboard focus. The shim reports the missing pieces, gives it a query type MoltenVK has, and on a click activates Enscape's view as Windows does. DXVK, which draws Revit's own interface, sees Vulkan unchanged. |
 | `tools/shims/dpapi` | The MCP server for Revit (Python) keeps its pairing secret encrypted for the Windows user (DPAPI), and its client runs on the Mac. The shim decrypts it inside the bottle once per connection; the secret goes to the client through a pipe, never to a file. |
+| `tools/shims/revitopen` | Nothing on the Mac can hand a file to a running Revit. It sends Revit the DDE command Windows sends, `[open("<path>")]`, and starts nothing, so `./revit open` never makes a second Revit. It runs by its Mac path, nothing is copied into the bottle |
 | `tools/shims/hittest` | macOS sees Revit as one window and Wine tells no other process which Windows window is under the cursor. For the app's trackpad gestures it answers, for a point, the window there and its parents (class and title), until Revit ends. |
 | `tools/shims/pdfprinter` | The bottle has no printers. Adds the **Revit PDF** printer; Ghostscript turns its output into PDFs in `~/Documents/Revit-PDF`. |
 | `tools/revitini.py` | Writes the `Revit.ini` settings of the `revitini` step (UTF-16, as Revit keeps it). |

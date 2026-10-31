@@ -87,6 +87,7 @@ Run them in Terminal, in the project folder. In a new Terminal window, first typ
 | `./revit set 2025 gdrive=off` | Change G: from Google Drive: `gdrive=auto` (the one account on this Mac), `gdrive=<email>` (one of several), `gdrive=off`; `gdrive_names=ru` adds the folder names of a Russian Windows ([more](docs/troubleshooting.md#google-drive)) |
 | `./revit gdrive warm 2025 "G:\Shared drives\Team"` | List a folder on G: and its subfolders once, so Revit's Open dialog does not wait on each (`--depth 2` for more levels) |
 | `./revit mcp 2027` | Connect an AI assistant to a running Revit, through Autodesk's Revit MCP Server or, with `--server pyrevit`, pyRevit's agent; on Revit 2020 `--server python`, the MCP server for Revit (Python). Needs a token: `./revit mcp token 2027`, or `./revit mcp bundle 2027` for Claude Desktop ([how](docs/mcp.md)) |
+| `./revit open <file>` | Open a `.rvt`, `.rfa`, `.rte` or `.rft` in the Revit it was saved in, or in that Revit if it is already running. It never upgrades a file: with no Revit of that year it opens nothing. `--copy-for 2027` opens a copy beside the file in a newer Revit; `--bottle <bottle>` picks a bottle |
 | `./revit stop 2025` | Quit a Revit that hangs |
 | `./revit cleanup` | Close programs Wine or the app left running (`--dry-run` lists them; `--all` closes all of Wine, Revit too, without saving) ([more](docs/troubleshooting.md#programs-keep-running-after-revit-quit)) |
 | `./revit logs 2025` | List the newest logs |
@@ -121,6 +122,9 @@ Run them in Terminal, in the project folder. In a new Terminal window, first typ
 
 ## Good to know
 
+- **Finder:** with the menu bar app, a double click on a Revit file does what `./revit open` does. If the file's Revit
+  is not on this Mac, the app says which one saved it and offers to add that Revit or to open a copy in a newer one.
+  If another app opens Revit files on your Mac: Get Info on a file, Open With, Mac BIM Dock, Change All.
 - **Your files:** the Documents folder in Revit is your Mac's Documents folder. Files saved anywhere else on the
   bottle's C: drive are deleted by `rebuild` and `remove`.
 - **Look:** Revit 2024 and newer start with anti-aliasing off (Revit runs better without it). Revit 2027 follows your
