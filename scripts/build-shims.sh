@@ -30,6 +30,7 @@ shim_spec() { # $1 = shim → OUT (its file in build/<shim>/), FLAGS, LIBS; 1 = 
     svcshim)    OUT=svcshim.exe;     FLAGS+=(-municode);         LIBS=(-ladvapi32) ;;
     themeset)   OUT=themeset.exe;    FLAGS+=(-municode);         LIBS=(-luser32 -ladvapi32) ;;
     tlbpin)     OUT=msls31.dll;      FLAGS+=(-shared);           LIBS=(-loleaut32) ;;
+    uibridge)   OUT=uibridge.exe;    FLAGS+=(-municode);         LIBS=(-luser32 -lole32 -loleaut32 -luuid) ;;
     vkshim)     OUT=vulkan-1.dll;    FLAGS+=(-shared "-I$VKH");  LIBS=(-luser32) ;;
     wbemshim)   OUT=wbemshim.dll;    FLAGS+=(-shared -municode); LIBS=(-lole32 -loleaut32 -luuid -lwbemuuid) ;;
     wv2fix)     OUT=version.dll;     FLAGS+=(-shared);           LIBS=(-luser32) ;;
