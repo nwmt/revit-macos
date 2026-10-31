@@ -21,7 +21,7 @@ struct VersionView: View {
                 ScrollView {
                     Group {
                         switch tab {
-                        case .overview: OverviewTab(env: env, bottle: b, year: ref.year)
+                        case .overview: OverviewTab(app: app, env: env, bottle: b, year: ref.year)
                         case .display: DisplayKeysTab(app: app, env: env, ref: ref, bottle: b)
                         case .drive: GoogleDriveTab(app: app, env: env, ref: ref, bottle: b)
                         case .addins: AddinsTab(app: app, env: env, ref: ref)
@@ -48,7 +48,10 @@ struct VersionView: View {
                 Text(b.support.map { "\(b.name) · \($0.tested)" } ?? b.name).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            if b.running { Button("Force quit…") { forceQuit() }.disabled(app.isBusy) }
+            if b.running {
+                Button("Revit not responding?") { env.router.recover(ref) }.buttonStyle(.link)
+                Button("Force quit…") { forceQuit() }.disabled(app.isBusy)
+            }
             RevitButton(app: app, year: ref.year, bottle: ref.bottle, running: b.running, pids: b.revitPids, blocked: app.isBusy)
         }
     }
@@ -72,6 +75,7 @@ struct VersionView: View {
 }
 
 private struct OverviewTab: View {
+    let app: AppModel
     let env: AppEnvironment
     let bottle: Bottle
     let year: Int
@@ -87,7 +91,12 @@ private struct OverviewTab: View {
             if !env.repo.isEmpty, let u = URL(string: "https://github.com/\(env.repo)/blob/main/versions/\(year).md") {
                 Link("All notes for Revit \(String(year))", destination: u)
             }
+            if let files = app.recent[bottle.name], !files.isEmpty {
+                Text("Recent projects").font(.headline).padding(.top, 12)
+                RecentList(env: env, files: files, limit: 8)
+            }
         }
+        .task(id: bottle.running) { await app.refreshRecent(bottle) }
     }
 }
 
@@ -206,6 +215,45 @@ private struct DisplayKeysTab: View {
     }
 }
 
+/// Lists a folder of G: ahead, because a person named it: Revit's Open dialog then does not wait on each subfolder.
+private struct PrepareFolder: View {
+    let warm: WarmModel
+    let ref: BottleRef
+    @State private var folder = ""
+    @State private var levels = 1
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Open dialog slow on a G: folder?").font(.headline)
+            Text("Google Drive fetches each new folder from the internet. Prepare a folder once: its subfolders are listed ahead, so Revit's Open dialog doesn't wait. It can run while Revit is open.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                TextField("G:\\Shared drives\\Team\\Projects", text: $folder).textFieldStyle(.roundedBorder).autocorrectionDisabled()
+                Button("Choose…") { choose() }
+            }
+            HStack {
+                Picker("Levels", selection: $levels) { Text("1").tag(1); Text("2").tag(2); Text("3").tag(3) }.fixedSize()
+                Spacer()
+                if warm.bottle == ref.bottle {
+                    Button("Cancel") { warm.cancel() }
+                } else {
+                    Button("Prepare folder") { warm.start(year: ref.year, bottle: ref.bottle, folder: folder.trimmingCharacters(in: .whitespaces), depth: levels) }
+                        .disabled(folder.trimmingCharacters(in: .whitespaces).isEmpty || warm.running)
+                }
+            }
+            if warm.bottle == ref.bottle { HStack { ProgressView().controlSize(.small); Text(warm.line.isEmpty ? String(localized: "Listing…") : warm.line).font(.callout) } }
+            else if warm.running { Text("Preparing a folder for another Revit.").font(.callout).foregroundStyle(.secondary) }
+            else if !warm.line.isEmpty { Text(warm.line).font(.callout).foregroundStyle(warm.failed ? .red : .secondary).textSelection(.enabled) }
+        }
+    }
+
+    private func choose() {
+        let p = NSOpenPanel()
+        p.canChooseFiles = false; p.canChooseDirectories = true; p.allowsMultipleSelection = false
+        if p.runModal() == .OK, let u = p.url { folder = u.path }
+    }
+}
+
 private struct GoogleDriveTab: View {
     let app: AppModel
     let env: AppEnvironment
@@ -229,6 +277,7 @@ private struct GoogleDriveTab: View {
             if draft.showsNames { Toggle("Russian Windows folder names too", isOn: $draft.russian) }
             else { Text("Own folder names are set.").font(.callout).foregroundStyle(.secondary) }
             Text("Quit Revit first: Wine shows a changed drive only when it starts again.").font(.callout).foregroundStyle(.secondary)
+            if bottle.gdrive?.mapping == "ok", let w = env.warm { Divider(); PrepareFolder(warm: w, ref: ref).padding(.bottom, 4); Divider() }
             HStack {
                 Button("Stop background programs…") { stop() }.disabled(app.isBusy)
                 Spacer()
@@ -271,6 +320,8 @@ private struct MaintenanceTab: View {
     @State private var health: DoctorReport?
     @State private var checking = false
     @State private var healthError: String?
+    @State private var logStarted = false
+    @State private var logError: String?
 
     private var points: [RestorePoint] { (app.status?.restorePoints ?? []).filter { $0.bottle == ref.bottle && $0.year == String(ref.year) } }
 
@@ -294,9 +345,20 @@ private struct MaintenanceTab: View {
             section("Logs and reports") {
                 HStack {
                     Button("Show logs") { showLogs() }
+                    Button(app.revitStarting[ref.bottle] != nil ? "Starting…" : "Start with a log") { startLog() }
+                        .disabled(bottle.running || app.isBusy || app.revitStarting[ref.bottle] != nil)
                     Button("Report a problem…") { Task { await Report.copy(app: app, year: ref.year, bottle: ref.bottle, logDir: nil) } }
                 }
+                if logStarted { Text("Make the problem happen, quit Revit, then use Report a problem.").font(.callout) }
+                if let e = logError { Text(e).font(.callout).foregroundStyle(.red) }
                 Text("Reports leave out personal data.").font(.callout).foregroundStyle(.secondary)
+            }
+            section("Something wrong?") {
+                HStack {
+                    Text("Steps from the safest to the last resort.")
+                    Spacer()
+                    Button("Show the steps…") { env.router.recover(ref) }
+                }
             }
             section("Fixes") {
                 switch FixesLine.of(built: bottle.built, now: app.status?.shimsNow) {
@@ -322,6 +384,14 @@ private struct MaintenanceTab: View {
                     Button("Delete all but the newest…") { env.router.ask(.points(year: ref.year, bottle: ref.bottle, clear: "old")) }.disabled(app.isBusy)
                 }
             }
+            section("Update Revit") {
+                HStack {
+                    Text("Got a newer update from your Autodesk Account? Choose it; the rest is a rebuild with a restore point.")
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    Button("Choose installer…") { chooseInstaller() }.disabled(app.isBusy || bottle.running)
+                }
+            }
             section("Start over") {
                 HStack {
                     Text("Rebuild: a fresh bottle, the newest fixes, a restore point first.")
@@ -335,10 +405,32 @@ private struct MaintenanceTab: View {
                 }
             }
         }
+        .task(id: env.router.healthWanted) {
+            if env.router.healthWanted { env.router.healthWanted = false; check() }
+        }
     }
 
     private func section<C: View>(_ title: LocalizedStringKey, @ViewBuilder _ content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 8) { Text(title).font(.headline); content() }
+    }
+
+    private func chooseInstaller() {
+        let p = NSOpenPanel()
+        p.canChooseFiles = false; p.canChooseDirectories = true; p.allowsMultipleSelection = false
+        p.message = String(localized: "Choose the folder with the Revit \(String(ref.year)) installer.")
+        if p.runModal() == .OK, let u = p.url {
+            env.router.ask(.plan(.update(year: ref.year, bottle: ref.bottle, from: u.path)))
+        }
+    }
+
+    private func startLog() {
+        logStarted = false; logError = nil
+        Task {
+            switch await app.debug(year: ref.year, bottle: ref.bottle) {
+            case .started: logStarted = true
+            case .refused(let why): logError = why
+            }
+        }
     }
 
     private func check() {

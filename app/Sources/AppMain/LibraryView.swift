@@ -7,6 +7,7 @@ struct LibraryView: View {
     let env: AppEnvironment
     @State private var left = 0
     @State private var targeted = false
+    @State private var picked: String?
     private static let types = ["rvt", "rfa", "rte", "rft"]
 
     var body: some View {
@@ -36,6 +37,22 @@ struct LibraryView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 14, alignment: .top)], spacing: 14) {
                     ForEach(c.cards, id: \.bottle) { Card(app: app, env: env, card: $0) }
                 }
+                if let sel = RecentChoice.bottle(c.cards, picked: picked), !(app.recent[sel.bottle] ?? []).isEmpty || c.cards.count > 1 {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Recent in Revit \(String(sel.year))").font(.headline)
+                            Spacer()
+                            if c.cards.count > 1 {
+                                Picker("Revit", selection: Binding(get: { sel.bottle }, set: { picked = $0 })) {
+                                    ForEach(c.cards, id: \.bottle) { Text("Revit \(String($0.year)) · \($0.bottle)").tag($0.bottle) }
+                                }
+                                .labelsHidden().fixedSize()
+                            }
+                        }
+                        if (app.recent[sel.bottle] ?? []).isEmpty { Text("Nothing yet: Revit writes this list when it quits.").font(.callout).foregroundStyle(.secondary) }
+                        RecentList(env: env, files: app.recent[sel.bottle] ?? [], limit: 8)
+                    }
+                }
                 if !c.orphans.isEmpty { orphans(c.orphans) }
                 if left > 0 {
                     Button { env.router.open(.run) } label: {
@@ -47,6 +64,7 @@ struct LibraryView: View {
             .padding(24).frame(maxWidth: .infinity, alignment: .leading)
         }
         .navigationTitle("Library")
+        .task { await app.refreshRecent() }
         .task {   // only while the Library shows
             while !Task.isCancelled {
                 if case let .report(r) = await app.cleanup(all: false, dryRun: true) { left = r.items.count }
@@ -97,6 +115,7 @@ private struct Card: View {
                 if card.hasPoint { Text("Restore point").font(.caption).foregroundStyle(.secondary) }
             }
             Text(card.note).font(.callout).foregroundStyle(.secondary).lineLimit(2).frame(minHeight: 34, alignment: .topLeading)
+            if card.running { Button("Revit not responding?") { env.router.recover(card.ref) }.buttonStyle(.link).font(.callout) }
             HStack {
                 RevitButton(app: app, year: card.year, bottle: card.bottle, running: card.running, pids: card.pids, blocked: card.taskHere)
                 let viewer = AppLinks.viewerApp(year: card.year, bottle: card.bottle, home: home)

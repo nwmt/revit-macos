@@ -60,11 +60,9 @@ def where(win):
     if w.lower().startswith(HOME_WIN):
         rest = parts[3:]   # after C:, users, crossover
         return " › ".join(rest)
-    if re.match(r"^[A-Za-z]:", w):
-        if w[0].lower() == "c":
-            return parts[-1] if len(parts) > 1 else "C:"
-        return " › ".join([parts[0].upper()] + parts[1:])
-    return parts[-1] if parts else ""
+    if w[:2].lower() == "g:":
+        return " › ".join(["G:"] + parts[1:])
+    return parts[-1] if len(parts) > 1 else ""   # elsewhere a whole path can name the user: Z:\\Users\\…
 
 
 def files(bottle, year):

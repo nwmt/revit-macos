@@ -95,6 +95,8 @@ Run them in Terminal, in the project folder. In a new Terminal window, first typ
 | `./revit debug 2025` | Start Revit and record a log |
 | `./revit report 2025` | Make a report for a GitHub issue, with personal data removed |
 | `./revit rebuild 2025` | Keep a restore point, delete the bottle and install Revit again |
+| `./revit update 2025 --from ~/Downloads/Revit2025` | Rebuild from a newer Revit installer |
+| `./revit recent 2025` | List the files Revit opened last |
 | `./revit rollback 2025` | Bring the bottle back from its newest restore point (`--to <id>`: an older one) |
 | `./revit points 2025` | List the bottle's restore points (`--clear old` keeps the newest, `--clear all` deletes all) |
 | `./revit remove 2025` | Delete Revit, its bottle and its apps |
@@ -105,16 +107,17 @@ Run them in Terminal, in the project folder. In a new Terminal window, first typ
 | `./revit import msls31 <file>` | Add msls31.dll from your Windows PC |
 | `./revit cache` | Show or clear installer files |
 
-`rebuild` and `remove` show what they delete and ask you to type the year first.
+`rebuild`, `update` and `remove` show what they delete and ask you to type the year first.
 
 ## Updating
 
 - **This project:** `git pull`. Your installed Revit keeps working. New fixes reach it after `./revit rebuild 2025`.
 - **A newer Revit update (2024 and newer):** each Create Installer file names one Revit update. Download a new
-  one from your Autodesk Account and put it into `installers/revit2025/` instead of the old one. Delete the folder
-  `installers/extracted/revit2025` (it holds the old unpacked files). Then run `./revit rebuild 2025`: it downloads
-  the new update and installs it.
-- `rebuild` and `remove` reset Revit's settings and add-ins in the bottle. Your projects in Documents stay.
+  one from your Autodesk Account into a folder of its own, then in the app choose Maintenance > Update Revit, or run
+  `./revit update 2025 --from <that folder>`. It shows what changes, keeps a restore point, unpacks the new installer
+  and installs it, downloading what the installer names. Old installer files in `installers/revit2025` move to
+  `installers/revit2025.old`. Roll back brings back the bottle, not the unpacked installer files.
+- `rebuild`, `update` and `remove` reset Revit's settings and add-ins in the bottle. Your projects in Documents stay.
 - **Restore points:** before it deletes the bottle, `rebuild` keeps an APFS copy of it, with your settings, add-ins and
   sign-in. If the new install is worse, `./revit rollback 2025` brings the old bottle back. The copy costs almost nothing
   at first, but after `rebuild` it holds the old bottle's disk space, up to its full size, until you delete it:

@@ -34,7 +34,7 @@ enum SheetRequest: Identifiable, Equatable {
     /// The sheet of a run that needs one: Retry comes here.
     static func of(_ r: RunRequest, bottleExists: Bool) -> SheetRequest? {
         switch r {
-        case .remove, .rebuild: .plan(r)
+        case .remove, .rebuild, .update: .plan(r)
         case let .rollback(y, b, id): .rollback(year: y, bottle: b, id: id)
         case let .clearPoints(y, b, _, _): .points(year: y, bottle: b, clear: bottleExists ? "old" : "all")   // a new plan, shown again
         default: nil
@@ -47,6 +47,9 @@ enum SheetRequest: Identifiable, Equatable {
     var place: Place = .library
     var tab: VersionTab = .overview
     var sheet: SheetRequest?
+    var recover: BottleRef?
+    @ObservationIgnored private var afterRecover: SheetRequest?
+    var healthWanted = false                // Maintenance runs the check when it next shows
 
     func open(_ r: Route) {
         switch r {
@@ -61,7 +64,14 @@ enum SheetRequest: Identifiable, Equatable {
         place = .bottle(ref); tab = t; pending = .main
     }
 
-    func ask(_ s: SheetRequest) { sheet = s; pending = .main }
+    func ask(_ s: SheetRequest) { afterRecover = nil; sheet = s; pending = .main }
+
+    func recover(_ ref: BottleRef) { afterRecover = nil; recover = ref; pending = .main }
+
+    /// From the ladder to another sheet: one sheet leaves before the next comes.
+    func leaveRecover(then s: SheetRequest) { afterRecover = s; recover = nil }
+
+    func recoverGone() { if let s = afterRecover { ask(s) } }
 }
 
 extension View {

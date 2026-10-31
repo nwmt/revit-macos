@@ -59,6 +59,13 @@ struct BottleMenu: View {
         } else {
             Button("Open Revit") { Task { await RevitActions.open(app: app, year: item.year, bottle: item.bottle) } }
         }
+        if !item.recent.isEmpty {
+            Menu("Open Recent") {
+                ForEach(item.recent, id: \.path) { f in
+                    Button(f.name) { if let p = f.path { Task { await env.files?.add([URL(fileURLWithPath: p)]) } } }
+                }
+            }
+        }
         let viewer = AppLinks.viewerApp(year: item.year, bottle: item.bottle, home: home)
         if !item.running, !item.starting, FileManager.default.fileExists(atPath: viewer.path) {
             Button("Open Revit Viewer") { Task { await RevitActions.open(app: app, year: item.year, bottle: item.bottle, viewer: true) } }
@@ -66,6 +73,7 @@ struct BottleMenu: View {
         }
         Button("Revit \(String(item.year)) in \(env.name)…") { env.router.page(ref) }
         Divider()
+        if item.running { Button("Revit not responding?…") { env.router.recover(ref) } }
         Button("Force quit…") { forceQuit() }.disabled(!changes)
     }
 

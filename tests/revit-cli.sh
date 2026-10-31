@@ -976,6 +976,10 @@ check "update --dry-run --json: the plan" jq_ 'exit !($d->{blocked} eq "" && $d-
 check "update --dry-run changes nothing" eval '[ ! -L "$R/installers/revit2025" ] && [ -d "$R/installers/extracted/revit2025" ]'
 reset; up_world; mkdir -p "$R/installers/extracted/revit2025/x"; echo i > "$R/installers/extracted/revit2025/x/RVT_2025_B_002_002.7z"; up_plan "$R/installers/extracted/revit2025/x"
 check "update: a folder inside what is replaced is blocked" jq_ 'exit !($d->{blocked} =~ /Choose a folder outside/)'
+reset; up_world; mkdir -p "$R/installers/extracted/revit2025.partial/x"; echo i > "$R/installers/extracted/revit2025.partial/x/RVT_2025_B_002_002.7z"; up_plan "$R/installers/extracted/revit2025.partial/x"
+check "update: a folder the unpacker clears is blocked" jq_ 'exit !($d->{blocked} =~ /Choose a folder outside/)'
+reset; up_world; rm -rf "$R/installers/revit2025"; touch "$R/installers/revit2025"; up_plan "$T/new"
+check "update: a file in the installer's place is blocked" jq_ 'exit !($d->{blocked} =~ /is a file, not a folder/)'
 reset; up_world; mkdir -p "$R/installers/revit2025-dl/x"; echo i > "$R/installers/revit2025-dl/x/RVT_2025_B_002_002.7z"; up_plan "$R/installers/revit2025-dl/x"
 check "update: a folder inside the old downloads is blocked" jq_ 'exit !($d->{blocked} =~ /Choose a folder outside/)'
 reset; up_world; mkdir -p "$R/installers/revit2025/x"; echo i > "$R/installers/revit2025/x/RVT_2025_B_002_002.7z"; up_plan "$R/installers/revit2025/x"

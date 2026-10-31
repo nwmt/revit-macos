@@ -87,7 +87,10 @@ struct PlanSheet: View {
 
     private var year: Int { switch request { case .plan(let r): r.year; case .rollback(let y, _, _), .points(let y, _, _): y } }
     private var bottle: String { switch request { case .plan(let r): r.bottle; case .rollback(_, let b, _), .points(_, let b, _): b } }
-    private var isRebuild: Bool { if case .plan(.rebuild) = request { true } else { false } }
+    private var isRebuild: Bool {
+        switch request { case .plan(.rebuild), .plan(.update): true; default: false }
+    }
+    private var blocked: Bool { if case .bottle(let p)? = plan, let b = p.blocked, !b.isEmpty { true } else { false } }
     private var pointPossible: Bool { if case .bottle(let p)? = plan { p.restorePoint == true } else { false } }
 
     var body: some View {
@@ -114,7 +117,7 @@ struct PlanSheet: View {
                 Spacer()
                 Button("Cancel", role: .cancel) { going?.cancel(); dismiss() }.keyboardShortcut(.cancelAction)
                 Button(goWord) { go() }.keyboardShortcut(.defaultAction).tint(destructive ? .red : .accentColor)
-                    .disabled(plan == nil || !gate.open || working || app.isBusy)
+                    .disabled(plan == nil || blocked || !gate.open || working || app.isBusy)
             }
         }
         .padding(20).frame(width: 520, alignment: .topLeading)
@@ -122,7 +125,18 @@ struct PlanSheet: View {
         .onDisappear { going?.cancel() }   // however the sheet closes, a Go still reading its plan stops there
     }
 
+    @ViewBuilder private func updateLines(_ p: RemovePlan) -> some View {
+        if let b = p.blocked, !b.isEmpty {
+            Text(b).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+        } else {
+            Text("Revit \(p.buildNow.flatMap { $0.isEmpty ? nil : $0 } ?? String(localized: "(unknown)")) → \(p.buildNew.flatMap { $0.isEmpty ? nil : $0 } ?? String(localized: "(unknown)"))").font(.headline)
+            if p.newer == false { Text("This installer is not newer than the Revit in this bottle.").foregroundStyle(.orange) }
+            if p.newer == nil { Text("The version could not be read.").font(.callout).foregroundStyle(.secondary) }
+        }
+    }
+
     @ViewBuilder private func bottlePlan(_ p: RemovePlan) -> some View {
+        if case .plan(.update) = request { updateLines(p) }
         if isRebuild {
             Toggle("Keep a restore point", isOn: $keepPoint).disabled(!pointPossible)
             Text(keepPoint && pointPossible
@@ -155,6 +169,7 @@ struct PlanSheet: View {
     private var title: String {
         switch request {
         case .plan(.remove): String(localized: "Remove Revit \(String(year)) (\(bottle))?")
+        case .plan(.update): String(localized: "Update Revit \(String(year)) (\(bottle))?")
         case .plan: String(localized: "Rebuild Revit \(String(year)) (\(bottle))?")
         case .rollback: String(localized: "Roll back Revit \(String(year)) (\(bottle))?")
         case .points: String(localized: "Delete restore points of \(bottle)?")
@@ -164,6 +179,7 @@ struct PlanSheet: View {
     private var goWord: String {
         switch request {
         case .plan(.remove): String(localized: "Remove")
+        case .plan(.update): String(localized: "Update")
         case .plan: String(localized: "Rebuild")
         case .rollback: String(localized: "Roll Back")
         case .points: String(localized: "Delete")
@@ -173,7 +189,7 @@ struct PlanSheet: View {
     private var destructive: Bool {
         switch request {
         case .rollback: false
-        case .plan(.rebuild): !(keepPoint && pointPossible)
+        case .plan(.rebuild), .plan(.update): !(keepPoint && pointPossible)
         default: true
         }
     }
@@ -188,7 +204,7 @@ struct PlanSheet: View {
     private func read() async -> LoadedPlan? {
         let args: [String]
         switch request {
-        case .plan(let r): args = [r.arguments[0], String(year), bottle, "--dry-run", "--json"]
+        case .plan(let r): args = r.planArguments
         case .rollback(_, _, let id): args = ["rollback", String(year), bottle, "--to", id, "--dry-run", "--json"]
         case .points(_, _, let c): args = ["points", String(year), bottle, "--clear", c, "--dry-run", "--json"]
         }

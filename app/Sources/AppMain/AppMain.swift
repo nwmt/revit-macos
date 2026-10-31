@@ -65,6 +65,7 @@ struct AppMain: App {
     let trackpad: TrackpadModel?
     let theme: ThemeSync?
     let files: FileOpenModel?
+    let warm: WarmModel?
     /// What the menu shows. Rebuilding an open menu closes its submenus, so it is updated only while no menu is open
     /// (AppKit says when menu tracking begins and ends) and only when it differs.
     private(set) var menu: MenuContent?
@@ -92,7 +93,7 @@ struct AppMain: App {
     func syncMenu() {
         guard !menuOpen, let app else { return }
         let m = MenuContent.make(status: app.status, watched: app.watched, failure: app.failure, busy: app.isBusy,
-                                 trackpad: trackpad?.line ?? .off, starting: Set(app.revitStarting.keys))
+                                 trackpad: trackpad?.line ?? .off, starting: Set(app.revitStarting.keys), recent: app.recent)
         if m != menu { menu = m }
     }
 
@@ -126,8 +127,12 @@ struct AppMain: App {
             theme = ThemeSync(engine: ProcessEngine(engine: engine, environment: EngineEnvironment.make(from: env)))
             files = FileOpenModel(engine: ProcessEngine(engine: engine, environment: EngineEnvironment.make(from: env)),
                                   ask: FileOpenDialogs(router: router))
+            let w = WarmModel(engine: ProcessEngine(engine: engine, environment: EngineEnvironment.make(from: env)))
+            warm = w
+            LaunchInfo.quitting = { w.cancel() }
         } else {
             app = nil
+            warm = nil
             wizard = nil
             settings = nil
             trackpad = nil

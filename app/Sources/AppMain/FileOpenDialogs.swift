@@ -14,6 +14,7 @@ import AppKit
 @MainActor enum LaunchInfo {
     static var loginItem = false
     static var reopen: (() -> Void)?
+    static var quitting: (@MainActor () -> Void)?
 }
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -24,6 +25,8 @@ import AppKit
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationWillTerminate(_ notification: Notification) { LaunchInfo.quitting?() }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { LaunchInfo.reopen?() }

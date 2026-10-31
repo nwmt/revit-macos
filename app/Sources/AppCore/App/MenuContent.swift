@@ -10,10 +10,11 @@ public struct MenuContent: Equatable {
 
     /// busy = AppModel.isBusy (it also knows a start under way).
     public static func make(status: EngineStatus?, watched: WatchedRun?, failure: Failure?, busy: Bool,
-                            trackpad: TrackpadLine = .off, starting: Set<String> = []) -> MenuContent {
+                            trackpad: TrackpadLine = .off, starting: Set<String> = [], recent: [String: [RecentFile]] = [:]) -> MenuContent {
         let bottles = (status?.bottles ?? []).compactMap { b in
             b.yearNumber.map { BottleItem(title: "Revit \($0) · \(b.name)", year: $0, bottle: b.name, running: b.running,
-                                         pids: b.revitPids, starting: starting.contains(b.name)) }
+                                         pids: b.revitPids, starting: starting.contains(b.name),
+                                         recent: Array((recent[b.name] ?? []).filter { $0.path != nil }.prefix(5))) }
         }
         var m = MenuContent(bottles: bottles, activity: activity(status: status, watched: watched, failure: failure), changesEnabled: !busy)
         switch trackpad {
@@ -62,6 +63,7 @@ public struct MenuContent: Equatable {
         switch command {
         case "install": String(localized: "Installing Revit \(y)")
         case "rebuild": String(localized: "Rebuilding Revit \(y)")
+        case "update": String(localized: "Updating Revit \(y)")
         case "addins": String(localized: "Adding add-ins to Revit \(y)")
         case "remove": String(localized: "Removing Revit \(y)")
         case "stop": String(localized: "Stopping Revit \(y)")
@@ -97,6 +99,7 @@ public struct BottleItem: Equatable, Sendable {
     public let running: Bool
     public var pids: [Int32] = []
     public var starting = false
+    public var recent: [RecentFile] = []
 }
 
 public struct Activity: Equatable, Sendable {

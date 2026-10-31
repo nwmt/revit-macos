@@ -100,7 +100,21 @@ public struct Support: Decodable, Equatable, Sendable {
 
 public struct Built: Decodable, Equatable, Sendable {
     public let shims, engine, time: String
-    public init(shims: String, engine: String, time: String) { self.shims = shims; self.engine = engine; self.time = time }
+    public let build: String?               // the Revit build it installed; nil from an older engine
+    public init(shims: String, engine: String, time: String, build: String? = nil) {
+        self.shims = shims; self.engine = engine; self.time = time; self.build = build
+    }
+}
+
+/// recent --json: what Revit opened last. path nil: a network path or a drive the bottle has not.
+public struct RecentFile: Decodable, Equatable, Sendable {
+    public let name, kind, `where`: String
+    public let path: String?
+    public init(name: String, kind: String, where w: String, path: String?) { self.name = name; self.kind = kind; self.where = w; self.path = path }
+}
+
+public struct RecentAnswer: Decodable, Equatable, Sendable {
+    public let files: [RecentFile]
 }
 
 /// gdrive.py state: never an email, never a folder name.
@@ -190,6 +204,11 @@ public struct RemovePlan: Decodable, Equatable, Sendable {
     public let addinsReset: Bool?           // rebuild only
     public let restorePoint: Bool?          // rebuild only: the run keeps a restore point; false from an older engine is nil
     public let notes: [String]
+    public let from: String?                // update only, as the next four
+    public let buildNow: String?
+    public let buildNew: String?
+    public let newer: Bool?                 // nil: one of the two builds is not known
+    public let blocked: String?             // why it cannot run, in words; "" when it can
 }
 
 public struct PlanItem: Decodable, Equatable, Sendable {

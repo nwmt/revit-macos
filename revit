@@ -566,7 +566,10 @@ update_check() { # ./revit update: what --from means now, with the same answer f
   UP_BLOCK=""; UP_SWAP=none; UP_NOW=""; UP_NEW=""; UP_NEWER=null; UP_NOTES=()
   UP_FROM="$(cd "$UPDATE_FROM" 2>/dev/null && pwd -P)" || { UP_FROM="$UPDATE_FROM"; UP_BLOCK="There is no folder $UPDATE_FROM."; return 0; }
   in="$(revit_input "$YEAR")"; dl="$in-dl"
-  if up_in "$UP_FROM" "$(revit_extracted "$YEAR")" || up_in "$UP_FROM" "$B" || up_in "$UP_FROM" "$dl"; then
+  local xp; xp="$(dirname "$(revit_extracted "$YEAR")")"; [ ! -d "$xp" ] || xp="$(cd "$xp" && pwd -P)"
+  case "$UP_FROM/" in "$xp/revit$YEAR"/*|"$xp/revit$YEAR".*/*)   # the unpacked folder, and its .partial and .old.* the unpacker clears
+    UP_BLOCK="This update replaces or deletes that folder. Choose a folder outside it."; return 0 ;; esac
+  if up_in "$UP_FROM" "$B" || up_in "$UP_FROM" "$dl" || up_in "$UP_FROM" "$(points_dir "$NAME")"; then
     UP_BLOCK="This update replaces or deletes that folder. Choose a folder outside it."; return 0
   fi
   if [ -L "$in" ]; then
@@ -581,6 +584,7 @@ update_check() { # ./revit update: what --from means now, with the same answer f
         UP_NOTES+=("The old installer files move to installers/revit$YEAR.old. Delete them when you no longer need them.")
       else UP_SWAP=empty; fi
     fi
+  elif [ -e "$in" ]; then UP_BLOCK="installers/revit$YEAR is a file, not a folder. Move it away, then try again."; return 0
   else UP_SWAP=link; fi
   dld="$UP_FROM"; [ "$UP_SWAP" != none ] || dld="$(revit_downloads "$YEAR")"   # after a swap the old downloads are gone
   d="$(python3 -I "$ROOT/tools/installer_source.py" detect "$UP_FROM" "$dld")" || { UP_BLOCK="Could not read that folder."; return 0; }
@@ -609,7 +613,7 @@ update_swap() { # under the lock, after the restore point: installers/revit<year
     link) rm -f "$in" ;;
   esac
   ln -s "$UP_FROM" "$in" || die "Could not link $UP_FROM. Nothing was deleted."
-  rm -rf "$in-dl"
+  rm -rf "$in-dl" || die "Could not delete the old downloads in $(tilde "$in-dl"). The bottle is still there."
 }
 
 # ---- run the command ----

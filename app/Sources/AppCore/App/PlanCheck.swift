@@ -6,6 +6,7 @@ extension RemovePlan {
     public var fingerprint: [String] {
         [command, bottle, String(nothing ?? false), String(addinsReset ?? false), String(restorePoint ?? true)]
             + delete.map(\.label) + ["|"] + (kept ?? []) + ["|"] + notes
+            + ["|", from ?? "", buildNew ?? "", blocked ?? ""]
     }
 }
 

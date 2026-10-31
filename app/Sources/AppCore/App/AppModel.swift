@@ -30,6 +30,8 @@ public enum CleanupAnswer: Equatable, Sendable { case report(CleanupReport), ref
     public private(set) var engineError: String?
     /// Bottles whose Open was pressed and whose Revit is not up yet (the launcher returns at once).
     public private(set) var revitStarting: [String: Date] = [:]
+    /// What each Revit opened last, by bottle. Read when it can have changed, not in the poll.
+    public private(set) var recent: [String: [RecentFile]] = [:]
 
     @ObservationIgnored let engine: any EngineClient
     @ObservationIgnored let defaults: UserDefaults
@@ -79,7 +81,9 @@ public enum CleanupAnswer: Equatable, Sendable { case report(CleanupReport), ref
         let wasRunning = Set((status?.bottles ?? []).filter(\.running).map(\.name))
         if status != s { status = s }   // an unchanged status is no change: the open menu must not rebuild
         expireStarting(now: Date())
-        if !wasRunning.subtracting(s.bottles.filter(\.running).map(\.name)).isEmpty, sweepTask == nil {
+        let quit = wasRunning.subtracting(s.bottles.filter(\.running).map(\.name))
+        for b in s.bottles where quit.contains(b.name) { await refreshRecent(b) }   // Revit writes the list when it quits
+        if !quit.isEmpty, sweepTask == nil {
             sweepTask = Task { [weak self] in _ = await self?.sweep(notify: true); self?.sweepTask = nil }   // a Revit quit
         }
         return true
@@ -109,6 +113,37 @@ public enum CleanupAnswer: Equatable, Sendable { case report(CleanupReport), ref
         return .starting
     }
 
+    public enum DebugOutcome: Equatable, Sendable { case started, refused(String) }
+
+    /// Start with a log: ./revit debug, which takes up to a minute. Starting… as for Open; the engine has its guards.
+    public func debug(year: Int, bottle: String) async -> DebugOutcome {
+        guard revitStarting[bottle] == nil else { return .refused(String(localized: "Revit is starting.")) }
+        revitStarting[bottle] = Date()
+        guard let out = await query(["debug", String(year), bottle]) else {
+            revitStarting[bottle] = nil
+            return .refused(engineError ?? "")
+        }
+        guard out.exitCode == 0 else {
+            revitStarting[bottle] = nil
+            return .refused(out.stderr.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        return .started
+    }
+
+    // MARK: recent files
+
+    /// recent --json. An answer that cannot be read keeps the list there is.
+    public func refreshRecent(_ b: Bottle) async {
+        guard let y = b.yearNumber, let out = await query(["recent", String(y), b.name, "--json"]), out.exitCode == 0,
+              let a = try? JSONDecoder.engine.decode(RecentAnswer.self, from: out.stdout) else { return }
+        if recent[b.name] != a.files { recent[b.name] = a.files }
+    }
+
+    /// Every Revit's list: at launch, and when a page that shows one appears.
+    public func refreshRecent() async {
+        for b in status?.bottles ?? [] { await refreshRecent(b) }
+    }
+
     func expireStarting(now: Date) {
         let up = Set((status?.bottles ?? []).filter(\.running).map(\.name))
         for (b, t) in revitStarting where up.contains(b) || now.timeIntervalSince(t) >= 180 { revitStarting[b] = nil }
@@ -122,7 +157,10 @@ public enum CleanupAnswer: Equatable, Sendable { case report(CleanupReport), ref
         var a = ["cleanup"]
         if all { a.append("--all") }
         if dryRun { a.append("--dry-run") }
-        if let t = targets { a += ["--targets", t.map(\.target).joined(separator: ",")] }
+        if let t = targets {
+            guard !t.isEmpty else { return .report(CleanupReport(items: [], skipped: [])) }   // none is none: an empty --targets would mean all
+            a += ["--targets", t.map(\.target).joined(separator: ",")]
+        }
         guard let out = await query(a + ["--json"]) else { return .refused(engineError ?? "") }
         // exit 1 with a report: some program could not be ended (its PID is in left)
         if let r = try? JSONDecoder.engine.decode(CleanupReport.self, from: out.stdout) { return .report(r) }
@@ -185,6 +223,8 @@ public enum CleanupAnswer: Equatable, Sendable { case report(CleanupReport), ref
 
     public func launch() async {
         await refresh()
+        await refreshRecent()
+        await closeOrphanWarm()
         let record = defaults.data(forKey: Self.recordKey).flatMap { try? JSONDecoder().decode(RunRecord.self, from: $0) }
         if let r = record, !r.pidStart.isEmpty, await engine.processStart(pid: r.pid) == r.pidStart {
             watch(URL(fileURLWithPath: r.ctx), record: r, supervisor: (r.pid, r.pidStart))   // events or not yet
@@ -206,6 +246,13 @@ public enum CleanupAnswer: Equatable, Sendable { case report(CleanupReport), ref
             watch(ctx, record: r, supervisor: (r.pid, r.pidStart))
             await poll()
         }
+    }
+
+    /// A folder listing the app asked for before it went away: no one can stop it now. Only that: a launch closes nothing else.
+    func closeOrphanWarm() async {
+        guard case let .report(r) = await cleanup(all: false, dryRun: true) else { return }
+        let lost = r.items.filter { $0.kind == "gdrive" && $0.reason == "parent_gone" }
+        if !lost.isEmpty { _ = await cleanup(all: false, dryRun: false, targets: lost) }
     }
 
     // MARK: following a run

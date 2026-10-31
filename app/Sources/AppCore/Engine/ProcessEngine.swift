@@ -43,6 +43,45 @@ public final class ProcessEngine: EngineClient, Sendable {
         }
     }
 
+    public func stream(_ args: [String], onLine: @escaping @Sendable (String) -> Void) async throws -> EngineOutput {
+        let p = Process()
+        // a group of its own, so Cancel reaches what it started: a child would hold the pipes open
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
+        p.arguments = ["-MPOSIX", "-e", "POSIX::setsid(); exec @ARGV or exit 127", "/bin/bash", engine.path] + args
+        p.environment = environment
+        p.standardInput = FileHandle.nullDevice
+        let out = Pipe(), err = Pipe()
+        p.standardOutput = out; p.standardError = err
+        try p.run()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { cont in
+                DispatchQueue.global().async {
+                    let e = Collected()
+                    let g = DispatchGroup()
+                    g.enter(); DispatchQueue.global().async { e.data = err.fileHandleForReading.readDataToEndOfFile(); g.leave() }
+                    var left = Data(), all = Data()
+                    while true {
+                        let d = out.fileHandleForReading.availableData
+                        if d.isEmpty { break }
+                        all += d; left += d
+                        while let i = left.firstIndex(of: 10) {
+                            onLine(String(decoding: left[left.startIndex..<i], as: UTF8.self))
+                            left = Data(left[left.index(after: i)...])
+                        }
+                    }
+                    if !left.isEmpty { onLine(String(decoding: left, as: UTF8.self)) }
+                    g.wait(); p.waitUntilExit()
+                    cont.resume(returning: EngineOutput(stdout: all, stderr: String(decoding: e.data, as: UTF8.self), exitCode: p.terminationStatus))
+                }
+            }
+        } onCancel: {
+            guard p.isRunning else { return }
+            let pid = p.processIdentifier
+            kill(-pid, SIGTERM)   // and KILL if a look at Google Drive holds it
+            DispatchQueue.global().asyncAfter(deadline: .now() + 3) { kill(-pid, SIGKILL) }
+        }
+    }
+
     public func start(_ args: [String], ctx: URL) async throws -> Int32 {
         var attr: posix_spawnattr_t? = nil
         var fa: posix_spawn_file_actions_t? = nil

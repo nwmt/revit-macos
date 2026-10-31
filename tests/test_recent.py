@@ -49,6 +49,7 @@ class Paths(unittest.TestCase):
         self.assertEqual(recent.where(r"G:\Shared drives\T\a.rvt"), "G: › Shared drives › T")
         self.assertEqual(recent.where(r"C:\Program Files\Samples\a.rvt"), "Samples")
         self.assertEqual(recent.where(r"\\server\share\a.rvt"), "share")
+        self.assertEqual(recent.where(r"Z:\Users\someone\Documents\Work\a.rvt"), "Work")
 
     def write(self, lines):
         d = os.path.join(self.b, "drive_c/users/crossover/AppData/Roaming/Autodesk/Revit/Autodesk Revit 2027")

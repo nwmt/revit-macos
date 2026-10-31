@@ -13,6 +13,9 @@ public protocol EngineClient: Sendable {
     /// A short command (status --json, find-installer, a dry run…): waits for it. A non-zero exit is a normal output
     /// (report's refusal is JSON on stdout with exit 1); throws only when it cannot start.
     func run(_ args: [String]) async throws -> EngineOutput
+    /// A command that takes a while and only says how far it is: onLine gets each line of its stdout. Cancelling the
+    /// task ends the command. No lock, no events, nothing written.
+    func stream(_ args: [String], onLine: @escaping @Sendable (String) -> Void) async throws -> EngineOutput
     /// A long command with ["--events", ctx.path] appended, in a session of its own; returns its pid. ctx must exist.
     func start(_ args: [String], ctx: URL) async throws -> Int32
     /// Cancel: right before the signal, in one go, the pid must be > 1, pidStart non-empty and equal to its
@@ -22,6 +25,14 @@ public protocol EngineClient: Sendable {
     func processStart(pid: Int32) async -> String?
     /// pid > 1 and the process leads its session and its group (what start makes).
     func isSessionLeader(_ pid: Int32) async -> Bool
+}
+
+extension EngineClient {
+    public func stream(_ args: [String], onLine: @escaping @Sendable (String) -> Void) async throws -> EngineOutput {
+        let out = try await run(args)
+        String(decoding: out.stdout, as: UTF8.self).split(separator: "\n").forEach { onLine(String($0)) }
+        return out
+    }
 }
 
 /// The environment of every engine process: the user's HOME, USER, LOGNAME, TMPDIR, a plain PATH, UTF-8, and the
