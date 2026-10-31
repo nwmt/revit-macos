@@ -2,7 +2,7 @@
 """The Mac side of tools/ui_server.py: a picture of a window of one process, and whether a person is using the mouse.
 Quartz through ctypes: this runs on the Python of the Command Line Tools, standard library only."""
 import ctypes
-import ctypes.util
+import os
 import struct
 import subprocess
 
@@ -53,17 +53,21 @@ def png_size(path):
 
 def screenshot(window, dst, run=None):
     """(width, height) of the picture of the window written to dst."""
-    (run or _capture)(window, dst)
     try:
+        os.unlink(dst)
+    except OSError:
+        pass
+    try:
+        (run or _capture)(window, dst)
         return png_size(dst)
-    except (OSError, ValueError):
+    except (OSError, ValueError, struct.error, subprocess.SubprocessError):
         raise NoPicture("No picture of the window. The app that runs this needs Screen Recording: System Settings, "
                         "Privacy & Security, Screen Recording.")
 
 
 def _capture(window, dst):
     subprocess.run(["/usr/sbin/screencapture", "-x", "-o", "-l", str(window), dst], stdin=subprocess.DEVNULL,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, timeout=20)
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=20)
 
 
 # ---- Quartz ----

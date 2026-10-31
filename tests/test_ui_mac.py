@@ -90,6 +90,19 @@ class Picture(unittest.TestCase):
             ui_mac.screenshot(1, os.path.join(self.d, "none.png"), run=lambda *a: None)
         self.assertIn("Screen Recording", str(e.exception))
 
+    def test_a_capture_that_times_out_is_no_picture(self):
+        def run(window, dst):
+            raise ui_mac.subprocess.TimeoutExpired("screencapture", 20)
+        with self.assertRaises(ui_mac.NoPicture):
+            ui_mac.screenshot(1, os.path.join(self.d, "a.png"), run=run)
+
+    def test_an_old_file_is_not_a_picture(self):
+        p = os.path.join(self.d, "a.png")
+        with open(p, "wb") as f:
+            f.write(b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13) + b"IHDR" + struct.pack(">II", 1, 1))
+        with self.assertRaises(ui_mac.NoPicture):
+            ui_mac.screenshot(1, p, run=lambda *a: None)
+
 
 if __name__ == "__main__":
     unittest.main()
