@@ -230,9 +230,8 @@ if [ "$CMD" = status ]; then
     case "$tm" in mac|light|dark) ;; *) tm="" ;; esac
     gd="$(python3 -I "$ROOT/tools/gdrive.py" state "$b" 2>/dev/null)" || gd=null   # G:: no email, no folder names
     n="$(basename "$b")"; rv=false; [ -f "$(revit_dir_unix "$b" "$ys")/Revit.exe" ] && rv=true
-    sj=""; [ "$ys" != 2027 ] || sj=",\"steel\":$(json_str "$(steel_state "$b" "$ys")")"   # the step steel's profile only
     pids="$(revit_pids "$b" "$ys" | paste -sd, -)"; run_=false; [ -z "$pids" ] || run_=true
-    b_json+="${b_json:+,}{\"name\":$(json_str "$n"),\"year\":$(json_str "$ys"),\"revit\":$rv,\"running\":$run_,\"revit_pids\":[$pids],\"addins\":[$(status_addins "$b" "$ys")],\"theme_mode\":$(json_str "$tm")$sj,\"gdrive\":$gd}"
+    b_json+="${b_json:+,}{\"name\":$(json_str "$n"),\"year\":$(json_str "$ys"),\"revit\":$rv,\"running\":$run_,\"revit_pids\":[$pids],\"addins\":[$(status_addins "$b" "$ys")],\"theme_mode\":$(json_str "$tm"),\"gdrive\":$gd}"
     human+="$(printf '  %-14s Revit %s%s' "$n" "$ys" "$([ $run_ = true ] && echo ', running')")"$'\n'
   done
   p_json=""; p_left=""; p_human=""   # restore points, of bottles that are gone too; sizes from point.conf: status runs often
@@ -643,6 +642,8 @@ case "$CMD" in
         || die "G: changes only while nothing runs in the bottle: quit Revit, then ./revit stop $YEAR$SFX and try again."
     fi
     echo "Revit $YEAR ($NAME): ${shown[*]}. Applies the next time Revit starts."
+    [ "${REVIT_STEEL:-}" != off ] \
+      || echo "Linked models open faster, but the steel connection tools are gone and a few models stop with a serious error while opening. If one does: ./revit set $YEAR$SFX steel=on"
     in_list retina "${list[@]}" \
       && echo "The first start may open Revit's window at another size: maximize it, quit Revit and start it again."
     run_ctx_new; sup_traps; lock_take --no-trap "./revit set $YEAR $NAME"; bottle_guard must_exist "$YEAR" "$NAME"

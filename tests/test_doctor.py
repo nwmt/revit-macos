@@ -1068,8 +1068,8 @@ class Settings(Sandbox):
 
     def test_steel_note_and_commands_name_the_bottle(self):
         for state, status, title, fix in (
-                ("on", "info", "Steel Connections on: models with links wait 1 to 3 minutes on first open", "./revit set 2027 rvt2027-b steel=off"),
-                ("off", "info", "Steel Connections off: links open faster, no steel connection tools", "./revit set 2027 rvt2027-b steel=on"),
+                ("on", "info", "Steel Connections on: models with links wait 1 to 3 minutes on first open", "./revit set 2027 rvt2027-b steel=off opens them faster, but a few models then stop with a serious error"),
+                ("off", "info", "Steel Connections off: links open faster, no steel connection tools", "./revit set 2027 rvt2027-b steel=on, if a model stops with a serious error while opening"),
                 ("mixed", "warn", "Steel Connections is set only in part", "./revit set 2027 rvt2027-b steel=on"),
                 ("missing", "warn", "a Steel Connections manifest is missing", "./revit rebuild 2027 rvt2027-b")):
             with self.subTest(state):

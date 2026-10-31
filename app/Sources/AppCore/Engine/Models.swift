@@ -49,17 +49,16 @@ public struct Bottle: Decodable, Equatable, Sendable {
     public let running: Bool
     public let revitPids: [Int32]           // the Mac processes of its Revit.exe; [] from an engine without the key
     public let addins: [String]
-    public let steel: String                // where Steel Connections' manifests are: on, off, mixed, missing, none; "" unknown
     public let themeMode: String            // the step theme's mode: mac, light, dark; "" without it or from an older engine
     public var yearNumber: Int? { Int(year) }
 
     public init(name: String, year: String, revit: Bool, running: Bool, revitPids: [Int32] = [], addins: [String],
-                themeMode: String = "", steel: String = "") {
+                themeMode: String = "") {
         self.name = name; self.year = year; self.revit = revit; self.running = running; self.revitPids = revitPids
-        self.addins = addins; self.themeMode = themeMode; self.steel = steel
+        self.addins = addins; self.themeMode = themeMode
     }
 
-    enum CodingKeys: String, CodingKey { case name, year, revit, running, revitPids, addins, themeMode, steel }
+    enum CodingKeys: String, CodingKey { case name, year, revit, running, revitPids, addins, themeMode }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -67,8 +66,7 @@ public struct Bottle: Decodable, Equatable, Sendable {
                   revit: try c.decode(Bool.self, forKey: .revit), running: try c.decode(Bool.self, forKey: .running),
                   revitPids: try c.decodeIfPresent([Int32].self, forKey: .revitPids) ?? [],
                   addins: try c.decode([String].self, forKey: .addins),
-                  themeMode: try c.decodeIfPresent(String.self, forKey: .themeMode) ?? "",
-                  steel: try c.decodeIfPresent(String.self, forKey: .steel) ?? "")
+                  themeMode: try c.decodeIfPresent(String.self, forKey: .themeMode) ?? "")
     }
 }
 

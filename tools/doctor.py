@@ -1525,10 +1525,10 @@ def steel_checks(f, b):
     cmd = f"./revit set {f['year']}{f['sfx']}"
     if s == "on":
         return [Check("settings.steel", "info", "Steel Connections on: models with links wait 1 to 3 minutes on first open",
-                      fix=f"{cmd} steel=off")]
+                      fix=f"{cmd} steel=off opens them faster, but a few models then stop with a serious error")]
     if s == "off":
         return [Check("settings.steel", "info", "Steel Connections off: links open faster, no steel connection tools",
-                      fix=f"{cmd} steel=on")]
+                      fix=f"{cmd} steel=on, if a model stops with a serious error while opening")]
     if s == "mixed":
         return [Check("settings.steel", "warn", "Steel Connections is set only in part", fix=f"{cmd} steel=on")]
     return [Check("settings.steel", "warn", "a Steel Connections manifest is missing", fix=f"./revit rebuild {f['year']}{f['sfx']}")]
