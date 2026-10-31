@@ -5,7 +5,7 @@ G:\\Shared drives, G:\\Other computers) and, if asked, second names for them (th
 the names a Russian Windows gives them).
 
   gdrive.py names <value>        check a names setting; prints the folders and their second names as JSON (code 2: bad)
-  gdrive.py state <bottle>       prints the state as JSON: mode, mapping, accounts, names, settings
+  gdrive.py state <bottle>       prints the state as JSON: mode, mapping, accounts, names, names_kind, settings
   gdrive.py advice <bottle> <year>   prints the level (ok, info, warn) and one line of advice
   gdrive.py sanitize <bottle>    copies stdin to stdout with Google Drive paths and email addresses hidden
   gdrive.py apply <bottle> [--mode auto|off|again|<email>] [--names <value>]
@@ -213,6 +213,8 @@ def state(b):
     out = {"mode": mode if mode in ("auto", "off") else "account",
            "mapping": "none", "accounts": ("zero", "one", "several")[min(len(acc), 2)],
            "names": 0, "settings": s is not None}
+    value = (s or {}).get("names", "en")
+    out["names_kind"] = value if value in ("en", "ru") else "en" if not value else "custom"   # never the names
     kind, links = mapped(b)
     want_acc, names = wanted(b, s)
     out["names"] = sum(len(v) for v in names.values())

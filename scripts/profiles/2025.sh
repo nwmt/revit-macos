@@ -1,4 +1,7 @@
 # Revit 2025: ODIS installer, .NET 8 (the 2025.5 update adds .NET 10; both get installed), sign-in in the browser.
+STATUS=works
+TESTED=2025.5
+GAPS="First PDF print may produce nothing"
 INSTALLER=odis
 DOTNET=net8
 PRODKEY=829Q1

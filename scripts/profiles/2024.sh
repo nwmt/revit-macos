@@ -1,4 +1,7 @@
 # Revit 2024: ODIS installer, Revit in RVT.msi plus the update's RVTSP*.msp, .NET Framework 4.8 as 2023;
+STATUS=works
+TESTED=2024.3.6
+GAPS="First PDF print may produce nothing"
 # sign-in in the browser (AdskIdentityManager), WebView2 and RealDWG as 2025.
 INSTALLER=odis
 DOTNET=netfx48

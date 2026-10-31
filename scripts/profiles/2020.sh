@@ -1,4 +1,7 @@
 # Revit 2020: Setup.ini installer (multi-part download), .NET Framework 4.7, sign-in in Revit's own window (AdSSO).
+STATUS=works
+TESTED=2020.2
+GAPS="Dynamo without 3D preview"
 INSTALLER=setupini
 DOTNET=netfx47                     # the installer's 4.7; 4.7.2 and 4.8 crash Revit 2020 under Wine
 PRODKEY=829L1

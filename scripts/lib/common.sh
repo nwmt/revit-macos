@@ -454,6 +454,15 @@ menu_apps_remove() { # $1 = bottle name: its CrossOver menu apps, then the folde
   return 0
 }
 
+revit_attempt_fresh() { # $1 = the bottle's open-start file: a start less than REVIT_OPEN_ATTEMPT_S ago, Revit perhaps
+  # not visible yet: it must not be started again (./revit open, ./revit start)
+  local t; t="$(cat "$1" 2>/dev/null)" && [[ "$t" =~ ^[0-9]+$ ]] && [ $(($(date +%s) - t)) -lt "${REVIT_OPEN_ATTEMPT_S:-120}" ]
+}
+revit_start_app() { # $1 = the Revit app, $2 = the open-start file. Under the lock. REVIT_OPENER: tests, a fake one
+  mkdir -p "$(dirname "$2")" && date +%s > "$2" || die "Cannot write in $(tilde "$(dirname "$2")")."
+  "${REVIT_OPENER:-/usr/bin/open}" "$1" </dev/null >/dev/null 2>&1 7>&- 8>&- 9>&- || { rm -f "$2"; die "Could not start $(tilde "$1")."; }
+}
+
 # ---- the run record: what ran in a bottle and how it ended, <bottle>/revit-macos/runs.ndjson (tools/runlog.py) ----
 runlog_engine() { # what made the run: app:<version> | git:<short HEAD>[+dirty: tracked files changed] | unknown. A copy
   # without .git asks no git: on a Mac without the Command Line Tools, /usr/bin/git opens an install prompt

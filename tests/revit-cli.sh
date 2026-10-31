@@ -502,13 +502,24 @@ revit_exe() { touch "$BOTTLES/$1/drive_c/Program Files/Autodesk/Revit $2/Revit.e
 reset; bottle rvt2024-a 2024 2024; revit_exe rvt2024-a 2024; bottle rvt2025-b 2025 ""; bottle exp "" ""; run "" status --json
 expect "status --json" 0 '"bottles":['
 check "status: valid JSON" eval 'printf "%s" "$OUT" | /usr/bin/perl -MJSON::PP -e "local \$/; JSON::PP->new->decode(<STDIN>)"'
-check "status: a Revit bottle" grep -qF '{"name":"rvt2024-a","year":"2024","revit":true,"running":false,"revit_pids":[],"addins":[],"theme_mode":"","gdrive":{"mode": "auto", "mapping": "none", "accounts": "zero", "names": 0, "settings": false}}' <<<"$OUT"
+check "status: a Revit bottle" grep -qF '{"name":"rvt2024-a","year":"2024","revit":true,"running":false,"revit_pids":[],"addins":[],"theme_mode":"","gdrive":{"mode": "auto", "mapping": "none", "accounts": "zero", "names": 0, "settings": false, "names_kind": "en"},' <<<"$OUT"
 check "status: a half-installed bottle" grep -qF '{"name":"rvt2025-b","year":"2025","revit":false,' <<<"$OUT"
+sj() { /usr/bin/perl -MJSON::PP -e 'my $d = decode_json($ARGV[0]); my ($b) = grep { $_->{name} eq $ARGV[1] } @{$d->{bottles}}; print JSON::PP->new->canonical->allow_nonref->encode($b->{$ARGV[2]})' "$OUT" "$1" "$2"; }
+check "status: support comes from the profile" eval '[ "$(sj rvt2024-a support)" = "{\"gaps\":\"First PDF print may produce nothing\",\"status\":\"works\",\"tested\":\"2024.3.6\"}" ]'
+check "status: settings only where the profile has the step" eval '[ "$(sj rvt2024-a settings)" = "{\"gdrive\":\"auto\"}" ]'
+check "status: a bottle no install record names" eval '[ "$(sj rvt2024-a built)" = null ]'
+check "status: the shims of this engine" grep -q '"shims_now":"' <<<"$OUT"
+mkdir -p "$BOTTLES/rvt2024-a/revit-macos"; printf '{"kind":"install","result":"ok","shims":"0.15.0","engine":"app:0.1.3","time":"t"}\n' > "$BOTTLES/rvt2024-a/revit-macos/runs.ndjson"
+run "" status --json; check "status: what built the bottle" eval '[ "$(sj rvt2024-a built)" = "{\"engine\":\"app:0.1.3\",\"shims\":\"0.15.0\",\"time\":\"t\"}" ]'
+reset; bottle rvt2027-a 2027 2027; bottle rvt2020-a 2020 2020; run "" status --json
+check "status: 2027 has all five settings" eval '[ "$(sj rvt2027-a settings)" = "{\"gdrive\":\"auto\",\"keys\":\"\",\"retina\":\"\",\"steel\":\"none\",\"theme\":\"\"}" ]'
+check "status: 2020 has no theme, no steel" eval '[ "$(sj rvt2020-a settings)" = "{\"gdrive\":\"auto\",\"keys\":\"\",\"retina\":\"\"}" ]'
+run "" status; check "status without --json: no new words" eval '! grep -q support <<<"$OUT"'
 check "status: a non-Revit bottle is left out" eval '! grep -q "\"exp\"" <<<"$OUT"'
 reset; bottle rvt2027-a 2027 2027; mkdir -p "$BOTTLES/rvt2027-a/dosdevices" "$H/Library/CloudStorage/GoogleDrive-someone@example.com/My Drive"
 env "${CLEAN_ENV[@]}" HOME="$H" python3 -I "$R/tools/gdrive.py" apply "$BOTTLES/rvt2027-a" --mode someone@example.com --names ru >/dev/null
 run "" status --json
-check "status: G: as gdrive.py state says, no email, no folder names" eval 'grep -qF "\"gdrive\":$(env "${CLEAN_ENV[@]}" HOME="$H" python3 -I "$R/tools/gdrive.py" state "$BOTTLES/rvt2027-a")}" <<<"$OUT" &&
+check "status: G: as gdrive.py state says, no email, no folder names" eval 'grep -qF "\"gdrive\":$(env "${CLEAN_ENV[@]}" HOME="$H" python3 -I "$R/tools/gdrive.py" state "$BOTTLES/rvt2027-a")," <<<"$OUT" &&
   grep -qF "\"gdrive\":{\"mode\": \"account\", \"mapping\": \"ok\", \"accounts\": \"one\", \"names\": 3" <<<"$OUT" && ! grep -q -e example.com -e "Other computers=" <<<"$OUT"'
 check "status: still valid JSON" eval 'printf "%s" "$OUT" | /usr/bin/perl -MJSON::PP -e "local \$/; JSON::PP->new->decode(<STDIN>)"'
 reset; bottle rvt2024-a 2024 2024; revit_exe rvt2024-a 2024; fake_revit rvt2024-a 2024; run "" status --json
@@ -1666,6 +1677,38 @@ echo current > "$BOTTLES/rvt2024-a/mark"; touch "$BOTTLES/rvt2024-a/.extra"; ino
 run "no" rollback 2024; expect "rollback can be cancelled" 1 "Cancelled"
 check "cancelled: bottle as it was" grep -qx current "$BOTTLES/rvt2024-a/mark"
 run "" rollback 2024 --dry-run; expect "rollback --dry-run" 0 "dry run"
+run "" rollback 2024 --to 20260101-000000 --dry-run --json
+check "rollback plan as JSON" eval '[ "$OUT" = "{\"command\":\"rollback\",\"year\":2024,\"bottle\":\"rvt2024-a\",\"id\":\"20260101-000000\",\"time\":\"2026-10-30T10:00:00Z\",\"bytes\":13000000000,\"bottle_exists\":true}" ]'
+run "" points 2024 --clear old --dry-run --json
+check "points plan as JSON" eval '[ "$OUT" = "{\"command\":\"points\",\"year\":2024,\"bottle\":\"rvt2024-a\",\"delete\":[{\"label\":\"restore point 20260101-000000\",\"bytes\":13000000000}],\"ids\":[\"20260101-000000\"],\"unfinished\":false}" ]'
+run "" points 2024 --clear-ids 20260101-000000,20250101-000000 --dry-run --json
+check "points --clear-ids plan: only the ids that are there" grep -qF '"ids":["20260101-000000"],' <<<"$OUT"
+run "" points 2024 --clear old --clear-ids 20260101-000000; expect "--clear with --clear-ids" 1 "not both"
+run "" points 2024 --clear-ids junk; expect "--clear-ids junk" 1 "as ./revit points lists them"
+run "" rollback 2024 --clear-unfinished; expect "--clear-unfinished is for points" 1 "for ./revit points only"
+ev_end() { grep -c '"event":"end"' "$1/events.ndjson"; }
+run "" rollback 2024 --yes --to 20260101-000000 --events "$T/ev-rb"; expect "rollback with events" 0 "is back"
+check "rollback events: start, one end, ok" eval 'grep -q "\"event\":\"start\"" "$T/ev-rb/events.ndjson" && [ "$(ev_end "$T/ev-rb")" = 1 ] && grep -q "\"result\":\"ok\"" "$T/ev-rb/events.ndjson"'
+fake_lock "somebody"; run "" rollback 2024 --yes --events "$T/ev-busy"; expect "rollback busy, with events" 1 "Another task"
+check "rollback busy: one end, busy" eval '[ "$(ev_end "$T/ev-busy")" = 1 ] && grep -q "\"result\":\"busy\"" "$T/ev-busy/events.ndjson"'
+stop_fakes
+fake_revit rvt2024-a 2024; run "" rollback 2024 --yes --events "$T/ev-run"; expect "rollback while Revit runs, with events" 1 ""
+check "rollback refused: one end, not ok" eval '[ "$(ev_end "$T/ev-run")" = 1 ] && ! grep -q "\"result\":\"ok\"" "$T/ev-run/events.ndjson"'
+stop_fakes
+pt_make rvt2024-a 2024 20260301-000000
+run "" points 2024 --yes --clear-ids 20260101-000000 --events "$T/ev-pt"; expect "points --clear-ids with events" 0 "Deleted."
+check "points --clear-ids: that one only, a newer point stays" eval '[ "$(pt_ids rvt2024-a)" = "20260201-000000 20260301-000000 " ]'
+check "points events: one end, ok" eval '[ "$(ev_end "$T/ev-pt")" = 1 ] && grep -q "\"result\":\"ok\"" "$T/ev-pt/events.ndjson"'
+run "" points 2024 --yes --clear-ids 20200101-000000; expect "points --clear-ids of a point that is gone" 0 "Nothing to delete"
+mkdir "$PR/rvt2024-a/restoring.20260201-000000"; run "" points 2024 --clear-ids 20260201-000000 --dry-run --json
+check "points plan: unfinished files are not deleted unless asked" eval 'grep -qF "\"unfinished\":false" <<<"$OUT"'
+run "" points 2024 --clear-ids 20260201-000000 --clear-unfinished --dry-run --json
+check "points plan: unfinished files, asked for" eval 'grep -qF "\"unfinished\":true" <<<"$OUT"'
+run "" points 2024 --yes --clear-ids 20260201-000000; expect "points: one id" 0 "Deleted."
+check "points: unfinished files stay unless shown" eval '[ -d "$PR/rvt2024-a/restoring.20260201-000000" ]'
+reset; pt_bottle rvt2024-a 2024; pt_make rvt2024-a 2024 20260101-000000; pt_make rvt2024-a 2024 20260201-000000
+echo newer > "$PR/rvt2024-a/20260201-000000/bottle/mark"; echo older > "$PR/rvt2024-a/20260101-000000/bottle/mark"
+echo current > "$BOTTLES/rvt2024-a/mark"; touch "$BOTTLES/rvt2024-a/.extra"; ino="$(stat -f %i "$BOTTLES/rvt2024-a")"
 run "2024" rollback 2024; expect "rollback" 0 "is back"
 check "rollback: the newest point" grep -qx newer "$BOTTLES/rvt2024-a/mark"
 check "rollback: hidden files of the point, none of the bottle" eval '[ -f "$BOTTLES/rvt2024-a/.hidden" ] && [ ! -e "$BOTTLES/rvt2024-a/.extra" ]'
@@ -1820,6 +1863,16 @@ run "" open "$H/Documents/bad.rvt"
 expect "open: not a Revit file → refused" 1 "Cannot tell which Revit saved bad.rvt"
 run "" open "$H/Documents/none.rvt"; expect "open: no such file" 1 "There is no file"
 
+open_world; touch "$T/opener-stays"; run "" start 2027; expect "start: starts the app" 0 ""
+check "start: one app, the bottle's" eval '[ "$(wc -l < "$T/opened" | tr -d " ")" = 1 ] && grep -q "Revit 2027 (rvt2027-a).app" "$T/opened"'
+run "" start 2027; expect "start again at once" 0 ""
+check "start again: no second app" eval '[ "$(wc -l < "$T/opened" | tr -d " ")" = 1 ]'
+REVIT_NO=1; POINT_ENV+=(REVIT_OPEN_START_WAIT=1 REVIT_OPEN_WAIT=1); run "" open "$H/Documents/p.rvt"
+check "open right after start: no second app" eval '[ "$(wc -l < "$T/opened" | tr -d " ")" = 1 ]'
+open_world; frevit; run "" start 2027; expect "start: Revit runs" 0 ""
+check "start: Revit runs, no app started" eval '[ ! -e "$T/opened" ]'
+open_world; fake_lock "somebody"; run "" start 2027; expect "start: busy → 75" 75 "Try again later"; stop_fakes
+open_world; rm -rf "$H/Applications/Revit 2027 (rvt2027-a).app"; run "" start 2027; expect "start: no app" 1 "There is no"
 open_world; frevit; run "" open "$H/Documents/p.rvt"
 expect "open: Revit runs → sent to it" 0 "Opened in Revit 2027 (rvt2027-a)."
 check "open: running Revit: no app started" eval '[ ! -e "$T/opened" ]'

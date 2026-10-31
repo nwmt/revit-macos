@@ -1,4 +1,7 @@
 # Revit 2027: ODIS installer, .NET 10, sign-in in the browser.
+STATUS=works
+TESTED=2027.3
+GAPS="Large models draw slowly the first time"
 # Enscape 4.18 LTS with its fixes: scripts/run-steps.sh 2027 <bottle> enscape trust.
 INSTALLER=odis
 DOTNET=net10

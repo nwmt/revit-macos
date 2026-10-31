@@ -36,6 +36,16 @@ for y in 2020 2023 2024 2025 2026 2027; do
   else fail "plan $y" "$(diff <(printf '%s\n' "$out") "$REPO/tests/plans/$y.txt")"; fi
 done
 
+# ---- what the app shows of a year: the profile against the docs ----
+for y in 2020 2021 2023 2024 2025 2026 2027; do
+  # shellcheck disable=SC1090
+  (STATUS=""; TESTED=""; GAPS=""; . "$REPO/scripts/profiles/$y.sh"
+   case "$STATUS" in works) w="Works" ;; mostly) w="Mostly works" ;; untested) w="Not tested" ;; *) exit 1 ;; esac
+   row="$(grep -F "| [$y](versions/$y.md) |" "$REPO/README.md")"
+   sed -n 3p "$REPO/versions/$y.md" | grep -qF "$w** on $TESTED" && grep -qF "$w | $TESTED | $GAPS |" <<<"$row") \
+    && ok "profile $y fits its version page and the README" || fail "profile $y: STATUS, TESTED or GAPS differ from versions/$y.md or the README"
+done
+
 # ---- install.sh, run for real with stub actions ----
 prep() { # preflight passes: fake CrossOver and tools, an unpacked installer, msls31.dll; every action is a stub
     reset; mkdir -p "$CXF/bin" "$T/bin" "$R/installers/extracted/revit2024" "$R/installers/redist/win7sp1/x64"

@@ -1,4 +1,7 @@
 # Revit 2021: ODIS installer (an app.*.xml per package), Revit itself in RVT.msi, .NET Framework 4.8, sign-in in
+STATUS=works
+TESTED=2021.1.2
+GAPS="2021.1.10 update not applied; Dynamo without 3D preview"
 # Revit's own window (AdSSO). Draft: not yet run end to end.
 INSTALLER=odis
 DOTNET=netfx48

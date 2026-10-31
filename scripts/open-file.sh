@@ -13,8 +13,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/scripts/lib/common.sh"; . "$ROOT/scripts/lib/shims.sh"; . "$ROOT/scripts/lib/wine.sh"
 [ $# = 4 ] || usage_die "Usage: scripts/open-file.sh <file> <bottle> <copy year> <plan>"
 FILE="$1"; ONLY="$2"; COPY="$3"; PLAN="$4"
-OPENER="${REVIT_OPENER:-/usr/bin/open}"   # tests: a fake one
-START_WAIT="${REVIT_OPEN_START_WAIT:-60}"; ATTEMPT_S="${REVIT_OPEN_ATTEMPT_S:-120}"
+START_WAIT="${REVIT_OPEN_START_WAIT:-60}"
 rf() { python3 -I -B "$ROOT/tools/rvtfile.py" "$@" 7>&- 8>&- 9>&-; }
 field() { python3 -I -c 'import json,sys; v=json.loads(sys.argv[1])
 for k in sys.argv[2:]:
@@ -49,9 +48,6 @@ WIN="$(rf winpath "$B" "$FILE")" || exit 1   # before Revit starts: a name Windo
 ensure_shim revitopen >/dev/null || die "revitopen.exe is missing. Run: ./scripts/build-shims.sh revitopen"
 EXE="$(shim_dir)/revitopen/revitopen.exe"
 ro() { w "$EXE" "$@" 2>/dev/null; }
-attempt_fresh() { # a start of ours less than ATTEMPT_S ago, Revit perhaps not visible yet: it must not be started again
-  local t; t="$(cat "$MARK" 2>/dev/null)" && [[ "$t" =~ ^[0-9]+$ ]] && [ $(($(date +%s) - t)) -lt "$ATTEMPT_S" ]
-}
 
 lock_take --busy-exit 75 "./revit open $YEAR $NAME"
 bottle_guard running_ok "$YEAR" "$NAME"
@@ -59,10 +55,9 @@ pids="$(revit_pids "$B" "$YEAR")"
 [ "$(wc -w <<<"$pids")" -le 1 ] || die "Two Revit $YEAR windows run in $NAME and Windows would pick one. Quit one, then try again."
 DEADLINE=$((SECONDS + ${REVIT_OPEN_WAIT:-300}))
 if [ -z "$pids" ]; then
-  if ! attempt_fresh; then
+  if ! revit_attempt_fresh "$MARK"; then
     [ -d "$APP" ] || die "There is no $(tilde "$APP"). Run ./revit rebuild $YEAR$(bottle_sfx "$NAME" "$YEAR"), or open Revit and use File > Open."
-    mkdir -p "$(dirname "$MARK")" && date +%s > "$MARK" || die "Cannot write in $NAME."
-    "$OPENER" "$APP" </dev/null >/dev/null 2>&1 7>&- 8>&- 9>&- || { rm -f "$MARK"; die "Could not start $(tilde "$APP")."; }
+    revit_start_app "$APP" "$MARK"
   fi
   for ((i = 0; i < START_WAIT; i++)); do revit_running "$B" "$YEAR" && break; sleep 1; done
 fi
@@ -116,7 +111,7 @@ prepare() { # right before sending: the file is what the plan saw. A copy is mad
 }
 
 while :; do
-  revit_running "$B" "$YEAR" || attempt_fresh || die "Revit $YEAR is not running in $NAME any more. Nothing was opened."
+  revit_running "$B" "$YEAR" || revit_attempt_fresh "$MARK" || die "Revit $YEAR is not running in $NAME any more. Nothing was opened."
   rc=3
   if revit_idle; then ro ready 10; rc=$?; else sleep 2; fi
   case "$rc" in

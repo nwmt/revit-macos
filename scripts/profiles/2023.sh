@@ -1,4 +1,7 @@
 # Revit 2023: ODIS installer, Revit itself in RVT.msi, .NET Framework 4.8, sign-in in Revit's own window (AdSSO).
+STATUS=works
+TESTED=2023.0
+GAPS="Dynamo node list empty"
 INSTALLER=odis
 DOTNET=netfx48
 PRODKEY=829O1

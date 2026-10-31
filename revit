@@ -10,7 +10,8 @@ DRY=0; LOG=0; KEEP=0   # --dry-run: remove and rebuild only. ./revit test: --log
 TARGETS=""   # ./revit cleanup: --targets <pid>:<start>,… (the app: what the person approved)
 RUN_ARG=""; EXCL=()   # ./revit report: --run <log_dir>, --exclude <file> (again for more files)
 WARM_OPTS=()   # ./revit gdrive warm: --depth N, --max N
-NO_POINT=0; POINT_TO=""; POINT_CLEAR=""   # ./revit rebuild --no-point, rollback --to <id>, points --clear old|all
+NO_POINT=0; POINT_TO=""; POINT_CLEAR=""; POINT_IDS=""; POINT_LEFT=0   # ./revit rebuild --no-point, rollback --to <id>, points --clear old|all
+# (the app: --clear-ids <id,…> only those, --clear-unfinished the files of a run cut short)
 OPEN_BOTTLE=""; COPY_FOR=""   # ./revit open --bottle <bottle>, --copy-for <year>
 RESULT_HINT=usage   # what an exit before the child means: usage until the arguments check out (Task 5 reads it)
 sup_end() { # $1 = exit status: the one end event, from the child's result file or from what an early exit means
@@ -68,6 +69,7 @@ Usage: ./revit <command> <year> [bottle]
   import    add a file the install needs from your Windows PC (import msls31 <file>)
   cache     show or clear downloaded and unpacked installer files (cache clear --yes)
   stop      quit a Revit that hangs
+  start     start Revit, or nothing when it runs or is starting (the app's Open button)
   open      open a file in the Revit it was saved in (open <file>, no year; never upgrades it: --copy-for <year> opens a copy)
   cleanup   close programs Wine or the app left running (no year: every bottle; --dry-run lists them; --all closes
             all of Wine, Revit too, without saving; --targets <pid>:<start>,… only those of them)
@@ -102,14 +104,15 @@ while [ $# -gt 0 ]; do
     --reuse-extracted) REUSE_X=1 ;;
     --reextract) REEXTRACT=1 ;;
     --dry-run) DRY=1 ;;
+    --clear-unfinished) POINT_LEFT=1 ;;
     --log) LOG=1 ;;
     --keep) KEEP=1 ;;
     --write) WRITE=1 ;;
     --no-point) NO_POINT=1 ;;
-    --events|--only|--accept-eula|--run|--exclude|--server|--tier|--name|--targets|--depth|--max|--to|--clear|--bottle|--copy-for)
+    --events|--only|--accept-eula|--run|--exclude|--server|--tier|--name|--targets|--depth|--max|--to|--clear|--clear-ids|--bottle|--copy-for)
       if [ $# -lt 2 ]; then FLAG_ERR="$1 needs a value"
       else case "$1" in --events) EVENTS_DIR="$2" ;; --only) ONLY="$2" ;; --accept-eula) EULA="$2" ;;
-        --run) RUN_ARG="$2" ;; --exclude) EXCL+=("$2") ;; --server) SERVER="$2" ;; --tier) TIER="$2" ;; --name) TOKEN_NAME="$2" ;; --depth|--max) WARM_OPTS+=("$1" "$2") ;; --targets) TARGETS="$2" ;; --to) POINT_TO="$2" ;; --clear) POINT_CLEAR="$2" ;; --bottle) OPEN_BOTTLE="$2" ;; --copy-for) COPY_FOR="$2" ;; esac; shift; fi ;;
+        --run) RUN_ARG="$2" ;; --exclude) EXCL+=("$2") ;; --server) SERVER="$2" ;; --tier) TIER="$2" ;; --name) TOKEN_NAME="$2" ;; --depth|--max) WARM_OPTS+=("$1" "$2") ;; --targets) TARGETS="$2" ;; --to) POINT_TO="$2" ;; --clear) POINT_CLEAR="$2" ;; --clear-ids) POINT_IDS="$2" ;; --bottle) OPEN_BOTTLE="$2" ;; --copy-for) COPY_FOR="$2" ;; esac; shift; fi ;;
     -h|--help) POS+=(help) ;;
     --*) FLAG_ERR="Unknown option: $1" ;;
     *) POS+=("$1") ;;
@@ -156,6 +159,9 @@ fi
 [ -z "$POINT_TO" ] || [[ "$POINT_TO" =~ ^[0-9]{8}-[0-9]{6}$ ]] || FLAG_ERR="--to takes a restore point as ./revit points lists it."
 [ -z "$POINT_CLEAR" ] || [ "$CMD" = points ] || FLAG_ERR="--clear is for ./revit points only."
 [ -z "$POINT_CLEAR" ] || [ "$POINT_CLEAR" = old ] || [ "$POINT_CLEAR" = all ] || FLAG_ERR="--clear is old (all but the newest) or all."
+[ -z "$POINT_IDS$POINT_CLEAR" ] || [ -z "$POINT_IDS" ] || [ -z "$POINT_CLEAR" ] || FLAG_ERR="Use --clear or --clear-ids, not both."
+[ -z "$POINT_IDS" ] && [ "$POINT_LEFT" = 0 ] || [ "$CMD" = points ] || FLAG_ERR="--clear-ids and --clear-unfinished are for ./revit points only."
+[ -z "$POINT_IDS" ] || [[ "$POINT_IDS" =~ ^[0-9]{8}-[0-9]{6}(,[0-9]{8}-[0-9]{6})*$ ]] || FLAG_ERR="--clear-ids takes restore points as ./revit points lists them."
 [ "$KEEP" = 0 ] || [ "$CMD" = test ] || FLAG_ERR="Unknown option: --keep"
 [ -z "$RUN_ARG" ] || [ "$CMD" = report ] || FLAG_ERR="--run is for ./revit report only."
 [ ${#EXCL[@]} = 0 ] || [ "$CMD" = report ] || FLAG_ERR="--exclude is for ./revit report only."
@@ -215,7 +221,7 @@ case "$MCPSUB" in   # no year, no bottle to check
     exec python3 -I -B "$ROOT/tools/mcp_gate.py" token-revoke --data "$DATA" --name "$YEAR_ARG" ;;
 esac
 case "$CMD" in
-  install|check|doctor|report|addins|import|cache|stop|cleanup|logs|debug|rebuild|remove|status|find-installer|link-installer|test|mcp|set|hittest|theme|gdrive|rollback|points|open) ;;
+  install|check|doctor|report|addins|import|cache|stop|cleanup|logs|debug|rebuild|remove|status|find-installer|link-installer|test|mcp|set|hittest|theme|gdrive|rollback|points|open|start) ;;
   ""|help|-h|--help) usage; exit 0 ;;
   *) echo "Unknown command: $CMD" >&2; echo >&2; usage >&2; exit 1 ;;
 esac
@@ -223,6 +229,18 @@ esac
 [ "$CMD" != open ] || exec "$ROOT/scripts/open-file.sh" "$YEAR_ARG" "$OPEN_BOTTLE" "$COPY_FOR" "$DRY"
 . "$ROOT/scripts/lib/addins.sh"
 . "$ROOT/scripts/lib/points.sh"
+status_extra() { # $1 = bottle path, $2 = year, $3 = theme_mode, $4 = gdrive state as JSON: the JSON keys support, settings, built
+  ( load_profile "$2" || { printf ',"support":null,"settings":{},"built":null'; exit 0; }
+    local st="$(python3 -I -B "$ROOT/tools/bottle_state.py" "$1" 2>/dev/null)" s=""; [ -n "$st" ] || st='{"retina":"","keys":"","built":null}'
+    jf() { /usr/bin/perl -MJSON::PP -e 'print JSON::PP->new->allow_nonref->canonical->encode(decode_json($ARGV[0])->{$ARGV[1]})' "$st" "$1"; }
+    in_list retina "${STEPS[@]}" && s+="${s:+,}\"retina\":$(jf retina)"
+    in_list mackeys "${STEPS[@]}" && s+="${s:+,}\"keys\":$(jf keys)"
+    in_list theme "${STEPS[@]}" && s+="${s:+,}\"theme\":$(json_str "$3")"
+    in_list steel "${STEPS[@]}" && s+="${s:+,}\"steel\":$(json_str "$(steel_state "$1" "$2")")"
+    in_list gdrive "${STEPS[@]}" && s+="${s:+,}\"gdrive\":$(/usr/bin/perl -MJSON::PP -e 'my $g = eval { decode_json($ARGV[0]) }; print JSON::PP->new->allow_nonref->encode(ref $g ? $g->{mode} : "")' "$4")"
+    printf ',"support":{"status":%s,"tested":%s,"gaps":%s},"settings":{%s},"built":%s' \
+      "$(json_str "$STATUS")" "$(json_str "$TESTED")" "$(json_str "$GAPS")" "$s" "$(jf built)" )
+}
 status_addins() { # $1 = bottle path, $2 = year: the ids of the add-ins installed there, as JSON strings
   local id out="" B="$1" YEAR="$2"
   for id in ${ADDIN_IDS[@]+"${ADDIN_IDS[@]}"}; do
@@ -242,7 +260,8 @@ if [ "$CMD" = status ]; then
     gd="$(python3 -I "$ROOT/tools/gdrive.py" state "$b" 2>/dev/null)" || gd=null   # G:: no email, no folder names
     n="$(basename "$b")"; rv=false; [ -f "$(revit_dir_unix "$b" "$ys")/Revit.exe" ] && rv=true
     pids="$(revit_pids "$b" "$ys" | paste -sd, -)"; run_=false; [ -z "$pids" ] || run_=true
-    b_json+="${b_json:+,}{\"name\":$(json_str "$n"),\"year\":$(json_str "$ys"),\"revit\":$rv,\"running\":$run_,\"revit_pids\":[$pids],\"addins\":[$(status_addins "$b" "$ys")],\"theme_mode\":$(json_str "$tm"),\"gdrive\":$gd}"
+    b_x=""; [ "$JSON" = 0 ] || b_x="$(status_extra "$b" "$ys" "$tm" "$gd")"
+    b_json+="${b_json:+,}{\"name\":$(json_str "$n"),\"year\":$(json_str "$ys"),\"revit\":$rv,\"running\":$run_,\"revit_pids\":[$pids],\"addins\":[$(status_addins "$b" "$ys")],\"theme_mode\":$(json_str "$tm"),\"gdrive\":$gd$b_x}"
     human+="$(printf '  %-14s Revit %s%s' "$n" "$ys" "$([ $run_ = true ] && echo ', running')")"$'\n'
   done
   p_json=""; p_left=""; p_human=""   # restore points, of bottles that are gone too; sizes from point.conf: status runs often
@@ -275,7 +294,7 @@ if [ "$CMD" = status ]; then
         "$(json_str "$(sed -n 's/^app_version=//p' "$ROOT/.app-bundle")")" "$(json_str "$ap")" "$(json_str "$(app_placement "$ap")")" \
         "$(json_str "$DATA")"
     fi
-    printf '"restore_points":[%s],"restore_leftovers":[%s],"bottles":[%s]}\n' "$p_json" "$p_left" "$b_json"
+    printf '"shims_now":%s,"restore_points":[%s],"restore_leftovers":[%s],"bottles":[%s]}\n' "$(json_str "$(runlog_shims)")" "$p_json" "$p_left" "$b_json"
   else
     [ -n "$human" ] && printf '%s' "$human" || echo "No Revit bottles yet. To install one: ./revit install <year>"
     if [ -n "$p_human" ]; then printf '%s' "$p_human"; echo "To see or delete them: ./revit points <year> [bottle] --clear old|all"; fi
@@ -561,6 +580,15 @@ case "$CMD" in
     bottle_guard must_exist "$YEAR" "$NAME"; not_busy
     run_ctx_new; sup_traps; lock_take --no-trap "./revit addins $YEAR $NAME"; bottle_guard must_exist "$YEAR" "$NAME"
     export RUN_KIND=addins; supervise "$ROOT/scripts/run-steps.sh" "$YEAR" "$NAME" "${ADDIN_STEPS[@]}" ;;
+  start)   # the path of ./revit open: under the lock, one attempt at a time, so a button and a file make one Revit
+    need_crossover; bottle_guard running_ok "$YEAR" "$NAME"
+    lock_take --busy-exit 75 "./revit start $YEAR $NAME"
+    bottle_guard running_ok "$YEAR" "$NAME"
+    [ -z "$(revit_pids "$B" "$YEAR")" ] || exit 0
+    SA="$HOME/Applications/Revit $YEAR ($NAME).app"; SM="$B/revit-macos/open-start"
+    ! revit_attempt_fresh "$SM" || exit 0
+    [ -d "$SA" ] || die "There is no $(tilde "$SA"). Run ./revit rebuild $YEAR$SFX."
+    revit_start_app "$SA" "$SM" ;;
   stop)
     need_crossover; bottle_guard running_ok "$YEAR" "$NAME"
     lock_take "./revit stop $YEAR $NAME"   # an install's Wine programs run in this bottle too: -k would end them
@@ -723,6 +751,12 @@ case "$CMD" in
     grep -qx "$id" <<<"$ids" || die "No restore point $id. Restore points: $(tr '\n' ' ' <<<"$ids")"
     PD="$(points_dir "$NAME")/$id"
     [ "$(volume_id "$PD")" = "$(volume_id "$BOTTLES")" ] || die "Restore point $id is on another volume than the bottles. Nothing changed."
+    if [ "$DRY$JSON" = 11 ]; then
+      by="$(point_get "$PD" bytes)"; [[ "$by" =~ ^[0-9]+$ ]] || by=0; be=false; [ ! -d "$B" ] || be=true
+      printf '{"command":"rollback","year":%s,"bottle":%s,"id":%s,"time":%s,"bytes":%s,"bottle_exists":%s}\n' "$((10#$YEAR))" \
+        "$(json_str "$NAME")" "$(json_str "$id")" "$(json_str "$(point_get "$PD" time)")" "$by" "$be"
+      exit 0
+    fi
     echo "This brings bottle $NAME back as it was at $(point_get "$PD" time) (restore point $id)."
     [ ! -d "$B" ] || echo "  Everything in the bottle's C: drive that changed since then is deleted."
     echo "  The restore point stays."
@@ -763,7 +797,7 @@ case "$CMD" in
     echo "Revit $YEAR ($NAME) is back. Start it from ~/Applications. The restore point stays: ./revit points $YEAR$SFX" ;;
   points)
     ids="$(points_ids "$NAME" "$YEAR")"
-    if [ -z "$POINT_CLEAR" ]; then
+    if [ -z "$POINT_CLEAR$POINT_IDS" ] && [ "$POINT_LEFT" = 0 ]; then
       if [ "$JSON" = 1 ]; then
         out=""
         while IFS= read -r id; do
@@ -781,8 +815,24 @@ case "$CMD" in
       echo "To bring one back: ./revit rollback $YEAR$SFX [--to <id>]. To delete them: ./revit points $YEAR$SFX --clear old|all"
       exit 0
     fi
-    targets="$ids"; [ "$POINT_CLEAR" = all ] || targets="$(tail -n +2 <<<"$ids")"
+    case "$POINT_CLEAR" in
+      all) targets="$ids" ;;
+      old) targets="$(tail -n +2 <<<"$ids")" ;;
+      *) targets="$(tr , '\n' <<<"$POINT_IDS" | grep -Fxf <(printf '%s\n' "$ids"))" ;;   # those named, if they are there
+    esac
     left="$(points_leftovers "$NAME")"
+    [ -n "$POINT_CLEAR" ] || [ "$POINT_LEFT" = 1 ] || left=""
+    if [ "$DRY$JSON" = 11 ]; then
+      del=""; idj=""; unf=false; [ -z "$left" ] || unf=true
+      while IFS= read -r id; do
+        [ -n "$id" ] || continue
+        by="$(point_get "$(points_dir "$NAME")/$id" bytes)"
+        del+="${del:+,}$(item_json "restore point $id" "${by:-null}")"; idj+="${idj:+,}$(json_str "$id")"
+      done <<<"$targets"
+      printf '{"command":"points","year":%s,"bottle":%s,"delete":[%s],"ids":[%s],"unfinished":%s}\n' "$((10#$YEAR))" \
+        "$(json_str "$NAME")" "$del" "$idj" "$unf"
+      exit 0
+    fi
     if [ -z "$targets" ] && [ -z "$left" ]; then echo "Nothing to delete."; exit 0; fi
     not_busy
     echo "This deletes:"
@@ -799,7 +849,7 @@ case "$CMD" in
       [ -n "$id" ] && grep -qx "$id" <<<"$now" || continue
       point_drop "$NAME" "$id" || die "Could not delete restore point $id. Delete it in Finder: $(tilde "$(points_dir "$NAME")")"
     done <<<"$targets"
-    points_clean "$NAME" || die "Could not delete all files in $(tilde "$(points_dir "$NAME")"). Delete them in Finder."
+    [ -z "$left" ] || points_clean "$NAME" || die "Could not delete all files in $(tilde "$(points_dir "$NAME")"). Delete them in Finder."
     points_tidy "$NAME"; echo "Deleted." ;;
   test)   # Revit plays journals in a temporary copy of the bottle (scripts/smoke.sh); documented in CONTRIBUTING
     need_crossover; bottle_guard must_exist "$YEAR" "$NAME"; not_busy

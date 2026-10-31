@@ -228,7 +228,7 @@ class State(Fake):
         self.mapping(a, ROLES + ("\u041c\u043e\u0439 \u0434\u0438\u0441\u043a", "\u041e\u0431\u0449\u0438\u0435 \u0434\u0438\u0441\u043a\u0438", "\u041a\u043e\u043c\u043f\u044c\u044e\u0442\u0435\u0440\u044b"))
         r = self.run_tool("state", self.b)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(json.loads(r.stdout), {"mode": "account", "mapping": "ok", "accounts": "one", "names": 3,
+        self.assertEqual(json.loads(r.stdout), {"mode": "account", "mapping": "ok", "accounts": "one", "names": 3, "names_kind": "ru",
                                                 "settings": True})
         self.assertNotIn("example.com", r.stdout + r.stderr)
 
@@ -268,7 +268,7 @@ class SettingsFile(Fake):
 
 class Advice(Fake):
     def adv(self, **kw):
-        s = dict({"mode": "auto", "mapping": "none", "accounts": "one", "names": 0, "settings": False}, **kw)
+        s = dict({"mode": "auto", "mapping": "none", "accounts": "one", "names": 0, "names_kind": "en", "settings": False}, **kw)
         return g.advice(s, 2027)
 
     def test_table(self):

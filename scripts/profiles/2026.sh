@@ -1,4 +1,7 @@
 # Revit 2026: ODIS installer, .NET 8 (the 2026.5 update adds .NET 10 and ships the runtime; both get installed).
+STATUS=mostly
+TESTED=2026.5
+GAPS="PDF, Dynamo, exports not tested"
 INSTALLER=odis
 DOTNET=net8
 PRODKEY=829R1
