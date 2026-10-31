@@ -73,6 +73,7 @@ Usage: ./revit <command> <year> [bottle]
   open      open a file in the Revit it was saved in (open <file>, no year; never upgrades it: --copy-for <year> opens a copy)
   cleanup   close programs Wine or the app left running (no year: every bottle; --dry-run lists them; --all closes
             all of Wine, Revit too, without saving; --targets <pid>:<start>,… only those of them)
+  recent    list the files Revit opened last (--json), from what Revit wrote when it last quit
   logs      list the newest logs
   debug     start Revit and record a log
   mcp       connect an AI assistant to a running Revit (--server pyrevit|python; docs/mcp.md); first give it a token:
@@ -223,7 +224,7 @@ case "$MCPSUB" in   # no year, no bottle to check
     exec python3 -I -B "$ROOT/tools/mcp_gate.py" token-revoke --data "$DATA" --name "$YEAR_ARG" ;;
 esac
 case "$CMD" in
-  install|check|doctor|report|addins|import|cache|stop|cleanup|logs|debug|rebuild|remove|status|find-installer|link-installer|test|mcp|set|hittest|theme|gdrive|rollback|points|open|start) ;;
+  install|check|doctor|report|addins|import|cache|stop|cleanup|logs|debug|recent|rebuild|remove|status|find-installer|link-installer|test|mcp|set|hittest|theme|gdrive|rollback|points|open|start) ;;
   ""|help|-h|--help) usage; exit 0 ;;
   *) echo "Unknown command: $CMD" >&2; echo >&2; usage >&2; exit 1 ;;
 esac
@@ -683,9 +684,14 @@ case "$CMD" in
       && echo "The first start may open Revit's window at another size: maximize it, quit Revit and start it again."
     run_ctx_new; sup_traps; lock_take --no-trap "./revit set $YEAR $NAME"; bottle_guard must_exist "$YEAR" "$NAME"
     export RUN_KIND=steps; supervise "$ROOT/scripts/run-steps.sh" "$YEAR" "$NAME" "${list[@]}" ;;
+  recent)   # Revit.ini only (tools/recent.py): no Wine, no lock, Revit may be open; never touches the files it lists
+    bottle_guard running_ok "$YEAR" "$NAME"
+    r_out="$(python3 -I -B "$ROOT/tools/recent.py" "$B" "$YEAR" 7>&- 9>&-)" || die "Could not read the recent files of $NAME."
+    if [ "$JSON" = 1 ]; then printf '{"command":"recent","year":%s,"bottle":%s,%s\n' "$((10#$YEAR))" "$(json_str "$NAME")" "${r_out#\{}"
+    else /usr/bin/perl -MJSON::PP -e 'for (@{decode_json($ARGV[0])->{files}}) { print "  $_->{name}  $_->{where}\n" }' "$r_out"; fi ;;
   debug)
-    need_crossover; bottle_guard must_exist "$YEAR" "$NAME"; not_busy
-    "$ROOT/scripts/launch.sh" "$YEAR" "$NAME" || exit 1
+    need_crossover; bottle_guard must_exist "$YEAR" "$NAME"
+    "$ROOT/scripts/launch.sh" "$YEAR" "$NAME" || exit $?   # 75: the lock is busy, try again
     echo "Make the problem happen, quit Revit, then run ./revit report $YEAR$SFX." ;;
   rebuild)
     need_crossover; bottle_guard must_exist "$YEAR" "$NAME"; not_busy

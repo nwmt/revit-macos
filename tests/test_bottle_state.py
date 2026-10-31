@@ -56,11 +56,11 @@ class BottleState(unittest.TestCase):
         self.assertEqual(self.state()["keys"], "")
 
     def test_built_is_the_newest_good_install(self):
-        good = {"kind": "install", "result": "partial", "shims": "0.15.0", "engine": "app:0.1.3", "time": "2026-10-30T21:34:22Z"}
+        good = {"kind": "install", "result": "partial", "shims": "0.15.0", "engine": "app:0.1.3", "time": "2026-10-30T21:34:22Z", "build": "27.3.0.1"}
         self.runs({"kind": "install", "result": "ok", "shims": "0.14.0", "engine": "x", "time": "t"}, good, "not json",
                   {"kind": "install", "result": "failed", "shims": "0.16.0", "engine": "y", "time": "t"},
                   {"kind": "addins", "result": "ok", "shims": "0.17.0", "engine": "z", "time": "t"})
-        self.assertEqual(self.state()["built"], {"shims": "0.15.0", "engine": "app:0.1.3", "time": "2026-10-30T21:34:22Z"})
+        self.assertEqual(self.state()["built"], {"shims": "0.15.0", "engine": "app:0.1.3", "time": "2026-10-30T21:34:22Z", "build": "27.3.0.1"})
 
     def test_status_keys(self):
         self.regs()
@@ -73,7 +73,7 @@ class BottleState(unittest.TestCase):
 
     def test_built_old_records(self):
         self.runs({"kind": "install", "result": "ok"})
-        self.assertEqual(self.state()["built"], {"shims": "", "engine": "", "time": ""})
+        self.assertEqual(self.state()["built"], {"shims": "", "engine": "", "time": "", "build": ""})
 
 
 if __name__ == "__main__":

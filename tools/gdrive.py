@@ -585,17 +585,16 @@ class Beat:
 
 
 def warm(b, folder, where="<year>", out=sys.stdout, every=5.0, depth=DEPTH, limit=LIMIT, pause=PAUSE):
-    roots = warm_roots(b, folder, where)
     listed = cloud_only = failed = timeouts = 0
     last = time.monotonic()
-    queue = [(start, 0) for _, start in roots]
     more = False   # folders left below the depth or past the limit
-    beat = Beat(b, every)
+    beat = Beat(b, every)   # before the first look at the folder: that look can hang on Google Drive too
 
     def term(*_):   # TERM (./revit cleanup) ends the walk through the finally below: the heartbeat goes too
         raise SystemExit(143)
     old = signal.signal(signal.SIGTERM, term)
     try:
+        queue = [(start, 0) for _, start in warm_roots(b, folder, where)]
         tried = 0   # folders asked for, listed or not: the limit and the pauses count every request
         while queue:
             if tried >= limit:

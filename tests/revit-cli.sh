@@ -334,6 +334,12 @@ reset; bottle rvt2027-a 2027 2027; fake_warm 700; cleanup --dry-run
 expect "a gdrive warm whose own heartbeat is older than the limit is stuck" 0 "a Google Drive folder does not answer"
 cleanup 2027; check "cleanup 2027 ends the stuck warm and its heartbeat" eval '[ "$RC" = 0 ] && gone "$LEFT" && [ ! -e "$BOTTLES/rvt2027-a/revit-macos/gdrive-warm-$LEFT" ]'
 reset; bottle rvt2027-a 2027 2027; fake_warm 5; cleanup --dry-run; expect "a slow gdrive warm that still makes progress is not stuck" 0 "Nothing is left running."
+reset; bottle rvt2027-a 2027 2027; mkdir -p "$T/fake/tools"
+printf 'import os, time\nopen(os.environ["RDY"], "w").write(str(os.getpid()))\ntime.sleep(60)\n' > "$T/fake/tools/gdrive.py"
+( RDY="$RDY" python3 -I "$T/fake/tools/gdrive.py" warm "$BOTTLES/rvt2027-a" 'G:\Projects' 2027 </dev/null >/dev/null 2>&1 & )
+fake_ready; LEFT="$(cat "$RDY")"; PIDS="$PIDS $LEFT"; cleanup --dry-run --json
+check "a gdrive warm whose app or terminal is gone is left over" grep -q '"parent_gone"' <<<"$OUT"
+cleanup 2027; check "cleanup ends it" eval '[ "$RC" = 0 ] && gone "$LEFT"'
 reset; bottle rvt2027-a 2027 2027; fake_warm ""; cleanup --dry-run; expect "a gdrive warm without a heartbeat is not stuck" 0 "Nothing is left running."
 reset; bottle rvt2027-a 2027 2027; fake_warm 700 -c 'import os, time; open(os.environ["RDY"], "w").close(); time.sleep(60)'; cleanup --dry-run
 expect "python -c naming gdrive.py warm is not a warm" 0 "Nothing is left running."
@@ -353,8 +359,6 @@ reset; bottle rvt2024-a 2024 2024; run "" debug 2024; expect "debug starts Revit
 check "debug passes the year" called "launch.sh 2024 rvt2024-a |"
 reset; bottle rvt2024-a 2024 2024; fake_revit rvt2024-a 2024; run "" debug 2024
 expect "debug refuses while Revit runs" 1 "Revit 2024 is running in rvt2024-a."
-reset; bottle rvt2024-a 2024 2024; fake_lock "run-steps.sh 2024 rvt2024-a wpfhw"; run "" debug 2024
-expect "debug refuses while another task runs" 1 "Another task is running: run-steps.sh 2024 rvt2024-a wpfhw."
 
 # ---- rebuild ----
 reset; bottle rvt2024-a 2024 2024; run "no" rebuild 2024; expect "rebuild can be cancelled" 1 "Cancelled. Nothing changed."
@@ -510,7 +514,7 @@ check "status: settings only where the profile has the step" eval '[ "$(sj rvt20
 check "status: a bottle no install record names" eval '[ "$(sj rvt2024-a built)" = null ]'
 check "status: the shims of this engine" grep -q '"shims_now":"' <<<"$OUT"
 mkdir -p "$BOTTLES/rvt2024-a/revit-macos"; printf '{"kind":"install","result":"ok","shims":"0.15.0","engine":"app:0.1.3","time":"t"}\n' > "$BOTTLES/rvt2024-a/revit-macos/runs.ndjson"
-run "" status --json; check "status: what built the bottle" eval '[ "$(sj rvt2024-a built)" = "{\"engine\":\"app:0.1.3\",\"shims\":\"0.15.0\",\"time\":\"t\"}" ]'
+run "" status --json; check "status: what built the bottle" eval '[ "$(sj rvt2024-a built)" = "{\"build\":\"\",\"engine\":\"app:0.1.3\",\"shims\":\"0.15.0\",\"time\":\"t\"}" ]'
 reset; bottle rvt2027-a 2027 2027; bottle rvt2020-a 2020 2020; run "" status --json
 check "status: 2027 has all five settings" eval '[ "$(sj rvt2027-a settings)" = "{\"gdrive\":\"auto\",\"keys\":\"\",\"retina\":\"\",\"steel\":\"none\",\"theme\":\"\"}" ]'
 check "status: 2020 has no theme, no steel" eval '[ "$(sj rvt2020-a settings)" = "{\"gdrive\":\"auto\",\"keys\":\"\",\"retina\":\"\"}" ]'
@@ -763,6 +767,21 @@ reset; bottle rvt2027-a 2027 2027; run "" set 2027 gdrive=again gdrive_names=ru;
 reset; bottle rvt2027-a 2027 2027; run "" set 2027 gdrive=maybe; expect "set gdrive: an unknown value" 1 "gdrive is auto, off, again or the email"
 reset; bottle rvt2027-a 2027 2027; fake_revit rvt2027-a 2027; run "" set 2027 gdrive=auto
 expect "set gdrive refuses while Revit runs" 1 "running"; check "set gdrive: nothing runs while Revit runs" not_called "run-steps.sh"
+# ---- recent ----
+recent_ini() { # $1 = bottle, the rest: lines of Revit.ini, in UTF-16 as Revit writes it
+  local d="$BOTTLES/$1/drive_c/users/crossover/AppData/Roaming/Autodesk/Revit/Autodesk Revit 2027"; shift; mkdir -p "$d"
+  python3 -c 'import sys; open(sys.argv[1], "wb").write("\r\n".join(sys.argv[2:]).encode("utf-16"))' "$d/Revit.ini" "$@"
+}
+reset; bottle rvt2027-a 2027 2027; run "" recent 2027 --json; expect "recent: no Revit.ini is no recent files" 0 '"files": []'
+recent_ini rvt2027-a '[Recent File List]' 'File1=C:\users\crossover\Documents\Work\a.rvt' 'File2=C:\x\b.pdf'
+run "" recent 2027 --json
+check "recent --json: the year, the bottle, Revit files only" eval 'python3 -c "import json, sys; d = json.load(sys.stdin)
+assert d[\"command\"] == \"recent\" and d[\"year\"] == 2027 and d[\"bottle\"] == \"rvt2027-a\"
+assert [f[\"where\"] for f in d[\"files\"]] == [\"Documents › Work\"]" <<<"$OUT"'
+run "" recent 2027; expect "recent in words" 0 "a.rvt  Documents › Work"
+run "" recent 2027 rvt2027-z --json; expect "recent: no such bottle" 1 "There is no bottle rvt2027-z"
+wine_left rvt2027-a; run "" recent 2027 --json; expect "recent takes no lock and no Wine" 0 "a.rvt"
+
 # ---- gdrive warm ----
 reset; bottle rvt2027-a 2027 2027; run "" gdrive; expect "gdrive: the usage" 2 "Usage: ./revit gdrive warm <year> [bottle] <folder"
 reset; bottle rvt2027-a 2027 2027; run "" gdrive warm 2027; expect "gdrive warm without a folder" 2 "Usage: ./revit gdrive warm"

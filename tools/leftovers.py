@@ -241,6 +241,8 @@ def classify(procs, bottles, cx, bottle=None, everything=False, started=None, no
                 hb = heartbeat(w, p)
                 if hb is not None and now - hb >= stuck_min:
                     add(p, "gdrive", "stuck", b)
+                elif p["ppid"] == 1:   # the app that asked for it, or the terminal, is gone: no one can stop it now
+                    add(p, "gdrive", "parent_gone", b)
         elif bottle is None and parent_gone(p, started):
             add(p, "helper", "parent_gone", None)
     items.sort(key=lambda i: i["pid"])

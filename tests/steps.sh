@@ -1026,7 +1026,19 @@ expect "launch.sh starts Revit and returns once it runs" 0 "Revit 2024 started (
 check "launch.sh: the bottle's wineserver under watch-server first, then Revit" eval '[ "$(sed -n 1p "$CALLS")" = "wineserver -k0" ] &&
   wait_for 3 grep -q "Revit.exe" "$CALLS"'
 in_repo 'lock_free && echo free'; expect "launch.sh: the Revit it started does not hold the lock" 0 "free"
+check "launch.sh leaves the mark ./revit start and open read" test -s "$BOTTLES/rvt2024-t/revit-macos/open-start"
 sleep 4
+OUT="$(cd / && "${SANDBOX_ENV[@]}" REVIT_CX_TMP="$T/cxtmp" REVIT_LAUNCH_WAIT=3 /bin/bash "$R/scripts/launch.sh" 2024 rvt2024-t 2>&1)"; RC=$?
+expect "launch.sh: a start under way is not doubled" 1 "Revit 2024 is starting"
+rm -f "$BOTTLES/rvt2024-t/revit-macos/open-start"; reset; mkbottle rvt2024-t 2024 2024; rule "Revit.exe" 7
+mkdir -p "$T/nopgrep"; printf '#!/bin/bash\nexit 1\n' > "$T/nopgrep/pgrep"; chmod +x "$T/nopgrep/pgrep"   # no Revit is ever seen
+OUT="$(cd / && "${SANDBOX_ENV[@]}" PATH="$T/nopgrep:$PATH" REVIT_CX_TMP="$T/cxtmp" REVIT_LAUNCH_WAIT=3 /bin/bash "$R/scripts/launch.sh" 2024 rvt2024-t 2>&1)"; RC=$?
+expect "launch.sh: Wine failing says so" 1 "did not start"
+check "launch.sh: a failed start takes its mark back" test ! -e "$BOTTLES/rvt2024-t/revit-macos/open-start"
+hold_lock "run-steps.sh 2024 rvt2024-t wpfhw"
+OUT="$(cd / && "${SANDBOX_ENV[@]}" REVIT_CX_TMP="$T/cxtmp" REVIT_LAUNCH_WAIT=3 /bin/bash "$R/scripts/launch.sh" 2024 rvt2024-t 2>&1)"; RC=$?
+expect "launch.sh: the lock busy is exit 75" 75 "Try again later."
+stop_bg
 
 # ---- watch-server: the bottle's wineserver with its log and how it ended ----
 CRASH='wineserver crashed, please enable coredumps (ulimit -c unlimited) and restart.'
