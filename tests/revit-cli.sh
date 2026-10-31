@@ -980,6 +980,8 @@ reset; up_world; mkdir -p "$R/installers/extracted/revit2025.partial/x"; echo i 
 check "update: a folder the unpacker clears is blocked" jq_ 'exit !($d->{blocked} =~ /Choose a folder outside/)'
 reset; up_world; rm -rf "$R/installers/revit2025"; touch "$R/installers/revit2025"; up_plan "$T/new"
 check "update: a file in the installer's place is blocked" jq_ 'exit !($d->{blocked} =~ /is a file, not a folder/)'
+reset; up_world; mkdir -p "$R/installers/revit2025-dl/update"; ln -s "$R/installers/revit2025-dl/update" "$T/new/update"; up_plan "$T/new"
+check "update: a link in the folder to what goes is blocked" jq_ 'exit !($d->{blocked} =~ /leads to files this update replaces/)'
 reset; up_world; mkdir -p "$R/installers/revit2025-dl/x"; echo i > "$R/installers/revit2025-dl/x/RVT_2025_B_002_002.7z"; up_plan "$R/installers/revit2025-dl/x"
 check "update: a folder inside the old downloads is blocked" jq_ 'exit !($d->{blocked} =~ /Choose a folder outside/)'
 reset; up_world; mkdir -p "$R/installers/revit2025/x"; echo i > "$R/installers/revit2025/x/RVT_2025_B_002_002.7z"; up_plan "$R/installers/revit2025/x"

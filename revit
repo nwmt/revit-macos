@@ -572,6 +572,12 @@ update_check() { # ./revit update: what --from means now, with the same answer f
   if up_in "$UP_FROM" "$B" || up_in "$UP_FROM" "$dl" || up_in "$UP_FROM" "$(points_dir "$NAME")"; then
     UP_BLOCK="This update replaces or deletes that folder. Choose a folder outside it."; return 0
   fi
+  local l t   # a link in the folder (an update/ next to the base) must not lead into what goes either
+  while IFS= read -r l; do
+    t="$(cd "$(dirname "$l")" 2>/dev/null && python3 -I -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$l")" || continue
+    case "$t/" in "$xp/revit$YEAR"/*|"$xp/revit$YEAR".*/*) UP_BLOCK="A link in that folder leads to files this update replaces. Copy the files in instead."; return 0 ;; esac
+    if up_in "$t" "$dl" || up_in "$t" "$in"; then UP_BLOCK="A link in that folder leads to files this update replaces. Copy the files in instead."; return 0; fi
+  done < <(/usr/bin/find "$UP_FROM" -maxdepth 3 -type l 2>/dev/null)
   if [ -L "$in" ]; then
     cur="$(cd "$in" 2>/dev/null && pwd -P)"; [ "$cur" = "$UP_FROM" ] || UP_SWAP=link
   elif [ -d "$in" ]; then
@@ -607,13 +613,14 @@ update_swap() { # under the lock, after the restore point: installers/revit<year
   local in; in="$(revit_input "$YEAR")"
   [ "$UP_SWAP" != none ] || return 0
   mkdir -p "$(dirname "$in")" || die "Cannot write to $(tilde "$(dirname "$in")")."
+  # first: the new link is what says the swap is done, and a run that stops here does it all again
+  rm -rf "$in-dl" || die "Could not delete the old downloads in $(tilde "$in-dl"). The bottle is still there."
   case "$UP_SWAP" in
-    real) mv "$in" "$in.old" || die "Could not move $(tilde "$in") away. Nothing was deleted." ;;
-    empty) rmdir "$in" || die "Could not replace the empty folder $(tilde "$in"). Nothing was deleted." ;;
+    real) mv "$in" "$in.old" || die "Could not move $(tilde "$in") away. The bottle is still there." ;;
+    empty) rmdir "$in" || die "Could not replace the empty folder $(tilde "$in"). The bottle is still there." ;;
     link) rm -f "$in" ;;
   esac
-  ln -s "$UP_FROM" "$in" || die "Could not link $UP_FROM. Nothing was deleted."
-  rm -rf "$in-dl" || die "Could not delete the old downloads in $(tilde "$in-dl"). The bottle is still there."
+  ln -s "$UP_FROM" "$in" || die "Could not link $UP_FROM. The bottle is still there."
 }
 
 # ---- run the command ----
