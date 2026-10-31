@@ -49,7 +49,7 @@ def built(bottle):
             last = r
     if last is None:
         return None
-    return {k: last.get(k) or "" for k in ("shims", "engine", "time", "build")}
+    return {**{k: last.get(k) or "" for k in ("shims", "engine", "time")}, "build": last.get("revit_build_expected") or ""}
 
 
 def status_keys(state, a):

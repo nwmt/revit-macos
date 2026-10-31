@@ -757,7 +757,7 @@ case "$CMD" in
     bottle_guard running_ok "$YEAR" "$NAME"
     r_out="$(python3 -I -B "$ROOT/tools/recent.py" "$B" "$YEAR" 7>&- 9>&-)" || die "Could not read the recent files of $NAME."
     if [ "$JSON" = 1 ]; then printf '{"command":"recent","year":%s,"bottle":%s,%s\n' "$((10#$YEAR))" "$(json_str "$NAME")" "${r_out#\{}"
-    else /usr/bin/perl -MJSON::PP -e 'for (@{decode_json($ARGV[0])->{files}}) { print "  $_->{name}  $_->{where}\n" }' "$r_out"; fi ;;
+    else /usr/bin/perl -CO -MJSON::PP -e 'for (@{decode_json($ARGV[0])->{files}}) { print "  $_->{name}  $_->{where}\n" }' "$r_out"; fi ;;
   debug)
     need_crossover; bottle_guard must_exist "$YEAR" "$NAME"
     "$ROOT/scripts/launch.sh" "$YEAR" "$NAME" || exit $?   # 75: the lock is busy, try again
