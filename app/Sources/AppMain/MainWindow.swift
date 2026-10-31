@@ -80,7 +80,10 @@ struct Sidebar: View {
 
     /// Never the app in ~/Applications: it would start a second Revit.
     static func show(_ pids: [Int32]) {
-        if !pids.contains(where: { NSRunningApplication(processIdentifier: $0)?.activate() == true }) {
+        // activation is cooperative: this app hands it over, or macOS refuses
+        let apps = pids.compactMap { NSRunningApplication(processIdentifier: $0) }
+        apps.forEach { NSApp.yieldActivation(to: $0) }
+        if !apps.contains(where: { $0.activate(from: .current, options: .activateAllWindows) }) {
             Confirm.tell(String(localized: "Could not bring Revit to the front."), "")
         }
     }
