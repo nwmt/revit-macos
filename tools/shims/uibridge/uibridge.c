@@ -20,20 +20,37 @@
  *
  *   state                 + dialog <hwnd> <class> <title> <enabled> <modeless> <rect> for each dialog, then
  *                         ok <main hwnd or 0> <title> <enabled> <responds> <rect>
- *   dialog <hwnd>         + <hwnd> <class> <text> <enabled> <visible> <rect> for each control, then ok <hwnd> <title>
+ *   dialog <hwnd>         + <hwnd> <class> <text> <enabled> <visible> <rect> for each control, then ok <hwnd> <title>;
+ *                         a WPF window answers as tree <hwnd> 7 200
  *   command <id>          WM_COMMAND to the main window, if it is enabled and answers: ok posted, else blocked <why>
  *   press <hwnd>          BM_CLICK to a button of Revit: ok pressed
  *   settext <hwnd> <text> WM_SETTEXT to an Edit of Revit: ok <the text read back>
+ *   tree <hwnd> <depth> <limit>
+ *                         UI Automation: + <depth> <control type> <name> <automation id> <class> <enabled> <rect> for each
+ *                         element, then ok <count> complete|partial. One at a time; the answer comes while other requests
+ *                         go on. partial: limit or 60 s reached.
+ *   click <top> <x> <y> <left|double|right>
+ *                         a real click in the window <top>, or the point's own child of it: ok restored, the cursor is
+ *                         back where it was, or ok moved, somebody moved it meanwhile and it stays
  *
- * A hwnd of another process is refused, so a stale hwnd that now names another program's window does nothing.
+ * A hwnd of another process is refused, so a stale hwnd that now names another program's window does nothing. A password
+ * field is never read or set.
+ *
+ * Wine's UI Automation sends WM_GETOBJECT without a timeout and has no patterns, so a tree only reads and runs on a thread
+ * of its own: when it gets no new element for 15 s the request answers busy, the thread stays, and more trees are busy
+ * until it is back. Ending this process would not stop the work inside Revit.
  *
  * Exit code: 0 (end of input, quit, Revit ended), 2 usage, 3 no Revit.exe in this bottle, 4 the ready file could not be
  * written, 5 more than one Revit.exe. Messages go to stderr.
  */
 #define _WIN32_WINNT 0x0A00
 #define WINVER 0x0A00
+#define COBJMACROS
+#define INITGUID
 #include <windows.h>
 #include <tlhelp32.h>
+#include <ole2.h>
+#include <uiautomation.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -42,9 +59,12 @@
 #define MAX_TEXT 2048
 #define RESPOND_MS 500   /* how long a window has to answer before it counts as busy */
 #define SEND_MS 2000
+#define TREE_STALL_MS 15000   /* no new element for this long: busy */
+#define TREE_TOTAL_MS 60000   /* about 7 elements a second: a long walk ends here, with what it has */
 
 static HANDLE out;
 static DWORD revit_pid;
+static CRITICAL_SECTION lock;   /* one answer line at a time, and it guards the static buffers of field() */
 
 static void put(const char *s, DWORD n)
 {
@@ -197,10 +217,13 @@ static void do_state(long seq)
     say("\n");
 }
 
+static int password(HWND h) { return (GetWindowLongPtrW(h, GWL_STYLE) & ES_PASSWORD) != 0; }
+
 static void edit_text(HWND h, WCHAR *t, int n)
 {
     DWORD_PTR r = 0;
     t[0] = 0;
+    if (password(h)) return;
     if (!SendMessageTimeoutW(h, WM_GETTEXT, n, (LPARAM)t, SMTO_ABORTIFHUNG, SEND_MS, &r)) t[0] = 0;
 }
 
@@ -226,6 +249,195 @@ static BOOL CALLBACK control_cb(HWND h, LPARAM l)
     return TRUE;
 }
 
+/* ---- tree ---- */
+static struct {
+    long seq;
+    HWND h;
+    int depth, limit;
+    int busy;        /* a request is on the thread */
+    int abandoned;   /* it answered busy: what is left of it stays quiet */
+    int partial;
+    DWORD started, tick;
+    HANDLE go, done;
+} job;
+
+static int abandoned(void)
+{
+    int a;
+    EnterCriticalSection(&lock);
+    a = job.abandoned;
+    LeaveCriticalSection(&lock);
+    return a;
+}
+
+static const WCHAR *text_prop(IUIAutomationElement *e, int id, VARIANT *v)
+{
+    VariantInit(v);
+    if (FAILED(IUIAutomationElement_GetCurrentPropertyValueEx(e, id, TRUE, v)) || v->vt != VT_BSTR || !v->bstrVal) return L"";
+    return v->bstrVal;
+}
+
+static int bool_prop(IUIAutomationElement *e, int id)
+{
+    VARIANT v;
+    int r;
+    VariantInit(&v);
+    r = SUCCEEDED(IUIAutomationElement_GetCurrentPropertyValueEx(e, id, TRUE, &v)) && v.vt == VT_BOOL && v.boolVal;
+    VariantClear(&v);
+    return r;
+}
+
+static void walk(IUIAutomationElement *e, IUIAutomationCondition *all, int depth, int *count)
+{
+    BSTR name = NULL;
+    VARIANT aid, cls;
+    CONTROLTYPEID type = 0;
+    RECT r = {0};
+    char b[64];
+    IUIAutomationElementArray *kids = NULL;
+    int n = 0, i;
+    if (abandoned()) return;
+    if (*count >= job.limit || GetTickCount() - job.started > TREE_TOTAL_MS) { job.partial = 1; return; }
+    (*count)++;
+    IUIAutomationElement_get_CurrentName(e, &name);
+    IUIAutomationElement_get_CurrentControlType(e, &type);
+    IUIAutomationElement_get_CurrentBoundingRectangle(e, &r);
+    {
+        const WCHAR *a = text_prop(e, UIA_AutomationIdPropertyId, &aid), *c = text_prop(e, UIA_ClassNamePropertyId, &cls);
+        int en = bool_prop(e, UIA_IsEnabledPropertyId);
+        EnterCriticalSection(&lock);
+        job.tick = GetTickCount();
+        if (!job.abandoned) {
+            num(job.seq);
+            say("\t+\t");
+            num(depth);
+            say("\t");
+            num((long)type);
+            field(name ? name : L"");
+            field(a);
+            field(c);
+            bit(en);
+            snprintf(b, sizeof b, "\t%ld,%ld,%ld,%ld\n", r.left, r.top, r.right, r.bottom);
+            say(b);
+        }
+        LeaveCriticalSection(&lock);
+    }
+    VariantClear(&aid);
+    VariantClear(&cls);
+    SysFreeString(name);
+    if (depth >= job.depth || r.right <= r.left) return;
+    if (FAILED(IUIAutomationElement_FindAll(e, TreeScope_Children, all, &kids)) || !kids) return;
+    IUIAutomationElementArray_get_Length(kids, &n);
+    for (i = 0; i < n; i++) {
+        IUIAutomationElement *k = NULL;
+        if (SUCCEEDED(IUIAutomationElementArray_GetElement(kids, i, &k)) && k) {
+            walk(k, all, depth + 1, count);
+            IUIAutomationElement_Release(k);
+        }
+    }
+    IUIAutomationElementArray_Release(kids);
+}
+
+static DWORD WINAPI tree_thread(void *unused)
+{
+    IUIAutomation *uia = NULL;
+    IUIAutomationCondition *all = NULL;
+    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    if (FAILED(CoCreateInstance(&CLSID_CUIAutomation, NULL, CLSCTX_INPROC_SERVER, &IID_IUIAutomation, (void **)&uia)) || !uia
+        || FAILED(IUIAutomation_CreateTrueCondition(uia, &all)) || !all) uia = NULL;
+    for (;;) {
+        IUIAutomationElement *root = NULL;
+        int count = 0;
+        const char *why = NULL;
+        WaitForSingleObject(job.go, INFINITE);
+        if (!uia) why = "UI Automation is not available";
+        else if (FAILED(IUIAutomation_ElementFromHandle(uia, job.h, &root)) || !root) why = "no element for this window";
+        else { walk(root, all, 0, &count); IUIAutomationElement_Release(root); }
+        EnterCriticalSection(&lock);
+        if (!job.abandoned) {
+            if (why) finish(job.seq, "error", why);
+            else { head(job.seq, "ok"); say("\t"); num(count); say(job.partial ? "\tpartial\n" : "\tcomplete\n"); }
+        }
+        job.busy = 0;
+        LeaveCriticalSection(&lock);
+        SetEvent(job.done);
+    }
+    return 0;
+}
+
+static DWORD WINAPI watchdog(void *unused)   /* a stalled request answers, whatever the thread does */
+{
+    HANDLE started = (HANDLE)unused;
+    for (;;) {
+        WaitForSingleObject(started, INFINITE);
+        while (WaitForSingleObject(job.done, 1000) == WAIT_TIMEOUT) {
+            EnterCriticalSection(&lock);
+            if (job.busy && !job.abandoned && GetTickCount() - job.tick > TREE_STALL_MS) {
+                job.abandoned = 1;
+                finish(job.seq, "busy", "Revit does not answer");
+            }
+            LeaveCriticalSection(&lock);
+        }
+    }
+    return 0;
+}
+
+static HANDLE tree_started;
+
+static void do_tree(long seq, HWND h, long depth, long limit)
+{
+    if (!ours(h)) { finish(seq, "refused", "not a window of Revit"); return; }
+    if (depth < 0 || limit < 1) { finish(seq, "refused", "bad depth or limit"); return; }
+    if (job.busy) { finish(seq, "busy", "a tree is still running"); return; }
+    if (!responds(h)) { finish(seq, "busy", "Revit does not answer"); return; }
+    job.seq = seq; job.h = h; job.depth = depth; job.limit = limit; job.busy = 1; job.abandoned = 0; job.partial = 0;
+    job.started = job.tick = GetTickCount();
+    ResetEvent(job.done);
+    SetEvent(tree_started);
+    SetEvent(job.go);
+}
+
+/* ---- click ---- */
+static void button(DWORD flags)
+{
+    INPUT i = {0};
+    i.type = INPUT_MOUSE;
+    i.mi.dwFlags = flags;
+    SendInput(1, &i, sizeof i);
+}
+
+static int near_point(POINT a, POINT b) { return labs(a.x - b.x) <= 2 && labs(a.y - b.y) <= 2; }
+
+static void do_click(long seq, HWND top, POINT p, const char *kind)
+{
+    HWND m = main_window();
+    POINT old, now;
+    int dbl = !strcmp(kind, "double"), right = !strcmp(kind, "right"), i;
+    DWORD down = right ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_LEFTDOWN, up = right ? MOUSEEVENTF_RIGHTUP : MOUSEEVENTF_LEFTUP;
+    if (!dbl && !right && strcmp(kind, "left")) { finish(seq, "refused", "unknown click"); return; }
+    if (!ours(top) || !IsWindowVisible(top)) { finish(seq, "refused", "not a visible window of Revit"); return; }
+    if (top == m && !IsWindowEnabled(m)) { finish(seq, "refused", "a dialog is open"); return; }
+    if (GetAncestor(WindowFromPoint(p), GA_ROOT) != top) { finish(seq, "refused", "another window is at this point"); return; }
+    SetForegroundWindow(top);
+    Sleep(100);
+    if (GetForegroundWindow() != top) { finish(seq, "refused", "the window did not come to the foreground"); return; }
+    GetCursorPos(&old);
+    SetCursorPos(p.x, p.y);
+    Sleep(60);
+    button(MOUSEEVENTF_MOVE);
+    Sleep(60);
+    for (i = 0; i <= dbl; i++) {
+        button(down);
+        Sleep(dbl ? 20 : 60);
+        button(up);
+        Sleep(dbl ? 20 : 60);
+    }
+    Sleep(40);
+    GetCursorPos(&now);
+    if (near_point(now, p)) { SetCursorPos(old.x, old.y); finish(seq, "ok", "restored"); }
+    else finish(seq, "ok", "moved");
+}
+
 static void do_dialog(long seq, HWND h)
 {
     struct controls a = { seq };
@@ -233,7 +445,8 @@ static void do_dialog(long seq, HWND h)
     static WCHAR t[MAX_TEXT + 1];
     if (!ours(h)) { finish(seq, "refused", "not a window of Revit"); return; }
     class_of(h, c, 64);
-    if (wcscmp(c, L"#32770")) { finish(seq, "refused", "not a Win32 dialog"); return; }
+    if (!wcsncmp(c, L"HwndWrapper", 11)) { do_tree(seq, h, 7, 200); return; }
+    if (wcscmp(c, L"#32770")) { finish(seq, "refused", "not a dialog"); return; }
     EnumChildWindows(h, control_cb, (LPARAM)&a);
     t[0] = 0;
     GetWindowTextW(h, t, MAX_TEXT + 1);
@@ -273,6 +486,7 @@ static void do_settext(long seq, HWND h, const char *text)
     if (!ours(h)) { finish(seq, "refused", "not a window of Revit"); return; }
     class_of(h, c, 32);
     if (wcscmp(c, L"Edit")) { finish(seq, "refused", "not an edit field"); return; }
+    if (password(h)) { finish(seq, "refused", "a password field"); return; }
     if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, -1, w, MAX_TEXT + 1)) {
         finish(seq, "refused", "the text is not valid or too long");
         return;
@@ -307,6 +521,14 @@ static int hwnd_of(const char *f, HWND *h)
     return 1;
 }
 
+static int number(const char *f, long *v)
+{
+    char *end;
+    if (!f || !*f) return 0;
+    *v = strtol(f, &end, 10);
+    return !*end;
+}
+
 static void line(char *s)
 {
     char *p = s, *fseq, *verb, *a, *end;
@@ -323,8 +545,21 @@ static void line(char *s)
     if (!strcmp(verb, "press") && hwnd_of(next_field(&p), &h) && !p) { do_press(seq, h); return; }
     if (!strcmp(verb, "settext") && hwnd_of(next_field(&p), &h) && p) { do_settext(seq, h, p); return; }
     if (!strcmp(verb, "command") && (a = next_field(&p)) && !p) {
-        long id = strtol(a, &end, 10);
-        if (*a && !*end) { do_command(seq, id); return; }
+        long id;
+        if (number(a, &id)) { do_command(seq, id); return; }
+    }
+    if (!strcmp(verb, "tree") && hwnd_of(next_field(&p), &h)) {
+        long depth, limit;
+        if (number(next_field(&p), &depth) && number(next_field(&p), &limit) && !p) { do_tree(seq, h, depth, limit); return; }
+    }
+    if (!strcmp(verb, "click") && hwnd_of(next_field(&p), &h)) {
+        long x, y;
+        char *kind;
+        if (number(next_field(&p), &x) && number(next_field(&p), &y) && (kind = next_field(&p)) && !p) {
+            POINT pt = { x, y };
+            do_click(seq, h, pt, kind);
+            return;
+        }
     }
 badline:
     seq = strtol(s, &end, 10);
@@ -346,7 +581,9 @@ static DWORD WINAPI reader(void *unused)   /* reads stdin; ends at its end */
                 if (!skipping) {
                     if (len && buf[len - 1] == '\r') len--;
                     buf[len] = 0;
+                    EnterCriticalSection(&lock);
                     line(buf);
+                    LeaveCriticalSection(&lock);
                 }
                 len = 0; skipping = 0;
             } else if (skipping) {
@@ -394,6 +631,12 @@ int wmain(int argc, WCHAR **argv)
     CloseHandle(ready);
     snprintf(hello, sizeof hello, "hello 1 %d %d %d %d\n", GetSystemMetrics(SM_XVIRTUALSCREEN),
              GetSystemMetrics(SM_YVIRTUALSCREEN), GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN));
+    InitializeCriticalSection(&lock);
+    job.go = CreateEventW(NULL, FALSE, FALSE, NULL);
+    job.done = CreateEventW(NULL, TRUE, TRUE, NULL);
+    tree_started = CreateEventW(NULL, FALSE, FALSE, NULL);
+    CreateThread(NULL, 0, tree_thread, NULL, 0, NULL);
+    CreateThread(NULL, 0, watchdog, tree_started, 0, NULL);
     say(hello);
     waits[0] = revit;
     waits[1] = CreateThread(NULL, 0, reader, NULL, 0, NULL);
