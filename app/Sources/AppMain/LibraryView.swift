@@ -101,7 +101,8 @@ private struct Card: View {
                 RevitButton(app: app, year: card.year, bottle: card.bottle, running: card.running, pids: card.pids, blocked: card.taskHere)
                 let viewer = AppLinks.viewerApp(year: card.year, bottle: card.bottle, home: home)
                 if !card.running, !card.starting, FileManager.default.fileExists(atPath: viewer.path) {
-                    Button("Viewer") { app.noteStarting(bottle: card.bottle); NSWorkspace.shared.open(viewer) }
+                    Button("Viewer") { Task { await RevitActions.open(app: app, year: card.year, bottle: card.bottle, viewer: true) } }
+                        .disabled(app.isBusy)
                 }
                 Spacer()
                 Button { env.router.page(card.ref) } label: { Image(systemName: "chevron.right") }

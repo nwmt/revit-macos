@@ -90,7 +90,7 @@ public enum CleanupAnswer: Equatable, Sendable { case report(CleanupReport), ref
     public enum OpenOutcome: Equatable, Sendable { case starting, running([Int32]), refused(String) }
 
     /// Open: ./revit start, the guard ./revit open uses. Marked before the first await: a second press does nothing.
-    public func open(year: Int, bottle: String) async -> OpenOutcome {
+    public func open(year: Int, bottle: String, viewer: Bool = false) async -> OpenOutcome {
         guard revitStarting[bottle] == nil else { return .starting }
         revitStarting[bottle] = Date()
         await refresh()
@@ -98,7 +98,7 @@ public enum CleanupAnswer: Equatable, Sendable { case report(CleanupReport), ref
             revitStarting[bottle] = nil
             return .running(b.revitPids)
         }
-        guard let out = await query(["start", String(year), bottle]) else {
+        guard let out = await query(["start", String(year), bottle] + (viewer ? ["--viewer"] : [])) else {
             revitStarting[bottle] = nil
             return .refused(engineError ?? "")
         }
@@ -108,9 +108,6 @@ public enum CleanupAnswer: Equatable, Sendable { case report(CleanupReport), ref
         }
         return .starting
     }
-
-    /// The Viewer starts Revit.exe too: Open waits for it as for its own start.
-    public func noteStarting(bottle: String) { revitStarting[bottle] = Date() }
 
     func expireStarting(now: Date) {
         let up = Set((status?.bottles ?? []).filter(\.running).map(\.name))

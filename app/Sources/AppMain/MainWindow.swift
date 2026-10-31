@@ -70,8 +70,8 @@ struct Sidebar: View {
 
 /// Open and Show Revit: one path for the menu, the Library, the version page and the end of an install.
 @MainActor enum RevitActions {
-    static func open(app: AppModel, year: Int, bottle: String) async {
-        switch await app.open(year: year, bottle: bottle) {
+    static func open(app: AppModel, year: Int, bottle: String, viewer: Bool = false) async {
+        switch await app.open(year: year, bottle: bottle, viewer: viewer) {
         case .starting: break
         case .running(let pids): show(pids)
         case .refused(let why): Confirm.tell(String(localized: "Revit \(String(year)) did not start."), why)

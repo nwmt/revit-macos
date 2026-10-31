@@ -256,9 +256,10 @@ func bottleStatus(running: Bool) -> EngineOutput {
     }
 }
 
-@MainActor @Test func theViewerCountsAsAStart() async {
+@MainActor @Test func theViewerGoesThroughTheSameStart() async {
     let h = Harness()
-    h.model.noteStarting(bottle: "b")
-    #expect(await h.model.open(year: 2027, bottle: "b") == .starting)
-    #expect(await !h.fake.calls.contains { $0.hasPrefix("run start") })
+    await h.fake.set(query: ["start", "2020", "b", "--viewer"], EngineOutput(stdout: Data(), stderr: "", exitCode: 0))
+    #expect(await h.model.open(year: 2020, bottle: "b", viewer: true) == .starting)
+    #expect(await h.model.open(year: 2020, bottle: "b") == .starting)
+    #expect(await h.fake.calls.filter { $0.hasPrefix("run start") } == ["run start 2020 b --viewer"])
 }

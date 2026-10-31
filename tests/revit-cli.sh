@@ -1869,6 +1869,10 @@ run "" start 2027; expect "start again at once" 0 ""
 check "start again: no second app" eval '[ "$(wc -l < "$T/opened" | tr -d " ")" = 1 ]'
 REVIT_NO=1; POINT_ENV+=(REVIT_OPEN_START_WAIT=1 REVIT_OPEN_WAIT=1); run "" open "$H/Documents/p.rvt"
 check "open right after start: no second app" eval '[ "$(wc -l < "$T/opened" | tr -d " ")" = 1 ]'
+open_world; touch "$T/opener-stays"; mkdir -p "$H/Applications/Revit Viewer 2027 (rvt2027-a).app"; run "" start 2027 --viewer; expect "start --viewer" 0 ""
+check "start --viewer: the Viewer's app" grep -q "Revit Viewer 2027 (rvt2027-a).app" "$T/opened"
+run "" open "$H/Documents/p.rvt"; check "open after the Viewer's start: no other app" eval '[ "$(wc -l < "$T/opened" | tr -d " ")" = 1 ]'
+run "" status --viewer; expect "--viewer is for start" 1 "for ./revit start only"
 open_world; frevit; run "" start 2027; expect "start: Revit runs" 0 ""
 check "start: Revit runs, no app started" eval '[ ! -e "$T/opened" ]'
 open_world; fake_lock "somebody"; run "" start 2027; expect "start: busy → 75" 75 "Try again later"; stop_fakes

@@ -98,7 +98,7 @@ Run them in Terminal, in the project folder. In a new Terminal window, first typ
 | `./revit rollback 2025` | Bring the bottle back from its newest restore point (`--to <id>`: an older one) |
 | `./revit points 2025` | List the bottle's restore points (`--clear old` keeps the newest, `--clear all` deletes all) |
 | `./revit remove 2025` | Delete Revit, its bottle and its apps |
-| `./revit start 2025` | Start Revit, or do nothing when it runs or is starting |
+| `./revit start 2025` | Start Revit (`--viewer`: Revit Viewer), or do nothing when it runs or is starting |
 | `./revit status` | List the Revit bottles and restore points on this Mac |
 | `./revit find-installer ~/Downloads/Revit` | Say which Revit installer a folder holds |
 | `./revit link-installer 2025 ~/Downloads/Revit` | Install Revit 2025 from that folder instead of `installers/revit2025/` |

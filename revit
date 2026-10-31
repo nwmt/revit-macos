@@ -10,7 +10,7 @@ DRY=0; LOG=0; KEEP=0   # --dry-run: remove and rebuild only. ./revit test: --log
 TARGETS=""   # ./revit cleanup: --targets <pid>:<start>,… (the app: what the person approved)
 RUN_ARG=""; EXCL=()   # ./revit report: --run <log_dir>, --exclude <file> (again for more files)
 WARM_OPTS=()   # ./revit gdrive warm: --depth N, --max N
-NO_POINT=0; POINT_TO=""; POINT_CLEAR=""; POINT_IDS=""; POINT_LEFT=0   # ./revit rebuild --no-point, rollback --to <id>, points --clear old|all
+VIEWER=0; NO_POINT=0; POINT_TO=""; POINT_CLEAR=""; POINT_IDS=""; POINT_LEFT=0   # ./revit rebuild --no-point, rollback --to <id>, points --clear old|all
 # (the app: --clear-ids <id,…> only those, --clear-unfinished the files of a run cut short)
 OPEN_BOTTLE=""; COPY_FOR=""   # ./revit open --bottle <bottle>, --copy-for <year>
 RESULT_HINT=usage   # what an exit before the child means: usage until the arguments check out (Task 5 reads it)
@@ -69,7 +69,7 @@ Usage: ./revit <command> <year> [bottle]
   import    add a file the install needs from your Windows PC (import msls31 <file>)
   cache     show or clear downloaded and unpacked installer files (cache clear --yes)
   stop      quit a Revit that hangs
-  start     start Revit, or nothing when it runs or is starting (the app's Open button)
+  start     start Revit (--viewer: the Viewer), or nothing when it runs or is starting (the app's Open button)
   open      open a file in the Revit it was saved in (open <file>, no year; never upgrades it: --copy-for <year> opens a copy)
   cleanup   close programs Wine or the app left running (no year: every bottle; --dry-run lists them; --all closes
             all of Wine, Revit too, without saving; --targets <pid>:<start>,… only those of them)
@@ -105,6 +105,7 @@ while [ $# -gt 0 ]; do
     --reextract) REEXTRACT=1 ;;
     --dry-run) DRY=1 ;;
     --clear-unfinished) POINT_LEFT=1 ;;
+    --viewer) VIEWER=1 ;;
     --log) LOG=1 ;;
     --keep) KEEP=1 ;;
     --write) WRITE=1 ;;
@@ -154,6 +155,7 @@ if [ "$CMD" = open ]; then
   [ "$DRY" = 0 ] || [ -z "$COPY_FOR" ] || FLAG_ERR="--copy-for makes a copy: it is not for --dry-run."
   [ -z "$COPY_FOR" ] || [[ "$COPY_FOR" =~ ^[0-9]{4}$ ]] || FLAG_ERR="--copy-for takes a Revit year."
 fi
+[ "$VIEWER" = 0 ] || [ "$CMD" = start ] || FLAG_ERR="--viewer is for ./revit start only."
 [ "$NO_POINT" = 0 ] || [ "$CMD" = rebuild ] || FLAG_ERR="--no-point is for ./revit rebuild only."
 [ -z "$POINT_TO" ] || [ "$CMD" = rollback ] || FLAG_ERR="--to is for ./revit rollback only."
 [ -z "$POINT_TO" ] || [[ "$POINT_TO" =~ ^[0-9]{8}-[0-9]{6}$ ]] || FLAG_ERR="--to takes a restore point as ./revit points lists it."
@@ -579,7 +581,7 @@ case "$CMD" in
     lock_take --busy-exit 75 "./revit start $YEAR $NAME"
     bottle_guard running_ok "$YEAR" "$NAME"
     [ -z "$(revit_pids "$B" "$YEAR")" ] || exit 0
-    SA="$HOME/Applications/Revit $YEAR ($NAME).app"; SM="$B/revit-macos/open-start"
+    SA="$HOME/Applications/Revit $YEAR ($NAME).app"; [ "$VIEWER" = 0 ] || SA="$HOME/Applications/Revit Viewer $YEAR ($NAME).app"; SM="$B/revit-macos/open-start"
     ! revit_attempt_fresh "$SM" || exit 0
     [ -d "$SA" ] || die "There is no $(tilde "$SA"). Run ./revit rebuild $YEAR$SFX."
     revit_start_app "$SA" "$SM" ;;

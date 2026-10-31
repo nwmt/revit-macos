@@ -61,7 +61,8 @@ struct BottleMenu: View {
         }
         let viewer = AppLinks.viewerApp(year: item.year, bottle: item.bottle, home: home)
         if !item.running, !item.starting, FileManager.default.fileExists(atPath: viewer.path) {
-            Button("Open Revit Viewer") { app.noteStarting(bottle: item.bottle); NSWorkspace.shared.open(viewer) }
+            Button("Open Revit Viewer") { Task { await RevitActions.open(app: app, year: item.year, bottle: item.bottle, viewer: true) } }
+                .disabled(!changes)
         }
         Button("Revit \(String(item.year)) in \(env.name)…") { env.router.page(ref) }
         Divider()
