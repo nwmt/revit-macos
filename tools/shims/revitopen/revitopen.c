@@ -25,7 +25,7 @@ static HDDEDATA CALLBACK callback(UINT t, UINT f, HCONV c, HSZ a, HSZ b, HDDEDAT
     return NULL;
 }
 
-static HCONV connect(void)
+static HCONV revit_conv(void)
 {
     HSZ service = DdeCreateStringHandleW(inst, L"Revit", CP_WINUNICODE);
     HSZ topic = DdeCreateStringHandleW(inst, L"System", CP_WINUNICODE);
@@ -39,7 +39,7 @@ static int ready(int seconds)
 {
     ULONGLONG end = GetTickCount64() + seconds * 1000ULL;
     for (;;) {
-        HCONV c = connect();
+        HCONV c = revit_conv();
         if (c) { DdeDisconnect(c); return 0; }
         if (GetTickCount64() >= end) return 3;
         Sleep(2000);
@@ -50,7 +50,7 @@ static int send_open(const wchar_t *path)
 {
     wchar_t cmd[1100];
     ULONGLONG end = GetTickCount64() + ANSWER_MS;
-    HCONV c = connect();
+    HCONV c = revit_conv();
     int rc = 6;
 
     if (!c) return 3;

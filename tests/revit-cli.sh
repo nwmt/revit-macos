@@ -920,7 +920,7 @@ reset; bottle rvt2027-a 2027 2027; run "" rebuild 2027 --dry-run --json
 check "rebuild --dry-run --json: add-ins reset in 2027" eval '[ "$RC" = 0 ] && grep -qF "\"addins_reset\":true" <<<"$OUT"'
 reset; bottle rvt2025-a 2025 2025; run "" rebuild 2025 --dry-run
 check "rebuild --dry-run: today's lines, then the dry-run line" eval '[ "$RC" = 0 ] && grep -qF "This deletes the bottle rvt2025-a" <<<"$OUT" && [ "$(tail -1 <<<"$OUT")" = "(dry run: nothing changed)" ] && not_called install.sh'
-reset; run "" install 2024 --dry-run; expect "--dry-run on install is refused" 1 "--dry-run is for ./revit remove, rebuild, rollback, points and cleanup only."
+reset; run "" install 2024 --dry-run; expect "--dry-run on install is refused" 1 "--dry-run is for ./revit remove, rebuild, rollback, points, cleanup and open only."
 reset; bottle rvt2025-a 2025 2025; touch "$T/stamp"; sleep 1; run "" remove 2025 --dry-run --events "$T/ev"
 newer="$(find "$T" -mindepth 1 -newer "$T/stamp" ! -path "$T/ev" ! -path "$T/ev/*" ! -path "$CALLS")"
 if [ -s "$T/ev/events.ndjson" ] && [ -z "$newer" ]; then ok "remove --dry-run with --events writes only the events folder"
