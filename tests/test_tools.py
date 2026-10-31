@@ -729,7 +729,7 @@ class LeftoversTest(Tmp):
     def test_a_warm_is_stuck_only_by_its_own_heartbeat(self):
         py = "/Library/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python"
         warm = lambda pid: self.proc(pid, ["python3", "-I", "/r/tools/gdrive.py", "warm", f"{self.b}/live", "G:\\x", "2027"],
-                                     exe=py, age=7200)
+                                     exe=py, age=7200, ppid=7)
         procs = [warm(43), warm(44), warm(45), warm(46),
                  self.proc(47, ["vim", "/r/tools/gdrive.py", "warm", f"{self.b}/live"], exe="/usr/bin/vim", age=7200),
                  self.proc(48, ["python3", "-c", "x", "/r/tools/gdrive.py", "warm", f"{self.b}/live"], exe=py, age=7200)]
@@ -741,6 +741,10 @@ class LeftoversTest(Tmp):
         with open(os.path.join(self.b, "live", "revit-macos", "gdrive-warm-46"), "w") as f:
             f.write("{")   # unreadable
         self.assertEqual(self.classify(procs)[0], {44: "stuck"})   # 46 has no heartbeat it can read: not stuck
+        orphan = self.proc(49, ["python3", "-I", "/r/tools/gdrive.py", "warm", f"{self.b}/live", "G:\\x", "2027"], exe=py, age=60)
+        self.beat(49, self.now - 60, self.now - 1)         # moving, but no one can stop it now
+        self.assertEqual(self.classify([orphan])[0], {49: "parent_gone"})
+        self.assertEqual(self.classify([orphan], bottle="other")[0], {})
         self.assertEqual(self.classify(procs, bottle="other")[0], {})
         self.assertEqual(self.classify(procs, everything=True)[0], {43: "all", 44: "all", 45: "all", 46: "all"})
 
