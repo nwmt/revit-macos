@@ -1,4 +1,5 @@
-// The menu (spec §3): one submenu per Revit bottle, the activity line, Add Revit version, Close all, Settings, Help, Quit.
+// The menu: one submenu per Revit bottle, the activity line, Open the app, Add Revit version, Close all, Settings, Help, Quit.
+// Nothing that deletes: Rebuild and Remove are on the Revit's page.
 // Items that change something are off while the engine is busy.
 import AppCore
 import AppKit
@@ -23,6 +24,7 @@ struct MenuView: View {
             Button("⚠︎ \(t)") { env.router.open(.settings) }
             Divider()
         }
+        Button("Open \(env.name)") { env.router.open(.main) }
         Button("Add Revit version…") { env.router.open(.wizard) }.disabled(!m.changesEnabled)
         Button("Close all…") { Task { await Confirm.closeAll(app: app) } }.disabled(!m.changesEnabled)
         Divider()
@@ -47,22 +49,23 @@ struct BottleMenu: View {
     let item: BottleItem
     let changes: Bool
     private var home: URL { FileManager.default.homeDirectoryForCurrentUser }
+    private var ref: BottleRef { BottleRef(year: item.year, bottle: item.bottle) }
 
     var body: some View {
-        Button("Open Revit") { NSWorkspace.shared.open(AppLinks.revitApp(year: item.year, bottle: item.bottle, home: home)) }
+        if item.running {
+            Button("Show Revit") { RevitActions.show(item.pids) }
+        } else if item.starting {
+            Button("Starting…") {}.disabled(true)
+        } else {
+            Button("Open Revit") { Task { await RevitActions.open(app: app, year: item.year, bottle: item.bottle) } }
+        }
         let viewer = AppLinks.viewerApp(year: item.year, bottle: item.bottle, home: home)
-        if FileManager.default.fileExists(atPath: viewer.path) {
+        if !item.running, FileManager.default.fileExists(atPath: viewer.path) {
             Button("Open Revit Viewer") { NSWorkspace.shared.open(viewer) }
         }
-        Button("Add-ins…") { env.router.open(.addins(BottleRef(year: item.year, bottle: item.bottle))) }.disabled(!changes)
-        Button("Force quit…") { forceQuit() }.disabled(!changes)
-        Button("Show logs") { showLogs() }
-        Button("Copy diagnostic report") { Task { await Report.copy(app: app, year: item.year, bottle: item.bottle, logDir: nil) } }
+        Button("Revit \(String(item.year)) in \(env.name)…") { env.router.page(ref) }
         Divider()
-        Button("Rebuild…") { Task { await Confirm.plan(app: app, env: env, .rebuild(year: item.year, bottle: item.bottle, source: nil)) } }
-            .disabled(!changes)
-        Button("Remove…") { Task { await Confirm.plan(app: app, env: env, .remove(year: item.year, bottle: item.bottle)) } }
-            .disabled(!changes)
+        Button("Force quit…") { forceQuit() }.disabled(!changes)
     }
 
     private func forceQuit() {
@@ -70,11 +73,5 @@ struct BottleMenu: View {
                           String(localized: "Unsaved work in Revit \(String(item.year)) will be lost."),
                           button: String(localized: "Force quit"), destructive: true) else { return }
         Task { await Confirm.start(app: app, env: env, .stop(year: item.year, bottle: item.bottle)) }
-    }
-
-    private func showLogs() {
-        guard let data = app.dataFolder else { return }
-        let l = AppLinks.logs(data: data, bottle: item.bottle)
-        NSWorkspace.shared.open(FileManager.default.fileExists(atPath: l.path) ? l : AppLinks.logs(data: data, bottle: nil))
     }
 }

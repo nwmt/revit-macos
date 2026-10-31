@@ -10,7 +10,26 @@ import AppKit
     static var receive: (([URL]) -> Void)?
 }
 
+/// Why the app started: read once, before the first window.
+@MainActor enum LaunchInfo {
+    static var loginItem = false
+    static var reopen: (() -> Void)?
+}
+
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        if let e = NSAppleEventManager.shared().currentAppleEvent, e.eventClass == kCoreEventClass, e.eventID == kAEOpenApplication,
+           e.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem { LaunchInfo.loginItem = true }
+        if SettingsModel.showsInDock(.standard) { NSApp.setActivationPolicy(.regular) }   // LSUIElement: no icon flash when off
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { LaunchInfo.reopen?() }
+        return true
+    }
+
     func application(_ application: NSApplication, open urls: [URL]) {
         FileInbox.opened = true
         if let r = FileInbox.receive { r(urls) } else { FileInbox.early += urls }

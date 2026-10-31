@@ -1,5 +1,5 @@
-// The menu bar app: a menu (MenuBarExtra) and its windows — the progress of a run, the first-run wizard, the add-ins of
-// a bottle, the settings. Every decision is the engine's (AppCore's models ask it); these views only draw and ask.
+// The app: a menu (MenuBarExtra) and its windows — the main window (Library, a page per Revit, Activity), the first-run
+// wizard, the settings. Every decision is the engine's (AppCore's models ask it); these views only draw and ask.
 // The name comes from Info.plist (app/app.conf), never from this file.
 import AppCore
 import AppKit
@@ -23,28 +23,32 @@ struct AppMain: App {
         }
         .menuBarExtraStyle(.menu)
 
-        Window("Progress", id: Route.run.id) {
-            if let app = env.app { RunWindow(app: app, env: env).appWindow(env) }
+        Window(env.name, id: Route.main.id) {
+            if let app = env.app { MainWindow(app: app, env: env).appWindow(env) }
         }
-        .windowResizability(.contentSize)
+        .defaultLaunchBehavior(.suppressed)   // only the router opens windows: a login or a file opens none
+        .restorationBehavior(.disabled)
         .handlesExternalEvents(matching: [])   // a file from Finder is the delegate's: SwiftUI would show this window for it
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") { env.router.open(.settings) }.keyboardShortcut(",")
+            }
+        }
 
         Window("Add Revit", id: Route.wizard.id) {
             if let app = env.app { WizardWindow(app: app, env: env).appWindow(env) }
         }
         .windowResizability(.contentSize)
-        .handlesExternalEvents(matching: [])   // a file from Finder is the delegate's: SwiftUI would show this window for it
-
-        WindowGroup("Add-ins", id: "addins", for: BottleRef.self) { $ref in
-            if let app = env.app, let ref { AddinsWindow(app: app, env: env, ref: ref).appWindow(env) }
-        }
-        .windowResizability(.contentSize)
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
         .handlesExternalEvents(matching: [])   // a file from Finder is the delegate's: SwiftUI would show this window for it
 
         Window("Settings", id: Route.settings.id) {
             if let app = env.app { SettingsWindow(app: app, env: env).appWindow(env) }
         }
         .windowResizability(.contentSize)
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
         .handlesExternalEvents(matching: [])   // a file from Finder is the delegate's: SwiftUI would show this window for it
     }
 }
@@ -67,8 +71,9 @@ struct AppMain: App {
     @ObservationIgnored private var menuOpen = false
     @ObservationIgnored private var openWindows = 0
 
-    /// While a window of the app is open the app is a regular one (a Dock icon, Cmd-Tab), so another app's dialog cannot
-    /// bury its window; when the last one closes it is a menu bar app again.
+    /// With the Dock icon on the app is always a regular one. Menu bar only: while a window of the app is open it is a
+    /// regular one (a Dock icon, Cmd-Tab), so another app's dialog cannot bury its window; when the last one closes it is
+    /// a menu bar app again.
     func windowAppeared() {
         openWindows += 1
         if openWindows == 1 { NSApp.setActivationPolicy(.regular) }
@@ -77,13 +82,17 @@ struct AppMain: App {
 
     func windowGone() {
         openWindows = max(0, openWindows - 1)
-        if openWindows == 0 { NSApp.setActivationPolicy(.accessory) }
+        dockChoiceChanged()
+    }
+
+    func dockChoiceChanged() {
+        NSApp.setActivationPolicy(openWindows > 0 || SettingsModel.showsInDock(.standard) ? .regular : .accessory)
     }
 
     func syncMenu() {
         guard !menuOpen, let app else { return }
         let m = MenuContent.make(status: app.status, watched: app.watched, failure: app.failure, busy: app.isBusy,
-                                 trackpad: trackpad?.line ?? .off)
+                                 trackpad: trackpad?.line ?? .off, starting: Set(app.revitStarting.keys))
         if m != menu { menu = m }
     }
 
@@ -125,6 +134,7 @@ struct AppMain: App {
             theme = nil
             files = nil
         }
+        LaunchInfo.reopen = { [router] in router.open(.main) }
         FileInbox.receive = { [weak self] urls in Task { await self?.files?.add(urls) } }
         // the Mac turned light or dark: Revit 2027 follows (ThemeSync)
         DistributedNotificationCenter.default().addObserver(forName: .init("AppleInterfaceThemeChangedNotification"),
@@ -147,27 +157,29 @@ struct MenuLabel: View {
     var body: some View {
         Image(systemName: "building.columns")
             .task { await run() }
-            .onChange(of: env.router.pending) { _, r in
-                guard let r else { return }
-                env.router.pending = nil
-                switch r {
-                case .addins(let ref): openWindow(id: "addins", value: ref)
-                default: openWindow(id: r.id)
-                }
-                NSApp.activate()
-            }
+            .onChange(of: env.router.pending) { go() }
+    }
+
+    private func go() {
+        guard let r = env.router.pending else { return }
+        env.router.pending = nil
+        openWindow(id: r.id)
+        NSApp.activate()
     }
 
     private func run() async {
+        go()   // a reopen or a click may have come before this view
         guard let app = env.app else { return }
         await app.launch()
         await env.trackpad?.start()
         env.syncMenu()
         if app.status?.app?.placement == "move" { Placement.ask(name: env.name) }
-        if app.watched != nil {
-            env.router.open(.run)
-        } else if (app.status?.bottles ?? []).isEmpty && !app.isBusy && !FileInbox.opened {
-            env.router.open(.wizard)   // started for a file: its dialog offers the wizard
+        switch LaunchRoute.pick(activeRun: app.watched != nil, forFile: FileInbox.opened, loginItem: LaunchInfo.loginItem,
+                                noBottles: (app.status?.bottles ?? []).isEmpty, busy: app.isBusy, showInDock: SettingsModel.showsInDock(.standard)) {
+        case .activity: env.router.open(.run)
+        case .wizard: env.router.open(.wizard)
+        case .main: env.router.open(.main)
+        case .nothing: break
         }
         await env.files?.add(FileInbox.early); FileInbox.early = []
         Task { await env.files?.start() }   // the poll loop must not wait for Revit to take a file

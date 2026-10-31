@@ -19,6 +19,19 @@ public struct EngineStatus: Decodable, Equatable, Sendable {
     public let busy: Busy
     public let app: AppInfo?               // only inside the app's bundle
     public let bottles: [Bottle]
+    public let restorePoints: [RestorePoint]   // of bottles that are gone too; [] from an older engine
+    public let shimsNow: String?           // the shims a rebuild would take
+
+    enum CodingKeys: String, CodingKey { case crossover, rosetta, msls31, busy, app, bottles, restorePoints, shimsNow }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        crossover = try c.decode(CrossOver.self, forKey: .crossover); rosetta = try c.decode(Bool.self, forKey: .rosetta)
+        msls31 = try c.decode(Bool.self, forKey: .msls31); busy = try c.decode(Busy.self, forKey: .busy)
+        app = try c.decodeIfPresent(AppInfo.self, forKey: .app); bottles = try c.decode([Bottle].self, forKey: .bottles)
+        restorePoints = try c.decodeIfPresent([RestorePoint].self, forKey: .restorePoints) ?? []
+        shimsNow = try c.decodeIfPresent(String.self, forKey: .shimsNow)
+    }
 
     public static func decode(_ data: Data) throws -> EngineStatus { try JSONDecoder.engine.decode(EngineStatus.self, from: data) }
 }
@@ -50,15 +63,21 @@ public struct Bottle: Decodable, Equatable, Sendable {
     public let revitPids: [Int32]           // the Mac processes of its Revit.exe; [] from an engine without the key
     public let addins: [String]
     public let themeMode: String            // the step theme's mode: mac, light, dark; "" without it or from an older engine
+    public let support: Support?            // the year's profile; nil from an older engine
+    public let settings: [String: String]   // retina, keys, theme, steel, gdrive: a key only where the profile has the step
+    public let built: Built?                // the newest install that ended; nil: no record says
+    public let gdrive: GDriveState?
     public var yearNumber: Int? { Int(year) }
 
     public init(name: String, year: String, revit: Bool, running: Bool, revitPids: [Int32] = [], addins: [String],
-                themeMode: String = "") {
+                themeMode: String = "", support: Support? = nil, settings: [String: String] = [:], built: Built? = nil,
+                gdrive: GDriveState? = nil) {
         self.name = name; self.year = year; self.revit = revit; self.running = running; self.revitPids = revitPids
-        self.addins = addins; self.themeMode = themeMode
+        self.addins = addins; self.themeMode = themeMode; self.support = support; self.settings = settings
+        self.built = built; self.gdrive = gdrive
     }
 
-    enum CodingKeys: String, CodingKey { case name, year, revit, running, revitPids, addins, themeMode }
+    enum CodingKeys: String, CodingKey { case name, year, revit, running, revitPids, addins, themeMode, support, settings, built, gdrive }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -66,7 +85,40 @@ public struct Bottle: Decodable, Equatable, Sendable {
                   revit: try c.decode(Bool.self, forKey: .revit), running: try c.decode(Bool.self, forKey: .running),
                   revitPids: try c.decodeIfPresent([Int32].self, forKey: .revitPids) ?? [],
                   addins: try c.decode([String].self, forKey: .addins),
-                  themeMode: try c.decodeIfPresent(String.self, forKey: .themeMode) ?? "")
+                  themeMode: try c.decodeIfPresent(String.self, forKey: .themeMode) ?? "",
+                  support: try c.decodeIfPresent(Support.self, forKey: .support),
+                  settings: try c.decodeIfPresent([String: String].self, forKey: .settings) ?? [:],
+                  built: try c.decodeIfPresent(Built.self, forKey: .built),
+                  gdrive: try? c.decodeIfPresent(GDriveState.self, forKey: .gdrive))
+    }
+}
+
+public struct Support: Decodable, Equatable, Sendable {
+    public let status, tested, gaps: String // status: works, mostly, untested
+    public init(status: String, tested: String, gaps: String) { self.status = status; self.tested = tested; self.gaps = gaps }
+}
+
+public struct Built: Decodable, Equatable, Sendable {
+    public let shims, engine, time: String
+    public init(shims: String, engine: String, time: String) { self.shims = shims; self.engine = engine; self.time = time }
+}
+
+/// gdrive.py state: never an email, never a folder name.
+public struct GDriveState: Decodable, Equatable, Sendable {
+    public let mode: String                 // auto, off, account
+    public let mapping: String              // ok, none, stale, account-missing, foreign…
+    public let accounts: String             // zero, one, several
+    public let namesKind: String?           // en, ru, custom; nil from an older engine
+    public init(mode: String, mapping: String, accounts: String, namesKind: String? = nil) {
+        self.mode = mode; self.mapping = mapping; self.accounts = accounts; self.namesKind = namesKind
+    }
+}
+
+public struct RestorePoint: Decodable, Equatable, Sendable {
+    public let bottle, year, id, time: String
+    public let bytes: Int64
+    public init(bottle: String, year: String, id: String, time: String, bytes: Int64) {
+        self.bottle = bottle; self.year = year; self.id = id; self.time = time; self.bytes = bytes
     }
 }
 
@@ -114,6 +166,13 @@ public struct AddinInfo: Decodable, Equatable, Sendable {
     }
 }
 
+/// doctor --json: the checks; a failed one is exit 1 with this on stdout.
+public struct DoctorReport: Decodable, Equatable, Sendable {
+    public struct Check: Decodable, Equatable, Sendable { public let id, status, title, detail: String }
+    public let checks: [Check]
+    public var problems: [Check] { checks.filter { $0.status == "warn" || $0.status == "fail" } }
+}
+
 public struct ReportResult: Decodable, Equatable, Sendable {
     public let reportTxt, reportZip: String?
     public let summary: String?
@@ -136,6 +195,26 @@ public struct RemovePlan: Decodable, Equatable, Sendable {
 public struct PlanItem: Decodable, Equatable, Sendable {
     public let label: String
     public let bytes: Int64?                // nil: not measured (apps)
+    public init(label: String, bytes: Int64?) { self.label = label; self.bytes = bytes }
+}
+
+/// rollback --dry-run --json.
+public struct RollbackPlan: Decodable, Equatable, Sendable {
+    public let command: String
+    public let year: Int
+    public let bottle, id, time: String
+    public let bytes: Int64
+    public let bottleExists: Bool
+}
+
+/// points --clear… --dry-run --json.
+public struct PointsPlan: Decodable, Equatable, Sendable {
+    public let command: String
+    public let year: Int
+    public let bottle: String
+    public let delete: [PlanItem]
+    public let ids: [String]
+    public let unfinished: Bool
 }
 
 /// cleanup --json (tools/leftovers.py): the programs left running, the bottles left alone because Revit runs there, and

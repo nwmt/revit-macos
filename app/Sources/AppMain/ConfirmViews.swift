@@ -1,8 +1,9 @@
-// Confirmations of the actions that delete or end something (spec §3; the engine says what goes):
-// Remove and Rebuild show the engine's dry-run plan with a red button; Force quit warns about unsaved work; Close all
+// Confirmations of the actions that delete or end something (the engine says what goes): Remove, Rebuild, Roll back and
+// deleting restore points are a sheet with the engine's dry-run plan; Force quit warns about unsaved work; Close all
 // lists what it ends.
 import AppCore
 import AppKit
+import SwiftUI
 
 @MainActor enum Confirm {
     /// A modal alert; true when the user pressed the button.
@@ -19,28 +20,6 @@ import AppKit
         NSApp.activate()
         let a = NSAlert(); a.messageText = title; a.informativeText = text
         a.runModal()
-    }
-
-    /// Remove or Rebuild: the engine's --dry-run --json plan, then the run on a yes.
-    static func plan(app: AppModel, env: AppEnvironment, _ r: RunRequest) async {
-        let verb = r.arguments[0]
-        guard let out = await app.query([verb, String(r.year), r.bottle, "--dry-run", "--json"]) else {
-            tell(String(localized: "The engine could not be started."), app.engineError ?? ""); return
-        }
-        guard out.exitCode == 0, let p = try? JSONDecoder.engine.decode(RemovePlan.self, from: out.stdout) else {
-            tell(String(localized: "Revit \(String(r.year)) (\(r.bottle))"), out.stderr.trimmingCharacters(in: .whitespacesAndNewlines)); return
-        }
-        if p.nothing == true { tell(String(localized: "Nothing to remove for Revit \(String(r.year)) (\(r.bottle))."), ""); return }
-        let size = ByteCountFormatter()
-        var lines = [String(localized: "This deletes:")]
-        lines += p.delete.map { i in i.bytes.map { "  \(i.label)  \(size.string(fromByteCount: $0))" } ?? "  \(i.label)" }
-        for k in p.kept ?? [] { lines.append(String(localized: "Kept: \(k)")) }
-        if p.addinsReset == true { lines.append(String(localized: "Revit settings and add-ins in this bottle are reset.")) }
-        lines += p.notes
-        let title = verb == "remove" ? String(localized: "Remove Revit \(String(r.year)) (\(r.bottle))?") : String(localized: "Rebuild Revit \(String(r.year)) (\(r.bottle))?")
-        let button = verb == "remove" ? String(localized: "Remove") : String(localized: "Rebuild")
-        guard ask(title, lines.joined(separator: "\n"), button: button, destructive: true) else { return }
-        await start(app: app, env: env, r.withPlan(restorePoint: p.restorePoint))
     }
 
     /// Close all: what cleanup --all would end (all of Wine, Revit too, and what the app left), then the close on a yes:
@@ -75,6 +54,167 @@ import AppKit
             tell(String(localized: "Another task is running."), app.busyText ?? "")
         } catch {
             tell(String(localized: "The engine could not be started."), app.engineError ?? "\(error)")
+        }
+    }
+}
+
+/// What the engine says will happen. The sheet keeps the one it showed: the button reads a new one, and any difference
+/// stops there and asks again (PlanCheck).
+enum LoadedPlan: Equatable {
+    case bottle(RemovePlan), rollback(RollbackPlan), points(PointsPlan)
+
+    var fingerprint: [String] {
+        switch self {
+        case .bottle(let p): p.fingerprint
+        case .rollback(let p): p.fingerprint
+        case .points(let p): p.fingerprint
+        }
+    }
+}
+
+struct PlanSheet: View {
+    let app: AppModel
+    let env: AppEnvironment
+    let request: SheetRequest
+    @State private var plan: LoadedPlan?
+    @State private var problem: String?
+    @State private var gate = SheetGate(year: nil)
+    @State private var keepPoint = true
+    @State private var changed = false
+    @State private var working = false
+    @Environment(\.dismiss) private var dismiss
+
+    private var year: Int { switch request { case .plan(let r): r.year; case .rollback(let y, _, _), .points(let y, _, _): y } }
+    private var bottle: String { switch request { case .plan(let r): r.bottle; case .rollback(_, let b, _), .points(_, let b, _): b } }
+    private var isRebuild: Bool { if case .plan(.rebuild) = request { true } else { false } }
+    private var pointPossible: Bool { if case .bottle(let p)? = plan { p.restorePoint == true } else { false } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title).font(.title3.bold())
+            if let problem { Text(problem).foregroundStyle(.red).textSelection(.enabled) }
+            if changed { Label("What this does has changed. Read it and confirm again.", systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
+            switch plan {
+            case .bottle(let p)?: bottlePlan(p)
+            case .rollback(let p)?:
+                Text("Brings bottle \(p.bottle) back as it was at \(p.time).")
+                if p.bottleExists { Text("Everything in the bottle's C: drive that changed since then is deleted.").foregroundStyle(.orange) }
+                Text("The restore point stays.").foregroundStyle(.secondary)
+            case .points(let p)?:
+                Text("Deleted").font(.headline)
+                lines(p.delete)
+                if p.unfinished { Text("Files of a run that was cut short").font(.callout) }
+            case nil: if problem == nil { ProgressView() }
+            }
+            if gate.year != nil, plan != nil {
+                TextField("Type \(String(year)) to go on", text: $gate.typed).textFieldStyle(.roundedBorder).frame(maxWidth: 220)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(goWord, role: destructive ? .destructive : nil) { go() }.keyboardShortcut(.defaultAction)
+                    .disabled(plan == nil || !gate.open || working || app.isBusy)
+            }
+        }
+        .padding(20).frame(width: 520, alignment: .topLeading)
+        .task { plan = await read(); reset() }
+    }
+
+    @ViewBuilder private func bottlePlan(_ p: RemovePlan) -> some View {
+        if isRebuild {
+            Toggle("Keep a restore point", isOn: $keepPoint).disabled(!pointPossible)
+            Text(keepPoint && pointPossible
+                 ? "A copy of \(p.bottle) with its settings, add-ins and sign-in. If the new install is worse, Roll back brings it back."
+                 : "Without it there is no way back to the bottle you have now: its settings, add-ins and sign-in are gone.")
+                .font(.callout).foregroundStyle(keepPoint && pointPossible ? Color.secondary : .red).fixedSize(horizontal: false, vertical: true)
+        }
+        Text("Deleted").font(.headline)
+        lines(p.delete)
+        if p.addinsReset == true { Text("Reset: Revit's settings and add-ins in the bottle.").font(.callout) }
+        ForEach(p.kept ?? [], id: \.self) { Text("Kept: \($0)").font(.callout) }
+        ForEach(p.notes, id: \.self) { Text($0).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+    }
+
+    private func lines(_ items: [PlanItem]) -> some View {
+        ForEach(items, id: \.label) { i in
+            HStack {
+                Text(i.label).lineLimit(1).truncationMode(.middle)
+                Spacer()
+                if let b = i.bytes { Text(ByteCountFormatter().string(fromByteCount: b)).foregroundStyle(.secondary) }
+            }
+            .font(.callout)
+        }
+    }
+
+    private var title: String {
+        switch request {
+        case .plan(.remove): String(localized: "Remove Revit \(String(year)) (\(bottle))?")
+        case .plan: String(localized: "Rebuild Revit \(String(year)) (\(bottle))?")
+        case .rollback: String(localized: "Roll back Revit \(String(year)) (\(bottle))?")
+        case .points: String(localized: "Delete restore points of \(bottle)?")
+        }
+    }
+
+    private var goWord: String {
+        switch request {
+        case .plan(.remove): String(localized: "Remove")
+        case .plan: String(localized: "Rebuild")
+        case .rollback: String(localized: "Roll Back")
+        case .points: String(localized: "Delete")
+        }
+    }
+
+    private var destructive: Bool {
+        switch request {
+        case .rollback: false
+        case .plan(.rebuild): !(keepPoint && pointPossible)
+        default: true
+        }
+    }
+
+    private func reset() {
+        var needsYear = false
+        if case .plan = request { needsYear = true }
+        gate = SheetGate(year: needsYear ? year : nil)
+        keepPoint = pointPossible
+    }
+
+    private func read() async -> LoadedPlan? {
+        let args: [String]
+        switch request {
+        case .plan(let r): args = [r.arguments[0], String(year), bottle, "--dry-run", "--json"]
+        case .rollback(_, _, let id): args = ["rollback", String(year), bottle, "--to", id, "--dry-run", "--json"]
+        case .points(_, _, let c): args = ["points", String(year), bottle, "--clear", c, "--dry-run", "--json"]
+        }
+        guard let out = await app.query(args) else { problem = app.engineError ?? ""; return nil }
+        let d = JSONDecoder.engine
+        var p: LoadedPlan?
+        if out.exitCode == 0 {
+            switch request {
+            case .plan: p = (try? d.decode(RemovePlan.self, from: out.stdout)).map { .bottle($0) }
+            case .rollback: p = (try? d.decode(RollbackPlan.self, from: out.stdout)).map { .rollback($0) }
+            case .points: p = (try? d.decode(PointsPlan.self, from: out.stdout)).map { .points($0) }
+            }
+        }
+        problem = p == nil ? out.stderr.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+        return p
+    }
+
+    private func go() {
+        working = true
+        Task {
+            defer { working = false }
+            guard let shown = plan, let now = await read() else { plan = nil; return }
+            guard now.fingerprint == shown.fingerprint else { plan = now; changed = true; reset(); return }
+            let run: RunRequest
+            switch (request, now) {
+            case (.plan(let r), _): run = r.keeping(point: isRebuild ? keepPoint && pointPossible : true)
+            case (.rollback(let y, let b, let id), _): run = .rollback(year: y, bottle: b, id: id)
+            case (_, .points(let p)): run = .clearPoints(year: year, bottle: bottle, ids: p.ids, clearUnfinished: p.unfinished)
+            default: return
+            }
+            dismiss()
+            await Confirm.start(app: app, env: env, run)
         }
     }
 }

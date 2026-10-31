@@ -63,6 +63,14 @@ public struct CacheItem: Decodable, Equatable, Sendable {
         set { defaults.set(newValue, forKey: "checkForUpdates") }
     }
 
+    /// The Dock icon: on unless the person chose the menu bar only.
+    public var showInDock: Bool {
+        get { _ = loginTick; return Self.showsInDock(defaults) }
+        set { defaults.set(newValue, forKey: Self.dockKey); loginTick += 1 }
+    }
+    static let dockKey = "showInDock"
+    public static func showsInDock(_ d: UserDefaults) -> Bool { d.object(forKey: dockKey) as? Bool ?? true }
+
     public func loadCache() async {
         guard let out = await app.query(["cache", "--json"]) else { cacheError = app.engineError; return }
         guard out.exitCode == 0, let p = try? JSONDecoder.engine.decode(CachePlan.self, from: out.stdout) else {

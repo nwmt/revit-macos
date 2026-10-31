@@ -1,5 +1,5 @@
-// The progress window ("run"): the run's actions and steps, the download, the engine's messages, Cancel; at the end
-// the result. Closing it changes nothing: the run goes on.
+// Activity's view of the run being watched: the run's actions and steps, the download, the engine's messages, Cancel; at the end
+// the result. Leaving it changes nothing: the run goes on.
 import AppCore
 import SwiftUI
 
@@ -65,8 +65,7 @@ struct RunWindow: View {
                 Text("Nothing is running.").foregroundStyle(.secondary)
             }
         }
-        .padding()
-        .frame(width: 520, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private func header(_ w: WatchedRun, _ m: MenuContent) -> String {
@@ -116,9 +115,8 @@ struct ResultView: View {
                 Text(kind == .stopped ? "Stopped." : "Done.").font(.headline)
                 if kind == .ok, let r = run.record?.request, isInstall(r) {
                     HStack {
-                        Button("Open Revit") {
-                            NSWorkspace.shared.open(AppLinks.revitApp(year: r.year, bottle: r.bottle, home: FileManager.default.homeDirectoryForCurrentUser))
-                        }
+                        let b = app.status?.bottles.first { $0.name == r.bottle }
+                        RevitButton(app: app, year: r.year, bottle: r.bottle, running: b?.running ?? false, pids: b?.revitPids ?? [], blocked: false)
                         Button("Choose add-ins…") { env.router.open(.addins(BottleRef(year: r.year, bottle: r.bottle))) }
                     }
                 }

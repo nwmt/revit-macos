@@ -12,11 +12,32 @@ public enum RunRequest: Codable, Equatable, Sendable {
     case addins(year: Int, bottle: String, ids: [String], eula: [String])
     case remove(year: Int, bottle: String)
     case stop(year: Int, bottle: String)
+    case set(year: Int, bottle: String, settings: [String])
+    case rollback(year: Int, bottle: String, id: String)
+    case clearPoints(year: Int, bottle: String, ids: [String], clearUnfinished: Bool)
 
-    /// A rebuild as the newest plan says: without a restore point only when the plan says none can be kept.
-    public func withPlan(restorePoint: Bool?) -> RunRequest {
+    /// A rebuild as the person confirmed it: without a restore point only when the sheet showed that.
+    public func keeping(point: Bool) -> RunRequest {
         guard case let .rebuild(y, b, s, _) = self else { return self }
-        return .rebuild(year: y, bottle: b, source: s, noPoint: restorePoint == false ? true : nil)
+        return .rebuild(year: y, bottle: b, source: s, noPoint: point ? nil : true)
+    }
+
+    /// Deletes or replaces something: Retry goes through its sheet and a new plan, never straight to the engine.
+    public var needsSheet: Bool {
+        switch self { case .remove, .rebuild, .rollback, .clearPoints: true; default: false }
+    }
+
+    /// What may be written down: a Google account's address stays in memory.
+    public var persistable: RunRequest {
+        guard case let .set(y, b, s) = self else { return self }
+        return .set(year: y, bottle: b, settings: s.map { $0.hasPrefix("gdrive=") && $0.contains("@") ? Self.accountMark : $0 })
+    }
+
+    static let accountMark = "gdrive=account"
+
+    /// Came back from disk without its address: it cannot run again.
+    public var lostAddress: Bool {
+        if case let .set(_, _, s) = self { s.contains(Self.accountMark) } else { false }
     }
 
     /// The engine's argv, without --events.
@@ -32,12 +53,16 @@ public enum RunRequest: Codable, Equatable, Sendable {
             return ["addins", String(y), b, "--only", ids.joined(separator: ",")] + (eula.isEmpty ? [] : ["--accept-eula", eula.joined(separator: ",")])
         case let .remove(y, b): return ["remove", String(y), b, "--yes"]
         case let .stop(y, b): return ["stop", String(y), b]
+        case let .set(y, b, s): return ["set", String(y), b] + s
+        case let .rollback(y, b, id): return ["rollback", String(y), b, "--yes", "--to", id]
+        case let .clearPoints(y, b, ids, left):
+            return ["points", String(y), b, "--yes"] + (ids.isEmpty ? [] : ["--clear-ids", ids.joined(separator: ",")]) + (left ? ["--clear-unfinished"] : [])
         }
     }
 
     /// The supervised commands, which end as stopped on INT.
     public var cancellable: Bool {
-        switch self { case .install, .rebuild, .check, .addins: true; case .remove, .stop: false }
+        switch self { case .install, .rebuild, .check, .addins: true; case .remove, .stop, .set, .rollback, .clearPoints: false }
     }
 
     /// install, rebuild and check with that source flag; the others as they are.
@@ -52,13 +77,15 @@ public enum RunRequest: Codable, Equatable, Sendable {
 
     public var year: Int {
         switch self {
-        case let .install(y, _, _), let .rebuild(y, _, _, _), let .check(y, _, _), let .addins(y, _, _, _), let .remove(y, _), let .stop(y, _): y
+        case let .install(y, _, _), let .rebuild(y, _, _, _), let .check(y, _, _), let .addins(y, _, _, _), let .remove(y, _), let .stop(y, _),
+             let .set(y, _, _), let .rollback(y, _, _), let .clearPoints(y, _, _, _): y
         }
     }
 
     public var bottle: String {
         switch self {
-        case let .install(_, b, _), let .rebuild(_, b, _, _), let .check(_, b, _), let .addins(_, b, _, _), let .remove(_, b), let .stop(_, b): b
+        case let .install(_, b, _), let .rebuild(_, b, _, _), let .check(_, b, _), let .addins(_, b, _, _), let .remove(_, b), let .stop(_, b),
+             let .set(_, b, _), let .rollback(_, b, _), let .clearPoints(_, b, _, _): b
         }
     }
 }

@@ -1,5 +1,5 @@
 // The notifications (the end of a run, a new version), through UserNotifications; permission is asked at the first one.
-// Clicking a run's opens the progress window, a new version's its release page.
+// Clicking a run's opens Activity, a new version's its release page.
 import AppCore
 import AppKit
 import UserNotifications

@@ -1,25 +1,7 @@
-// The add-ins window of one bottle: the catalog for its year with checkboxes for what can be added, the file an add-in
-// needs from the user, the license to accept, Ghostscript, "Install selected"; then the run, as the progress window.
+// The Add-ins tab of one bottle: the catalog for its year with checkboxes for what can be added, the file an add-in
+// needs from the user, the license to accept, Ghostscript, "Install selected"; the run shows in Activity.
 import AppCore
 import SwiftUI
-
-struct AddinsWindow: View {
-    let app: AppModel
-    let env: AppEnvironment
-    let ref: BottleRef
-    @State private var model: AddinsModel?
-
-    var body: some View {
-        Group {
-            if let model { AddinsView(model: model, app: app, env: env) } else { ProgressView().padding() }
-        }
-        .task(id: ref) {
-            let m = AddinsModel(app: app, system: MacSystemActions(), year: ref.year, bottle: ref.bottle)
-            model = m
-            await m.load()
-        }
-    }
-}
 
 struct AddinsView: View {
     let model: AddinsModel
@@ -49,10 +31,9 @@ struct AddinsView: View {
                 .disabled(model.selected.isEmpty || app.isBusy || model.working)
                 .keyboardShortcut(.defaultAction)
             }
-            if myRun { Divider(); RunWindow(app: app, env: env) }
+            if myRun { Button("Show progress in Activity") { env.router.open(.run) } }
         }
-        .padding(20)
-        .frame(width: 560, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .sheet(isPresented: Binding(get: { license != nil }, set: { if !$0 { license = nil } })) {
             if let l = license {
                 VStack(alignment: .leading, spacing: 12) {

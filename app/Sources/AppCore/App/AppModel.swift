@@ -28,6 +28,8 @@ public enum CleanupAnswer: Equatable, Sendable { case report(CleanupReport), ref
     public private(set) var watched: WatchedRun?
     public private(set) var failure: Failure?
     public private(set) var engineError: String?
+    /// Bottles whose Open was pressed and whose Revit is not up yet (the launcher returns at once).
+    public private(set) var revitStarting: [String: Date] = [:]
 
     @ObservationIgnored let engine: any EngineClient
     @ObservationIgnored let defaults: UserDefaults
@@ -55,7 +57,7 @@ public enum CleanupAnswer: Equatable, Sendable { case report(CleanupReport), ref
     }
 
     public var isBusy: Bool { starting || watchedIsActive || (status?.busy.busy ?? false) }
-    public var retryRequest: RunRequest? { watched?.record?.request }
+    public var retryRequest: RunRequest? { watched?.record?.request.lostAddress == true ? nil : watched?.record?.request }
     /// What Retry runs: the same request, except that an install interrupted after its bottle was made is a rebuild
     /// (the engine refuses to install into an existing bottle; Rebuild goes through its confirmation).
     public var recoveryRequest: RunRequest? {
@@ -76,10 +78,40 @@ public enum CleanupAnswer: Equatable, Sendable { case report(CleanupReport), ref
               let s = try? EngineStatus.decode(out.stdout) else { return false }
         let wasRunning = Set((status?.bottles ?? []).filter(\.running).map(\.name))
         if status != s { status = s }   // an unchanged status is no change: the open menu must not rebuild
+        expireStarting(now: Date())
         if !wasRunning.subtracting(s.bottles.filter(\.running).map(\.name)).isEmpty, sweepTask == nil {
             sweepTask = Task { [weak self] in _ = await self?.sweep(notify: true); self?.sweepTask = nil }   // a Revit quit
         }
         return true
+    }
+
+    // MARK: starting Revit
+
+    public enum OpenOutcome: Equatable, Sendable { case starting, running([Int32]), refused(String) }
+
+    /// Open: ./revit start, the guard ./revit open uses. Marked before the first await: a second press does nothing.
+    public func open(year: Int, bottle: String) async -> OpenOutcome {
+        guard revitStarting[bottle] == nil else { return .starting }
+        revitStarting[bottle] = Date()
+        await refresh()
+        if let b = status?.bottles.first(where: { $0.name == bottle }), b.running {
+            revitStarting[bottle] = nil
+            return .running(b.revitPids)
+        }
+        guard let out = await query(["start", String(year), bottle]) else {
+            revitStarting[bottle] = nil
+            return .refused(engineError ?? "")
+        }
+        guard out.exitCode == 0 else {
+            revitStarting[bottle] = nil
+            return .refused(out.stderr.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        return .starting
+    }
+
+    func expireStarting(now: Date) {
+        let up = Set((status?.bottles ?? []).filter(\.running).map(\.name))
+        for (b, t) in revitStarting where up.contains(b) || now.timeIntervalSince(t) >= 180 { revitStarting[b] = nil }
     }
 
     // MARK: programs left running (./revit cleanup)
@@ -131,7 +163,8 @@ public enum CleanupAnswer: Equatable, Sendable { case report(CleanupReport), ref
         engineError = nil
         let st = await engine.processStart(pid: pid) ?? ""
         let rec = RunRecord(ctx: ctx.path, runID: ctx.lastPathComponent, request: r, pid: pid, pidStart: st)
-        if let d = try? JSONEncoder().encode(rec) { defaults.set(d, forKey: Self.recordKey) }
+        let saved = RunRecord(ctx: rec.ctx, runID: rec.runID, request: r.persistable, pid: pid, pidStart: st)
+        if let d = try? JSONEncoder().encode(saved) { defaults.set(d, forKey: Self.recordKey) }
         failure = nil
         watch(ctx, record: rec, supervisor: (pid, st))
     }
@@ -209,7 +242,7 @@ public enum CleanupAnswer: Equatable, Sendable { case report(CleanupReport), ref
                 }
             }
         }
-        if !refreshedNow, now.timeIntervalSince(lastStatus) >= (isBusy ? 3 : 15) { await refresh() }
+        if !refreshedNow, now.timeIntervalSince(lastStatus) >= (isBusy || !revitStarting.isEmpty ? 3 : 15) { await refresh() }
     }
 
     private func readEvents() {

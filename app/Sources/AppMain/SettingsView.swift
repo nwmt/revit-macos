@@ -19,6 +19,11 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section {
+                Picker("Show \(env.name) in", selection: Binding(get: { settings.showInDock }, set: { settings.showInDock = $0; env.dockChoiceChanged() })) {
+                    Text("The Dock and the menu bar").tag(true)
+                    Text("The menu bar only").tag(false)
+                }
+                .pickerStyle(.radioGroup)
                 Toggle("Open at login", isOn: $settings.launchAtLogin)
                 if let n = settings.loginNote { Text(n).font(.callout).foregroundStyle(.secondary) }
                 if let e = settings.loginError { Text(e).font(.callout).foregroundStyle(.red) }
