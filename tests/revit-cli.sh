@@ -12,7 +12,7 @@ CLEAN_ENV=(-u REVIT_DATA -u REVIT_LOCK_DIR -u SHIMS_DIR -u REVIT_BUNDLED -u REVI
   -u SMOKE_STALL -u SMOKE_WORKER_WAIT -u SMOKE_POLL -u SMOKE_PREP_TIMEOUT -u REVIT_CX_TMP -u REVIT_WATCH_IDLE -u REVIT_WATCH_LOCK_WAIT -u REVIT_WATCH_LSOF -u MCP_TEST_HOLD -u MCP_HANDOFF_S
   -u REVIT_RETINA -u REVIT_KEYS -u SETTINGS_SAVE_WAIT -u REVIT_FREE_GB -u REVIT_SWAP_FAIL_AT
   -u PYMCP_ROUTES_PORT -u PYMCP_DPAPI_S -u PYMCP_STATUS_S -u PYMCP_EXEC_HOLD -u PYMCP_TEST_HOLD -u REVIT_HOST -u REVIT_PORT
-  -u REVIT_OPENER -u REVIT_OPEN_START_WAIT -u REVIT_OPEN_ATTEMPT_S -u REVIT_OPEN_WAIT -u REVIT_OPEN_WAIT_BUSY)
+  -u REVIT_OPENER -u REVIT_OPEN_START_WAIT -u REVIT_OPEN_ATTEMPT_S -u REVIT_OPEN_WAIT -u REVIT_OPEN_TOOK_S)
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)" && [ -d "$TMP" ] || { echo "mktemp failed" >&2; exit 1; }   # an empty TOP would be the current folder
 TOP="$(cd "$TMP" && pwd -P)" || exit 1   # /var → /private/var: lsof reports real paths
@@ -1757,7 +1757,7 @@ open(sys.argv[2], "wb").write(t.compound(t.text(["Worksharing: %s" % sys.argv[4]
 }
 open_world() { # bottles rvt2027-a and rvt2020-a with Revit.exe and their apps; a fake wine plays revitopen.exe: $T/ro-ready
   # and $T/ro-send give its exit codes, $T/ro-log what it was asked
-  pkill -f "$BOTTLES/rvt2027-a/drive_c/open.tmp" 2>/dev/null; reset
+  [ ! -e "$BOTTLES" ] || pkill -f "$BOTTLES/rvt2027-a/drive_c/open.tmp" 2>/dev/null; reset
   local y; for y in 2027 2020; do
     bottle "rvt$y-a" "$y" "$y"; : > "$BOTTLES/rvt$y-a/drive_c/Program Files/Autodesk/Revit $y/Revit.exe"
     mkdir -p "$BOTTLES/rvt$y-a/dosdevices" "$H/Applications/Revit $y (rvt$y-a).app"; ln -s / "$BOTTLES/rvt$y-a/dosdevices/z:"
@@ -1769,7 +1769,10 @@ shift 3   # --bottle <name> --wait-children
 { printf '%s ' "\$1" "\$2" "\$3"; [ -e /dev/fd/9 ] && printf 'FD9'; echo; } >> "$T/ro-log"
 case "\$2" in
   ready) exit "\$(cat "$T/ro-ready" 2>/dev/null || echo 0)" ;;
-  send) exit "\$(cat "$T/ro-send" 2>/dev/null || echo 0)" ;;
+  send) rc="\$(cat "$T/ro-send" 2>/dev/null || echo 0)"; f="\${3#[A-Z]:}"; f="\${f//\\\\//}"
+    # Revit loads the file: it holds it open, unless a dialog swallows the command
+    [ "\$rc" != 0 ] || [ -f "$T/ro-swallow" ] || perl -e 'open(my \$a, "<", \$ARGV[0]) or die; open(my \$b, "<", \$ARGV[1]) or die; sleep 4' "\$f" "$BOTTLES/rvt2027-a/drive_c/open.tmp" 'C:\\Program Files\\Autodesk\\Revit 2027\\Revit.exe' >/dev/null 2>&1 7>&- 8>&- 9>&- &
+    exit "\$rc" ;;
 esac
 EOF
   chmod +x "$CXF/bin/wine"
@@ -1778,11 +1781,17 @@ EOF
 echo "\$1" >> "$T/opened"
 [ -f "$T/opener-stays" ] && exit 0
 perl -e 'open(my \$f, "<", \$ARGV[0]) or die; sleep 6' "$BOTTLES/rvt2027-a/drive_c/open.tmp" 'C:\\Program Files\\Autodesk\\Revit 2027\\Revit.exe' >/dev/null 2>&1 &
+d="$BOTTLES/rvt2027-a/drive_c/users/crossover/AppData/Local/Autodesk/Revit/Autodesk Revit 2027/Journals"; sleep 1.1; mkdir -p "\$d"; echo "appPriv idle" > "\$d/journal.0002.txt"
 EOF
   chmod +x "$T/opener"; : > "$BOTTLES/rvt2027-a/drive_c/open.tmp"
-  POINT_ENV=(REVIT_OPENER="$T/opener" REVIT_OPEN_START_WAIT=5 REVIT_OPEN_ATTEMPT_S=3 REVIT_OPEN_WAIT=3 REVIT_OPEN_WAIT_BUSY=3)
+  POINT_ENV=(REVIT_OPENER="$T/opener" REVIT_OPEN_START_WAIT=5 REVIT_OPEN_ATTEMPT_S=3 REVIT_OPEN_WAIT=3 REVIT_OPEN_TOOK_S=1)
   rvt "$H/Documents/p.rvt" 2027
 }
+idle() { # the journal of a Revit that has started; $1 = 0: not idle yet
+  local d="$BOTTLES/rvt2027-a/drive_c/users/crossover/AppData/Local/Autodesk/Revit/Autodesk Revit 2027/Journals"
+  sleep 1.1; mkdir -p "$d"; [ "${1:-1}" = 0 ] && : > "$d/journal.0002.txt" || echo "'C 31-Oct-2026 16:07:40.956;   0:< appPriv idle " > "$d/journal.0002.txt"
+}
+frevit() { fake_revit rvt2027-a 2027; idle; }
 plan() { run "" open "$1" --dry-run --json; PJ="$OUT"; }
 pf() { python3 -I -c 'import json,sys; print(json.loads(sys.argv[1])[sys.argv[2]])' "$PJ" "$1"; }
 is_touched() { [ -e "$T/ro-log" ] || [ -e "$T/opened" ]; }
@@ -1804,12 +1813,12 @@ run "" open "$H/Documents/bad.rvt"
 expect "open: not a Revit file → refused" 1 "Cannot tell which Revit saved bad.rvt"
 run "" open "$H/Documents/none.rvt"; expect "open: no such file" 1 "There is no file"
 
-open_world; fake_revit rvt2027-a 2027; run "" open "$H/Documents/p.rvt"
+open_world; frevit; run "" open "$H/Documents/p.rvt"
 expect "open: Revit runs → sent to it" 0 "Opened in Revit 2027 (rvt2027-a)."
 check "open: running Revit: no app started" eval '[ ! -e "$T/opened" ]'
 check "open: asks if DDE is there, sends the Windows path once" eval '[ "$(grep -c " send " "$T/ro-log")" = 1 ] && grep -qF "ready 10" "$T/ro-log" && grep -qF "Documents\\p.rvt" "$T/ro-log"'
 check "open: the lock does not reach Wine" eval '! grep -q FD9 "$T/ro-log"'
-open_world; fake_revit rvt2027-a 2027; fake_revit rvt2027-a 2027; run "" open "$H/Documents/p.rvt"
+open_world; fake_revit rvt2027-a 2027; frevit; run "" open "$H/Documents/p.rvt"
 expect "open: two Revits in one bottle → refused" 1 "Quit one"
 check "open: two Revits: nothing sent" eval '[ ! -e "$T/ro-log" ]'
 
@@ -1826,15 +1835,22 @@ check "open: a start under way is not repeated" eval '[ ! -e "$T/opened" ]'
 open_world; : > "$T/opener-stays"; POINT_ENV+=(REVIT_OPEN_START_WAIT=1); rm -rf "$H/Applications/Revit 2027 (rvt2027-a).app"; run "" open "$H/Documents/p.rvt"
 expect "open: no app → says what to do, starts nothing else" 1 "There is no"
 
-open_world; fake_revit rvt2027-a 2027; echo 3 > "$T/ro-ready"; run "" open "$H/Documents/p.rvt"
+open_world; fake_revit rvt2027-a 2027; idle 0; run "" open "$H/Documents/p.rvt"
+expect "open: Revit runs, not idle yet (DDE would drop it) → nothing sent" 1 "did not take the file in time"
+check "open: not idle: not even asked" eval '[ ! -e "$T/ro-log" ]'
+open_world; fake_revit rvt2027-a 2027; d="$BOTTLES/rvt2027-a/drive_c/users/crossover/AppData/Local/Autodesk/Revit/Autodesk Revit 2027/Journals"; mkdir -p "$d"; echo "appPriv idle" > "$d/journal.0001.txt"; /usr/bin/SetFile -d 01/01/2020 "$d/journal.0001.txt" 2>/dev/null; touch -t 202001010000 "$d/journal.0001.txt"; run "" open "$H/Documents/p.rvt"
+expect "open: only an earlier Revit's journal says idle → nothing sent" 1 "did not take the file in time"
+open_world; frevit; echo 3 > "$T/ro-ready"; run "" open "$H/Documents/p.rvt"
 expect "open: Revit runs, DDE never answers → gives up, nothing sent" 1 "did not take the file in time"
 check "open: no send without a server" eval '! grep -q " send " "$T/ro-log"'
-open_world; fake_revit rvt2027-a 2027; echo 4 > "$T/ro-send"; run "" open "$H/Documents/p.rvt"; expect "open: Revit busy" 1 "close its open dialog"
-open_world; fake_revit rvt2027-a 2027; echo 5 > "$T/ro-send"; run "" open "$H/Documents/p.rvt"; expect "open: no answer → said so" 1 "It may still open the file"
+open_world; frevit; : > "$T/ro-swallow"; run "" open "$H/Documents/p.rvt"; expect "open: acked but a dialog swallowed it → said so, not sent twice" 1 "did not open it"
+check "open: swallowed: sent once" eval '[ "$(grep -c " send " "$T/ro-log")" = 1 ]'
+open_world; frevit; echo 4 > "$T/ro-send"; run "" open "$H/Documents/p.rvt"; expect "open: Revit busy" 1 "close its open dialog"
+open_world; frevit; echo 5 > "$T/ro-send"; run "" open "$H/Documents/p.rvt"; expect "open: no answer → said so" 1 "It may still open the file"
 check "open: no answer → not sent again" eval '[ "$(grep -c " send " "$T/ro-log")" = 1 ]'
-open_world; fake_revit rvt2027-a 2027; echo 3 > "$T/ro-send"; run "" open "$H/Documents/p.rvt"; expect "open: server gone at send → gives up in time" 1 "did not take the file in time"
+open_world; frevit; echo 3 > "$T/ro-send"; run "" open "$H/Documents/p.rvt"; expect "open: server gone at send → gives up in time" 1 "did not take the file in time"
 
-open_world; fake_revit rvt2027-a 2027; rvt "$H/Documents/late.rvt" 2027
+open_world; frevit; rvt "$H/Documents/late.rvt" 2027
 # the real rvtfile.py behind a front: the file changes between the plan and the check before sending
 mv "$R/tools/rvtfile.py" "$T/rf.py"
 cat > "$R/tools/rvtfile.py" <<EOF
@@ -1847,12 +1863,12 @@ run "" open "$H/Documents/late.rvt"
 expect "open: the file changed before sending → refused" 1 "The file changed while Revit started"
 check "open: a changed file is not sent" eval '! grep -q " send " "$T/ro-log"'
 
-open_world; mkdir -p "$H/Documents/a"; rvt "$H/Documents/a/b.rvt" 2025; rvt "$H/Documents/a\\b.rvt" 2027; fake_revit rvt2027-a 2027
+open_world; mkdir -p "$H/Documents/a"; rvt "$H/Documents/a/b.rvt" 2025; rvt "$H/Documents/a\\b.rvt" 2027; frevit
 run "" open "$H/Documents/a\\b.rvt"
 expect "open: a backslash in a Mac name is refused" 1 "Rename it first"
 check "open: backslash: nothing sent" eval '[ ! -e "$T/ro-log" ]'
 
-open_world; rvt "$H/Documents/old.rvt" 2025; fake_revit rvt2027-a 2027; run "" open "$H/Documents/old.rvt" --copy-for 2027
+open_world; rvt "$H/Documents/old.rvt" 2025; frevit; run "" open "$H/Documents/old.rvt" --copy-for 2027
 expect "open --copy-for: the copy opens" 0 "Opened in Revit 2027"
 check "open --copy-for: beside the file, the original stays" eval '[ -f "$H/Documents/old (Revit 2027).rvt" ] && [ -f "$H/Documents/old.rvt" ]'
 check "open --copy-for: Revit gets the copy" eval 'grep -qF "old (Revit 2027).rvt" "$T/ro-log"'

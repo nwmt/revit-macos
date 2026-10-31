@@ -4,8 +4,9 @@
 # A Revit already running gets the file; otherwise the bottle's Revit app starts, as from the menu (its server watch,
 # theme and shortcut arguments), and revitopen.exe (tools/shims/revitopen, by its Mac path) hands the file over by DDE.
 # revitopen.exe starts nothing, so this never makes a second Revit. The lock is held only while deciding and starting.
-# The file is read again right before it is sent: a sync may have replaced it during the minutes Revit took to start.
-# Exit code: 0 sent, or the --plan answer; 1 refused or failed (the reason on stderr); 75 try again later (the lock is busy).
+# Revit answers DDE before it can take a command, and acks and drops what comes early: the journal's first "appPriv idle"
+# of this Revit says it is ready. The file is read again right before it is sent: a sync may have replaced it during the minutes Revit took to start.
+# Exit code: 0 Revit has the file open, or the --plan answer; 1 refused or failed (the reason on stderr); 75 try again later (the lock is busy).
 # Usage: scripts/open-file.sh <file> <bottle or ""> <copy year or ""> <1: only answer with the plan as JSON>
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -56,9 +57,8 @@ lock_take --busy-exit 75 "./revit open $YEAR $NAME"
 bottle_guard running_ok "$YEAR" "$NAME"
 pids="$(revit_pids "$B" "$YEAR")"
 [ "$(wc -w <<<"$pids")" -le 1 ] || die "Two Revit $YEAR windows run in $NAME and Windows would pick one. Quit one, then try again."
-DEADLINE=$((SECONDS + ${REVIT_OPEN_WAIT_BUSY:-60}))
+DEADLINE=$((SECONDS + ${REVIT_OPEN_WAIT:-300}))
 if [ -z "$pids" ]; then
-  DEADLINE=$((SECONDS + ${REVIT_OPEN_WAIT:-300}))
   if ! attempt_fresh; then
     [ -d "$APP" ] || die "There is no $(tilde "$APP"). Run ./revit rebuild $YEAR$(bottle_sfx "$NAME" "$YEAR"), or open Revit and use File > Open."
     mkdir -p "$(dirname "$MARK")" && date +%s > "$MARK" || die "Cannot write in $NAME."
@@ -67,6 +67,23 @@ if [ -z "$pids" ]; then
   for ((i = 0; i < START_WAIT; i++)); do revit_running "$B" "$YEAR" && break; sleep 1; done
 fi
 exec 9>&-   # Revit is up or on its way: the wait below must not stop other work on this Mac
+
+revit_idle() { # this Revit has reached idle: the newest journal, made since it started, says so
+  local p t f d="$B/drive_c/users/crossover/AppData/Local/Autodesk/Revit/Autodesk Revit $YEAR/Journals"
+  p="$(revit_pids "$B" "$YEAR" | head -1)"; [ -n "$p" ] || return 1
+  t="$(LC_ALL=C date -j -f '%a %b %e %T %Y' "$(LC_ALL=C ps -o lstart= -p "$p" | sed 's/^ *//; s/ *$//')" +%s 2>/dev/null)" || return 1
+  f="$(ls -t "$d"/journal.[0-9]*.txt 2>/dev/null | head -1)"; [ -n "$f" ] || return 1
+  [ "$(stat -f %B "$f")" -ge "$t" ] && LC_ALL=C grep -aq 'appPriv idle' "$f"
+}
+
+took() { # DDE acks a command that a modal dialog then swallows: Revit holds the file open once it has begun to load it
+  local p i n=$(( ${REVIT_OPEN_TOOK_S:-20} * 2 ))
+  for ((i = 0; i < n; i++)); do
+    for p in $(revit_pids "$B" "$YEAR"); do lsof -p "$p" -Fn 2>/dev/null | grep -qxF "n$(cd "$(dirname "$FILE")" && pwd -P)/$(basename "$FILE")" && return 0; done
+    sleep 0.5
+  done
+  return 1
+}
 
 prepare() { # right before sending: the file is what the plan saw. A copy is made only now, when it can be opened
   local now
@@ -87,12 +104,13 @@ prepare() { # right before sending: the file is what the plan saw. A copy is mad
 while :; do
   revit_running "$B" "$YEAR" || attempt_fresh || die "Revit $YEAR is not running in $NAME any more. Nothing was opened."
   rc=3
-  if revit_running "$B" "$YEAR"; then ro ready 10; rc=$?; else sleep 2; fi
+  if revit_idle; then ro ready 10; rc=$?; else sleep 2; fi
   case "$rc" in
     0) prepare
        ro send "$WIN"; rc=$?
        case "$rc" in
-         0) echo "Opened in Revit $YEAR ($NAME)."; exit 0 ;;
+         0) took && { echo "Opened in Revit $YEAR ($NAME)."; exit 0; }
+            die "Revit $YEAR got the file but did not open it. Close any dialog in Revit, then look before you try again." ;;
          3) ;;   # Revit has just left DDE: below
          4) die "Revit $YEAR is busy: close its open dialog, then try again." ;;
          5) die "Revit $YEAR did not answer. It may still open the file: look before you try again." ;;
