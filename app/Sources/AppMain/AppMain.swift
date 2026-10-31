@@ -27,21 +27,25 @@ struct AppMain: App {
             if let app = env.app { RunWindow(app: app, env: env).appWindow(env) }
         }
         .windowResizability(.contentSize)
+        .defaultLaunchBehavior(.suppressed)   // started by a file, SwiftUI would open the first of these by itself
 
         Window("Add Revit", id: Route.wizard.id) {
             if let app = env.app { WizardWindow(app: app, env: env).appWindow(env) }
         }
         .windowResizability(.contentSize)
+        .defaultLaunchBehavior(.suppressed)   // started by a file, SwiftUI would open the first of these by itself
 
         WindowGroup("Add-ins", id: "addins", for: BottleRef.self) { $ref in
             if let app = env.app, let ref { AddinsWindow(app: app, env: env, ref: ref).appWindow(env) }
         }
         .windowResizability(.contentSize)
+        .defaultLaunchBehavior(.suppressed)   // started by a file, SwiftUI would open the first of these by itself
 
         Window("Settings", id: Route.settings.id) {
             if let app = env.app { SettingsWindow(app: app, env: env).appWindow(env) }
         }
         .windowResizability(.contentSize)
+        .defaultLaunchBehavior(.suppressed)   // started by a file, SwiftUI would open the first of these by itself
     }
 }
 

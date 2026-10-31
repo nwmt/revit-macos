@@ -69,16 +69,20 @@ fi
 exec 9>&-   # Revit is up or on its way: the wait below must not stop other work on this Mac
 
 revit_idle() { # this Revit has reached idle: the newest journal, made since it started, says so
-  local p t f d="$B/drive_c/users/crossover/AppData/Local/Autodesk/Revit/Autodesk Revit $YEAR/Journals"
+  local p t f
   p="$(revit_pids "$B" "$YEAR" | head -1)"; [ -n "$p" ] || return 1
   t="$(LC_ALL=C date -j -f '%a %b %e %T %Y' "$(LC_ALL=C ps -o lstart= -p "$p" | sed 's/^ *//; s/ *$//')" +%s 2>/dev/null)" || return 1
-  f="$(ls -t "$d"/journal.[0-9]*.txt 2>/dev/null | head -1)"; [ -n "$f" ] || return 1
+  f="$(journal)"; [ -n "$f" ] || return 1
   [ "$(stat -f %B "$f")" -ge "$t" ] && LC_ALL=C grep -aq 'appPriv idle' "$f"
 }
 
-took() { # DDE acks a command that a modal dialog then swallows: Revit holds the file open once it has begun to load it
+journal() { ls -t "$B/drive_c/users/crossover/AppData/Local/Autodesk/Revit/Autodesk Revit $YEAR/Journals"/journal.[0-9]*.txt 2>/dev/null | head -1; }
+took() { # DDE acks a command that a modal dialog then swallows: Revit holds the file open once it has begun to load it.
+  # A file of an older Revit waits at Revit's own question about upgrading it, which is the user's to answer. $1 = the
+  # journal's size before sending
   local p i n=$(( ${REVIT_OPEN_TOOK_S:-20} * 2 ))
   for ((i = 0; i < n; i++)); do
+    tail -c +"$(($1 + 1))" "$(journal)" 2>/dev/null | LC_ALL=C grep -aq TaskDialog_Model_Upgrade && return 0
     for p in $(revit_pids "$B" "$YEAR"); do lsof -p "$p" -Fn 2>/dev/null | grep -qxF "n$(cd "$(dirname "$FILE")" && pwd -P)/$(basename "$FILE")" && return 0; done
     sleep 0.5
   done
@@ -107,9 +111,10 @@ while :; do
   if revit_idle; then ro ready 10; rc=$?; else sleep 2; fi
   case "$rc" in
     0) prepare
+       size="$(stat -f %z "$(journal)")"
        ro send "$WIN"; rc=$?
        case "$rc" in
-         0) took && { echo "Opened in Revit $YEAR ($NAME)."; exit 0; }
+         0) took "$size" && { echo "Opened in Revit $YEAR ($NAME)."; exit 0; }
             die "Revit $YEAR got the file but did not open it. Close any dialog in Revit, then look before you try again." ;;
          3) ;;   # Revit has just left DDE: below
          4) die "Revit $YEAR is busy: close its open dialog, then try again." ;;

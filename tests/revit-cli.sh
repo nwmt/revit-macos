@@ -1844,7 +1844,10 @@ open_world; frevit; echo 3 > "$T/ro-ready"; run "" open "$H/Documents/p.rvt"
 expect "open: Revit runs, DDE never answers → gives up, nothing sent" 1 "did not take the file in time"
 check "open: no send without a server" eval '! grep -q " send " "$T/ro-log"'
 open_world; frevit; : > "$T/ro-swallow"; run "" open "$H/Documents/p.rvt"; expect "open: acked but a dialog swallowed it → said so, not sent twice" 1 "did not open it"
-check "open: swallowed: sent once" eval '[ "$(grep -c " send " "$T/ro-log")" = 1 ]'
+open_world; frevit; : > "$T/ro-swallow"; rvt "$H/Documents/old.rvt" 2025; printf '#!/bin/bash\necho "TaskDialog_Model_Upgrade" >> "%s"\nsleep 1\n' "$BOTTLES/rvt2027-a/drive_c/users/crossover/AppData/Local/Autodesk/Revit/Autodesk Revit 2027/Journals/journal.0002.txt" > "$T/ro-hook"; chmod +x "$T/ro-hook"
+sed -i '' 's|^case "\$2" in|[ "\$2" != send ] \|\| "'"$T"'/ro-hook"\ncase "\$2" in|' "$CXF/bin/wine"; run "" open "$H/Documents/old.rvt" --copy-for 2027
+expect "open: Revit asks about upgrading the copy → that is a yes" 0 "Opened in Revit 2027"
+open_world; frevit; : > "$T/ro-swallow"; run "" open "$H/Documents/p.rvt"; check "open: swallowed: sent once" eval '[ "$(grep -c " send " "$T/ro-log")" = 1 ]'
 open_world; frevit; echo 4 > "$T/ro-send"; run "" open "$H/Documents/p.rvt"; expect "open: Revit busy" 1 "close its open dialog"
 open_world; frevit; echo 5 > "$T/ro-send"; run "" open "$H/Documents/p.rvt"; expect "open: no answer → said so" 1 "It may still open the file"
 check "open: no answer → not sent again" eval '[ "$(grep -c " send " "$T/ro-log")" = 1 ]'
