@@ -82,6 +82,7 @@ struct PlanSheet: View {
     @State private var keepPoint = true
     @State private var changed = false
     @State private var working = false
+    @State private var going: Task<Void, Never>?
     @Environment(\.dismiss) private var dismiss
 
     private var year: Int { switch request { case .plan(let r): r.year; case .rollback(let y, _, _), .points(let y, _, _): y } }
@@ -111,13 +112,14 @@ struct PlanSheet: View {
             }
             HStack {
                 Spacer()
-                Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Cancel", role: .cancel) { going?.cancel(); dismiss() }.keyboardShortcut(.cancelAction)
                 Button(goWord) { go() }.keyboardShortcut(.defaultAction).tint(destructive ? .red : .accentColor)
                     .disabled(plan == nil || !gate.open || working || app.isBusy)
             }
         }
         .padding(20).frame(width: 520, alignment: .topLeading)
         .task { plan = await read(); reset() }
+        .onDisappear { going?.cancel() }   // however the sheet closes, a Go still reading its plan stops there
     }
 
     @ViewBuilder private func bottlePlan(_ p: RemovePlan) -> some View {
@@ -206,9 +208,10 @@ struct PlanSheet: View {
 
     private func go() {
         working = true
-        Task {
+        going = Task {
             defer { working = false }
             guard let shown = plan, let now = await read() else { plan = nil; return }
+            guard !Task.isCancelled else { return }
             guard now.fingerprint == shown.fingerprint else { plan = now; changed = true; reset(); return }
             let run: RunRequest
             switch (request, now) {

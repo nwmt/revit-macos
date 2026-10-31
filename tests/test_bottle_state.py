@@ -62,6 +62,15 @@ class BottleState(unittest.TestCase):
                   {"kind": "addins", "result": "ok", "shims": "0.17.0", "engine": "z", "time": "t"})
         self.assertEqual(self.state()["built"], {"shims": "0.15.0", "engine": "app:0.1.3", "time": "2026-10-30T21:34:22Z"})
 
+    def test_status_keys(self):
+        self.regs()
+        r = subprocess.run([sys.executable, "-I", "-B", TOOL, self.b, "--status", "works", "--tested", "2027.3", "--gaps", "G",
+                            "--steps", "vc retina mackeys steel gdrive", "--theme", "", "--steel", "off",
+                            "--gdrive", '{"mode": "account"}'], capture_output=True, text=True, check=True)
+        d = json.loads("{" + r.stdout[1:] + "}")
+        self.assertEqual(d, {"support": {"status": "works", "tested": "2027.3", "gaps": "G"}, "built": None,
+                             "settings": {"retina": "on", "keys": "mac", "steel": "off", "gdrive": "account"}})
+
     def test_built_old_records(self):
         self.runs({"kind": "install", "result": "ok"})
         self.assertEqual(self.state()["built"], {"shims": "", "engine": "", "time": ""})

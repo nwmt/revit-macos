@@ -32,11 +32,11 @@ enum SheetRequest: Identifiable, Equatable {
     }
 
     /// The sheet of a run that needs one: Retry comes here.
-    static func of(_ r: RunRequest) -> SheetRequest? {
+    static func of(_ r: RunRequest, bottleExists: Bool) -> SheetRequest? {
         switch r {
         case .remove, .rebuild: .plan(r)
         case let .rollback(y, b, id): .rollback(year: y, bottle: b, id: id)
-        case let .clearPoints(y, b, _, _): .points(year: y, bottle: b, clear: "old")
+        case let .clearPoints(y, b, _, _): .points(year: y, bottle: b, clear: bottleExists ? "old" : "all")   // a new plan, shown again
         default: nil
         }
     }

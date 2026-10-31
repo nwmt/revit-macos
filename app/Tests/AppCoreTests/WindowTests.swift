@@ -255,3 +255,10 @@ func bottleStatus(running: Bool) -> EngineOutput {
         #expect(again.watched?.record?.request.lostAddress == true); #expect(again.retryRequest == nil)
     }
 }
+
+@MainActor @Test func theViewerCountsAsAStart() async {
+    let h = Harness()
+    h.model.noteStarting(bottle: "b")
+    #expect(await h.model.open(year: 2027, bottle: "b") == .starting)
+    #expect(await !h.fake.calls.contains { $0.hasPrefix("run start") })
+}

@@ -3,11 +3,14 @@
 """What ./revit status --json says about one bottle beyond its files: the display and key settings and what built it.
 
   bottle_state.py <bottle>      prints {"retina": …, "keys": …, "built": …} as JSON
+  bottle_state.py <bottle> --status S --tested T --gaps G --steps "…" --theme M --steel S --gdrive JSON
+                                prints the bottle's keys of ./revit status --json: ,"support":…,"settings":…,"built":…
 
 retina: on, compact, off; mixed when the values fit no ./revit set; "" when they cannot be read. keys: mac, windows,
 "" otherwise. built: shims, engine and time of the newest install that ended ok or partial; null without one. It reads
 the bottle's files only, no Wine, and writes nothing. Run with python3 -I -B.
 """
+import argparse
 import json
 import os
 import sys
@@ -49,11 +52,29 @@ def built(bottle):
     return {k: last.get(k) or "" for k in ("shims", "engine", "time")}
 
 
+def status_keys(state, a):
+    """One process per bottle: ./revit status runs every few seconds."""
+    steps = a.steps.split()
+    try:
+        drive = (json.loads(a.gdrive) or {}).get("mode", "")
+    except (ValueError, AttributeError):
+        drive = ""
+    wanted = (("retina", "retina", state["retina"]), ("mackeys", "keys", state["keys"]), ("theme", "theme", a.theme),
+              ("steel", "steel", a.steel), ("gdrive", "gdrive", drive))
+    keys_ = {"support": {"status": a.status, "tested": a.tested, "gaps": a.gaps},
+             "settings": {k: v for step, k, v in wanted if step in steps}, "built": state["built"]}
+    return "," + json.dumps(keys_, separators=(",", ":"), ensure_ascii=False)[1:-1]
+
+
 def main():
-    if len(sys.argv) != 2:
-        sys.exit("Usage: bottle_state.py <bottle>")
-    s = doctor.collect_settings(sys.argv[1])
-    print(json.dumps({"retina": retina(s), "keys": keys(s), "built": built(sys.argv[1])}, separators=(",", ":")))
+    p = argparse.ArgumentParser()
+    p.add_argument("bottle")
+    for o in ("status", "tested", "gaps", "steps", "theme", "steel", "gdrive"):
+        p.add_argument("--" + o)
+    a = p.parse_args()
+    s = doctor.collect_settings(a.bottle)
+    state = {"retina": retina(s), "keys": keys(s), "built": built(a.bottle)}
+    sys.stdout.write(status_keys(state, a) if a.steps is not None else json.dumps(state, separators=(",", ":")) + "\n")
 
 
 if __name__ == "__main__":

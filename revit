@@ -231,15 +231,9 @@ esac
 . "$ROOT/scripts/lib/points.sh"
 status_extra() { # $1 = bottle path, $2 = year, $3 = theme_mode, $4 = gdrive state as JSON: the JSON keys support, settings, built
   ( load_profile "$2" || { printf ',"support":null,"settings":{},"built":null'; exit 0; }
-    local st="$(python3 -I -B "$ROOT/tools/bottle_state.py" "$1" 2>/dev/null)" s=""; [ -n "$st" ] || st='{"retina":"","keys":"","built":null}'
-    jf() { /usr/bin/perl -MJSON::PP -e 'print JSON::PP->new->allow_nonref->canonical->encode(decode_json($ARGV[0])->{$ARGV[1]})' "$st" "$1"; }
-    in_list retina "${STEPS[@]}" && s+="${s:+,}\"retina\":$(jf retina)"
-    in_list mackeys "${STEPS[@]}" && s+="${s:+,}\"keys\":$(jf keys)"
-    in_list theme "${STEPS[@]}" && s+="${s:+,}\"theme\":$(json_str "$3")"
-    in_list steel "${STEPS[@]}" && s+="${s:+,}\"steel\":$(json_str "$(steel_state "$1" "$2")")"
-    in_list gdrive "${STEPS[@]}" && s+="${s:+,}\"gdrive\":$(/usr/bin/perl -MJSON::PP -e 'my $g = eval { decode_json($ARGV[0]) }; print JSON::PP->new->allow_nonref->encode(ref $g ? $g->{mode} : "")' "$4")"
-    printf ',"support":{"status":%s,"tested":%s,"gaps":%s},"settings":{%s},"built":%s' \
-      "$(json_str "$STATUS")" "$(json_str "$TESTED")" "$(json_str "$GAPS")" "$s" "$(jf built)" )
+    python3 -I -B "$ROOT/tools/bottle_state.py" "$1" --status "$STATUS" --tested "$TESTED" --gaps "$GAPS" --steps "${STEPS[*]}" \
+      --theme "$3" --steel "$(in_list steel "${STEPS[@]}" && steel_state "$1" "$2")" --gdrive "$4" 2>/dev/null \
+      || printf ',"support":null,"settings":{},"built":null' )
 }
 status_addins() { # $1 = bottle path, $2 = year: the ids of the add-ins installed there, as JSON strings
   local id out="" B="$1" YEAR="$2"

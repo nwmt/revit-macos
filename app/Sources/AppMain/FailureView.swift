@@ -104,7 +104,7 @@ struct FailureView: View {
     }
 
     private func retry(_ r: RunRequest) {
-        if let s = SheetRequest.of(r) { env.router.ask(s); return }   // deletes something: a new plan, confirmed again
+        if let s = SheetRequest.of(r, bottleExists: app.status?.bottles.contains { $0.name == r.bottle } ?? true) { env.router.ask(s); return }   // deletes something: a new plan, confirmed again
         app.dismissFailure()
         Task { await Confirm.start(app: app, env: env, r) }
     }

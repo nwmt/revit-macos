@@ -60,8 +60,8 @@ struct BottleMenu: View {
             Button("Open Revit") { Task { await RevitActions.open(app: app, year: item.year, bottle: item.bottle) } }
         }
         let viewer = AppLinks.viewerApp(year: item.year, bottle: item.bottle, home: home)
-        if !item.running, FileManager.default.fileExists(atPath: viewer.path) {
-            Button("Open Revit Viewer") { NSWorkspace.shared.open(viewer) }
+        if !item.running, !item.starting, FileManager.default.fileExists(atPath: viewer.path) {
+            Button("Open Revit Viewer") { app.noteStarting(bottle: item.bottle); NSWorkspace.shared.open(viewer) }
         }
         Button("Revit \(String(item.year)) in \(env.name)…") { env.router.page(ref) }
         Divider()

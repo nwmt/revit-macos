@@ -109,6 +109,9 @@ public enum CleanupAnswer: Equatable, Sendable { case report(CleanupReport), ref
         return .starting
     }
 
+    /// The Viewer starts Revit.exe too: Open waits for it as for its own start.
+    public func noteStarting(bottle: String) { revitStarting[bottle] = Date() }
+
     func expireStarting(now: Date) {
         let up = Set((status?.bottles ?? []).filter(\.running).map(\.name))
         for (b, t) in revitStarting where up.contains(b) || now.timeIntervalSince(t) >= 180 { revitStarting[b] = nil }

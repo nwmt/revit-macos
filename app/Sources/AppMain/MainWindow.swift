@@ -15,7 +15,7 @@ struct MainWindow: View {
             switch router.place {
             case .library: LibraryView(app: app, env: env)
             case .activity: ActivityView(app: app, env: env)
-            case .bottle(let ref): VersionView(app: app, env: env, ref: ref)
+            case .bottle(let ref): VersionView(app: app, env: env, ref: ref).id(ref)   // a draft belongs to its bottle
             }
         }
         .frame(minWidth: 880, minHeight: 560)
