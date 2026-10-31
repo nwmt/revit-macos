@@ -80,30 +80,39 @@ journal() { ls -t "$B/drive_c/users/crossover/AppData/Local/Autodesk/Revit/Autod
 took() { # DDE acks a command that a modal dialog then swallows: Revit holds the file open once it has begun to load it.
   # A file of an older Revit waits at Revit's own question about upgrading it, which is the user's to answer. $1 = the
   # journal's size before sending
-  local p i n=$(( ${REVIT_OPEN_TOOK_S:-20} * 2 ))
+  local p i out n=$(( ${REVIT_OPEN_TOOK_S:-20} * 2 ))
   for ((i = 0; i < n; i++)); do
-    tail -c +"$(($1 + 1))" "$(journal)" 2>/dev/null | LC_ALL=C grep -aq TaskDialog_Model_Upgrade && return 0
+    # into variables, not `| grep -q`: under pipefail an early grep exit gives the writer SIGPIPE
+    out="$(tail -c +"$(($1 + 1))" "$(journal)" 2>/dev/null)"
+    LC_ALL=C grep -aq TaskDialog_Model_Upgrade <<<"$out" && return 0
     # by inode: lsof escapes names that are not ASCII
-    for p in $(revit_pids "$B" "$YEAR"); do lsof -p "$p" -Fi 2>/dev/null | grep -qxF "i$(stat -f %i "$FILE")" && return 0; done
+    for p in $(revit_pids "$B" "$YEAR"); do
+      out="$(lsof -p "$p" -Fi 2>/dev/null)"
+      grep -qxF "i$(stat -f %i "$FILE")" <<<"$out" && return 0
+    done
     sleep 0.5
   done
   return 1
 }
 
-prepare() { # right before sending: the file is what the plan saw. A copy is made only now, when it can be opened
-  local now
-  if [ "$ACTION" = copy ]; then
-    FILE="$(rf copy "$FILE" "$YEAR")" || exit 1
-    ACTION=open
-    now="$(rf info "$FILE")"
-    [ "$(field "$now" format)" = "$(field "$P" format)" ] || die "The file changed while Revit started. Nothing was opened: try again."
-    WIN="$(rf winpath "$B" "$FILE")" || exit 1
-    echo "Copy: $(tilde "$FILE")"
-    return 0
-  fi
-  now="$(rf info "$FILE")"
-  [ "$(field "$now" format)/$(field "$now" size)/$(field "$now" mtime_ns)" = "$(field "$P" format)/$(field "$P" size)/$(field "$P" mtime_ns)" ] \
+unchanged() { # $1 = info of the file now: it is what the plan saw
+  [ "$(field "$1" format)/$(field "$1" worksharing)/$(field "$1" size)/$(field "$1" mtime_ns)" = \
+    "$(field "$P" format)/$(field "$P" worksharing)/$(field "$P" size)/$(field "$P" mtime_ns)" ] \
     || die "The file changed while Revit started. Nothing was opened: try again."
+}
+prepare() { # right before sending: the file is what the plan saw. A copy is made only now, when it can be opened; from
+  # here on it is the file, with its own size and time
+  local now
+  now="$(rf info "$FILE")"; unchanged "$now"
+  [ "$ACTION" = copy ] || return 0
+  FILE="$(rf copy "$FILE" "$YEAR")" || exit 1
+  ACTION=open
+  now="$(rf info "$FILE")"
+  [ "$(field "$now" format)/$(field "$now" worksharing)" = "$(field "$P" format)/$(field "$P" worksharing)" ] \
+    || die "The file changed while Revit started. Nothing was opened: try again."
+  P="$now"
+  WIN="$(rf winpath "$B" "$FILE")" || exit 1
+  echo "Copy: $(tilde "$FILE")"
 }
 
 while :; do

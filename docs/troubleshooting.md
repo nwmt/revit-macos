@@ -101,6 +101,11 @@ app started as soon as the app quits. Starting Revit from Terminal still works.
 **Solution:** System Settings → General → Login Items & Extensions → Allow in the Background: turn on
 **Revit <year> (<bottle>)**. The **Autodesk Sign-In (<bottle>)** app works the same way: turn it on too.
 
+### A file from Finder does not open
+
+A dialog open in Revit swallows the file, and closing the dialog does not bring it back. The menu bar app says so. Close
+the dialog, then open the file again.
+
 ## Sign-in
 
 ### Revit hangs on the splash screen after the first sign-in

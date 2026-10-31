@@ -166,7 +166,7 @@ struct MenuLabel: View {
         if app.status?.app?.placement == "move" { Placement.ask(name: env.name) }
         if app.watched != nil {
             env.router.open(.run)
-        } else if (app.status?.bottles ?? []).isEmpty && !app.isBusy && FileInbox.early.isEmpty {
+        } else if (app.status?.bottles ?? []).isEmpty && !app.isBusy && !FileInbox.opened {
             env.router.open(.wizard)   // started for a file: its dialog offers the wizard
         }
         await env.files?.add(FileInbox.early); FileInbox.early = []

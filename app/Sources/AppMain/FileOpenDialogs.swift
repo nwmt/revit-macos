@@ -6,11 +6,13 @@ import AppKit
 /// Finder's open event can come before AppEnvironment has its model.
 @MainActor enum FileInbox {
     static var early: [URL] = []
+    static var opened = false     // a file has come, so the first-run wizard does not open by itself
     static var receive: (([URL]) -> Void)?
 }
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     func application(_ application: NSApplication, open urls: [URL]) {
+        FileInbox.opened = true
         if let r = FileInbox.receive { r(urls) } else { FileInbox.early += urls }
     }
 }

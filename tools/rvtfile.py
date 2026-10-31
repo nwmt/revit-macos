@@ -32,7 +32,7 @@ def compound_stream(f, want):
         raise Bad("damaged file")
     ss, ms = 1 << shift, 1 << mini_shift
     nfat, dir0 = struct.unpack("<I", h[44:48])[0], struct.unpack("<I", h[48:52])[0]
-    cutoff, mfat0, _, dif, ndif = struct.unpack("<5I", h[56:76])
+    cutoff, mfat0, _, dif, _ = struct.unpack("<5I", h[56:76])
     total = max(os.fstat(f.fileno()).st_size // ss, 1)
 
     def sector(n):
@@ -46,12 +46,14 @@ def compound_stream(f, want):
 
     words = ss // 4
     difat = list(struct.unpack("<109I", h[76:512]))
-    seen = 0
-    while dif < END and seen <= ndif:
+    visited = set()
+    while dif < END:
+        if dif in visited:
+            raise Bad("damaged file")
+        visited.add(dif)
         v = struct.unpack("<%dI" % words, sector(dif))
         difat += v[:-1]
         dif = v[-1]
-        seen += 1
     fat_sectors = [x for x in difat[:nfat] if x < END]
     fat_cache = {}
 

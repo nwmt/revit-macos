@@ -143,6 +143,12 @@ class Info(Tmp):
         self.bad(compound(text(MODERN) + b"\0" * 6000, loop=True))
         self.bad(compound(text(MODERN), cut=5000))
 
+    def test_a_difat_that_points_at_itself_ends(self):
+        d = bytearray(compound(text(MODERN)))
+        d[68:76] = struct.pack("<II", 0, 0xFFFFFFFF)   # first DIFAT sector: 0, which loops; a count that does not help
+        d[4096:8192] = struct.pack("<1024I", *([0] * 1024))
+        self.bad(bytes(d))
+
     def test_a_missing_file(self):
         self.assertTrue(rf.info(os.path.join(self.d, "none.rvt"))["error"])
 
