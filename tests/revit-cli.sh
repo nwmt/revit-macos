@@ -957,11 +957,67 @@ reset; bottle rvt2027-a 2027 2027; run "" rebuild 2027 --dry-run --json
 check "rebuild --dry-run --json: add-ins reset in 2027" eval '[ "$RC" = 0 ] && grep -qF "\"addins_reset\":true" <<<"$OUT"'
 reset; bottle rvt2025-a 2025 2025; run "" rebuild 2025 --dry-run
 check "rebuild --dry-run: today's lines, then the dry-run line" eval '[ "$RC" = 0 ] && grep -qF "This deletes the bottle rvt2025-a" <<<"$OUT" && [ "$(tail -1 <<<"$OUT")" = "(dry run: nothing changed)" ] && not_called install.sh'
-reset; run "" install 2024 --dry-run; expect "--dry-run on install is refused" 1 "--dry-run is for ./revit remove, rebuild, rollback, points, cleanup and open only."
+reset; run "" install 2024 --dry-run; expect "--dry-run on install is refused" 1 "--dry-run is for ./revit remove, rebuild, update, rollback, points, cleanup and open only."
 reset; bottle rvt2025-a 2025 2025; touch "$T/stamp"; sleep 1; run "" remove 2025 --dry-run --events "$T/ev"
 newer="$(find "$T" -mindepth 1 -newer "$T/stamp" ! -path "$T/ev" ! -path "$T/ev/*" ! -path "$CALLS")"
 if [ -s "$T/ev/events.ndjson" ] && [ -z "$newer" ]; then ok "remove --dry-run with --events writes only the events folder"
 else fail "remove --dry-run with --events writes only the events folder" "$newer"; fi
+# ---- update: a rebuild from a chosen installer folder ----
+up_world() { # rvt2025-a with Revit, a new installer in $T/new, the unpacked old one
+  bottle rvt2025-a 2025 2025; touch "$BOTTLES/rvt2025-a/drive_c/Program Files/Autodesk/Revit 2025/Revit.exe"
+  mkdir -p "$T/new" "$R/installers/extracted/revit2025"; echo i > "$T/new/RVT_2025_B_002_002.7z"
+}
+up_plan() { run "" update 2025 --from "$1" --dry-run --json; }
+reset; up_world; rm -f "$T/new/RVT_2025_B_002_002.7z"; echo x > "$T/new/RVT_2026_B_002_002.7z"; up_plan "$T/new"
+check "update: another year's installer is blocked" jq_ 'exit !($d->{command} eq "update" && $d->{blocked} =~ /does not hold a Revit 2025 installer/)'
+reset; up_world; up_plan "$T/nothing"; check "update: no such folder is blocked" jq_ 'exit !($d->{blocked} =~ /There is no folder/)'
+reset; up_world; up_plan "$T/new"
+check "update --dry-run --json: the plan" jq_ 'exit !($d->{blocked} eq "" && $d->{from} =~ m{/new$} && join("|", map { $_->{label} } @{$d->{delete}}) eq "bottle rvt2025-a|installers/extracted/revit2025" && $d->{addins_reset} && !defined $d->{newer})'
+check "update --dry-run changes nothing" eval '[ ! -L "$R/installers/revit2025" ] && [ -d "$R/installers/extracted/revit2025" ]'
+reset; up_world; mkdir -p "$R/installers/extracted/revit2025/x"; echo i > "$R/installers/extracted/revit2025/x/RVT_2025_B_002_002.7z"; up_plan "$R/installers/extracted/revit2025/x"
+check "update: a folder inside what is replaced is blocked" jq_ 'exit !($d->{blocked} =~ /Choose a folder outside/)'
+reset; up_world; mkdir -p "$R/installers/revit2025-dl/x"; echo i > "$R/installers/revit2025-dl/x/RVT_2025_B_002_002.7z"; up_plan "$R/installers/revit2025-dl/x"
+check "update: a folder inside the old downloads is blocked" jq_ 'exit !($d->{blocked} =~ /Choose a folder outside/)'
+reset; up_world; mkdir -p "$R/installers/revit2025/x"; echo i > "$R/installers/revit2025/x/RVT_2025_B_002_002.7z"; up_plan "$R/installers/revit2025/x"
+check "update: a folder inside the installer that moves is blocked" jq_ 'exit !($d->{blocked} =~ /Choose a folder outside/)'
+reset; up_world; bottle rvt2025-b 2025 2025; up_plan "$T/new"; check "update: another bottle of the year is blocked" jq_ 'exit !($d->{blocked} =~ /rvt2025-b still uses/)'
+reset; up_world; mkdir -p "$R/installers/revit2025" "$R/installers/revit2025.old"; echo o > "$R/installers/revit2025/old.7z"; up_plan "$T/new"
+check "update: an older .old folder is blocked" jq_ 'exit !($d->{blocked} =~ /revit2025.old is still there/)'
+run "" update 2025 --from "$T/new" --yes; check "update --yes refuses what the plan blocks, and changes nothing" eval '[ "$RC" = 1 ] && [ ! -L "$R/installers/revit2025" ] && not_called "install.sh"'
+reset; up_world; mkdir -p "$R/installers/revit2025"; echo o > "$R/installers/revit2025/old.7z"; mkdir -p "$R/installers/revit2025-dl"
+run "" update 2025 --from "$T/new" --yes --no-point
+check "update: real folder moved to .old, link, downloads gone, unpacks again" eval '[ "$RC" = 0 ] && [ -f "$R/installers/revit2025.old/old.7z" ] && [ -L "$R/installers/revit2025" ] && [ ! -e "$R/installers/revit2025-dl" ] && called "install.sh 2025 rvt2025-a"'
+reset; up_world; rm -rf "$R/installers/revit2025"; mkdir "$T/older"; ln -s "$T/older" "$R/installers/revit2025"; run "" update 2025 --from "$T/new" --yes --no-point
+check "update: a link is replaced" eval '[ "$RC" = 0 ] && [ "$(readlink "$R/installers/revit2025")" = "$(cd "$T/new" && pwd -P)" ]'
+mkdir -p "$R/installers/revit2025-dl"; touch "$R/installers/revit2025-dl/own.part"; run "" update 2025 --from "$T/new" --yes --no-point
+check "update again from the same folder keeps its own downloads" eval '[ "$RC" = 0 ] && [ -e "$R/installers/revit2025-dl/own.part" ]'
+reset; up_world; rm -rf "$R/installers/revit2025"; mkdir -p "$R/installers/revit2025"; run "" update 2025 --from "$T/new" --yes --no-point
+check "update: an empty folder is replaced" eval '[ "$RC" = 0 ] && [ -L "$R/installers/revit2025" ]'
+reset; up_world; fake_revit rvt2025-a 2025; run "" update 2025 --from "$T/new" --yes --no-point
+check "update: refused while Revit runs, nothing swapped" eval '[ "$RC" = 1 ] && [ ! -L "$R/installers/revit2025" ]'
+reset; up_world; run "" update 2025 --yes --no-point; expect "update needs --from" 1 "Which installer folder?"
+reset; up_world; run "" update 2025 --from "$T/new" --reextract; expect "update: its own unpacking" 1 "always unpacks"
+reset; run "" rebuild 2025 --from x; expect "--from is for update only" 1 "--from is for ./revit update only."
+reset; up_world; mkdir -p "$R/installers/revit2025"; echo o > "$R/installers/revit2025/old.7z"
+run "" update 2025 --from "$T/new" --yes --no-point --events "$T/ev1"
+check "update --events: one end" eval '[ "$(grep -c "\"event\":\"end\"" "$T/ev1/events.ndjson")" = 1 ]'
+
+reset; up_world; mkdir -p "$R/installers/revit2025"; echo o > "$R/installers/revit2025/old.7z"; FREE_GB=1 run "" update 2025 --from "$T/new" --yes
+check "update: no restore point, nothing moved" eval '[ "$RC" = 1 ] && [ -f "$R/installers/revit2025/old.7z" ] && not_called "install.sh" && grep -q "Nothing was deleted" <<<"$OUT"'
+reset; up_world; mkdir -p "$R/installers/revit2025" "$R/installers/revit2025-dl"; echo o > "$R/installers/revit2025/old.7z"; touch "$R/installers/revit2025-dl/d"
+cat > "$R/tools/bottle_state.py" <<'PY'
+import os, signal, subprocess
+p = os.getppid()   # up to ./revit itself, past the subshells: Cancel comes before any swap
+while True:
+    q = int(subprocess.check_output(["ps", "-o", "ppid=", "-p", str(p)]))
+    if "/revit update" not in subprocess.check_output(["ps", "-o", "args=", "-p", str(q)]).decode():
+        break
+    p = q
+os.kill(p, signal.SIGTERM)
+PY
+run "" update 2025 --from "$T/new" --yes --no-point --events "$T/ev2"
+check "update: an early Cancel moves nothing, with --no-point too" eval '[ "$RC" != 0 ] && [ -f "$R/installers/revit2025/old.7z" ] && [ -e "$R/installers/revit2025-dl/d" ] && not_called "install.sh" && grep -q "\"result\":\"stopped\"" "$T/ev2/events.ndjson"'
+
 # ---- cache: downloaded and unpacked installer files the app can delete ----
 items() { jq_ 'for (@{$d->{items}}) { printf "%s|%s|%s|%s\n", $_->{label}, $_->{removable} ? "rm" : "keep", $_->{kept}, $_->{bytes} }'; }
 reset; mkdir -p "$R/installers/revit2025-dl" "$R/installers/extracted/revit2025" "$R/cache/winetricks"
@@ -1799,7 +1855,7 @@ ln -s "$H/Documents" "$PR/rvt2024-a/20260201-000000/bottle/link"
 run "" points 2024 --clear all --yes; expect "points --clear all" 0 "Deleted"
 check "--clear all: gone, links not followed" eval '[ ! -e "$PR" ] && [ -f "$H/Documents/project.rvt" ]'
 run "" points 2024 --clear junk; expect "--clear junk" 1 "--clear is old"
-run "" rollback 2024 --no-point; expect "--no-point elsewhere" 1 "for ./revit rebuild only"
+run "" rollback 2024 --no-point; expect "--no-point elsewhere" 1 "for ./revit rebuild and update only"
 run "" status; check "status without points says nothing of them" eval '! grep -qF "Restore points" <<<"$OUT"'
 
 reset; pt_bottle rvt2024-a 2024; pt_make rvt2024-a 2024 20260101-000000; mkdir -p "$PR/rvt2024-a/replaced.20260101-000000"

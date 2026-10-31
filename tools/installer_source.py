@@ -5,7 +5,7 @@ made from. Resolved once (source.json); get-revit.sh, unpack-revit.sh and instal
   resolve  <year> <input> <downloads> <checksums> <out.json>   stage 1: files, roles, URLs, expected sums
   finalize <source.json> <hashes.tsv>                          stage 2: actual sha256, source_id
   compare  <source.json> <dot-source.json> <hashes.tsv>        match | mismatch <why> | nosource
-  detect   <folder>                                            for ./revit find-installer
+  detect   <folder> [<downloads>]                              for ./revit find-installer and update
   build    <source.json> <a.b.c.d|unknown>                     keep the expected Revit build (installer_drift.py) in the list
 
 Kinds: create-installer (2024+: Autodesk's small tool and the files its manifest names), parts (an Autodesk multi-part
@@ -320,13 +320,13 @@ def compare(src, dot, hashes):
     return "match"
 
 
-def detect(folder):
+def detect(folder, downloads=None):
     names = sorted(os.listdir(folder)) if os.path.isdir(folder) else []
     year = next((m.group(1) for n in names for m in [re.search(r"(?:Create_Installer_RVT_|Revit_|RVT_)(\d{4})_", n)] if m), None)
     out = {"year": year, "kind": None, "complete": False, "downloadable": False, "missing": [], "problem": "", "files": []}
     if not year:
         return out
-    s = resolve(year, folder, folder, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "installers", "CHECKSUMS.txt"))
+    s = resolve(year, folder, downloads or folder, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "installers", "CHECKSUMS.txt"))
     absent = [f for f in s["files"] if not os.path.exists(f["path"])]
     out.update(kind=s["kind"], problem=s["problem"], missing=[os.path.basename(f["path"]) for f in absent])
     out["complete"] = bool(s["files"]) and not absent and not s["problem"] and s["kind"] != "updates-only"
@@ -354,8 +354,8 @@ def main(a):
             return finalize(a[1], a[2])
         if a[:1] == ["compare"] and len(a) == 4:
             print(compare(a[1], a[2], a[3])); return 0
-        if a[:1] == ["detect"] and len(a) == 2:
-            print(json.dumps(detect(a[1]))); return 0
+        if a[:1] == ["detect"] and len(a) in (2, 3):
+            print(json.dumps(detect(*a[1:]))); return 0
         if a[:1] == ["build"] and len(a) == 3:
             s = json.load(open(a[1]))
             if not isinstance(s, dict):

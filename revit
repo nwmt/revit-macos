@@ -13,6 +13,7 @@ WARM_OPTS=()   # ./revit gdrive warm: --depth N, --max N
 VIEWER=0; NO_POINT=0; POINT_TO=""; POINT_CLEAR=""; POINT_IDS=""; POINT_LEFT=0   # ./revit rebuild --no-point, rollback --to <id>, points --clear old|all
 # (the app: --clear-ids <id,…> only those, --clear-unfinished the files of a run cut short)
 OPEN_BOTTLE=""; COPY_FOR=""   # ./revit open --bottle <bottle>, --copy-for <year>
+UPDATE_FROM=""   # ./revit update --from <folder>
 RESULT_HINT=usage   # what an exit before the child means: usage until the arguments check out (Task 5 reads it)
 sup_end() { # $1 = exit status: the one end event, from the child's result file or from what an early exit means
   [ "$END_DONE" = 0 ] || return 0; END_DONE=1
@@ -43,7 +44,7 @@ supervise() { # <command…>: runs it in the foreground of this process group (C
   fi
   # bash reports a foreground child killed by TERM/HUP ("Terminated: 15") on its own stderr; exec'ing, it did not:
   # the child keeps the real stderr (fd 8), this shell's goes to /dev/null while it waits
-  case "$CMD" in install|rebuild|addins|test)   # no sleep while it works; ends with this process, holds no lock or events fd
+  case "$CMD" in install|rebuild|update|addins|test)   # no sleep while it works; ends with this process, holds no lock or events fd
     command -v caffeinate >/dev/null && caffeinate -i -w $$ </dev/null >/dev/null 2>&1 7>&- 9>&- & ;;
   esac
   exec 8>&2 2>/dev/null
@@ -82,6 +83,7 @@ Usage: ./revit <command> <year> [bottle]
   hittest   for the app: the Windows window under a point (stdin/stdout)
   theme     for the app: Revit's theme follows the Mac's light or dark look now
   rebuild   keep a restore point, delete the bottle and install Revit again (--no-point: keep none)
+  update    rebuild from a newer Revit installer (--from <folder>; --no-point: keep none)
   rollback  bring the bottle back from its restore point (--to <id>: an older one)
   points    list the restore points of a bottle (--clear old|all deletes them)
   remove    delete Revit, its bottle and its apps
@@ -111,9 +113,9 @@ while [ $# -gt 0 ]; do
     --keep) KEEP=1 ;;
     --write) WRITE=1 ;;
     --no-point) NO_POINT=1 ;;
-    --events|--only|--accept-eula|--run|--exclude|--server|--tier|--name|--targets|--depth|--max|--to|--clear|--clear-ids|--bottle|--copy-for)
+    --events|--only|--accept-eula|--run|--exclude|--server|--tier|--name|--targets|--depth|--max|--to|--clear|--clear-ids|--from|--bottle|--copy-for)
       if [ $# -lt 2 ]; then FLAG_ERR="$1 needs a value"
-      else case "$1" in --events) EVENTS_DIR="$2" ;; --only) ONLY="$2" ;; --accept-eula) EULA="$2" ;;
+      else case "$1" in --from) UPDATE_FROM="$2" ;; --events) EVENTS_DIR="$2" ;; --only) ONLY="$2" ;; --accept-eula) EULA="$2" ;;
         --run) RUN_ARG="$2" ;; --exclude) EXCL+=("$2") ;; --server) SERVER="$2" ;; --tier) TIER="$2" ;; --name) TOKEN_NAME="$2" ;; --depth|--max) WARM_OPTS+=("$1" "$2") ;; --targets) TARGETS="$2" ;; --to) POINT_TO="$2" ;; --clear) POINT_CLEAR="$2" ;; --clear-ids) POINT_IDS="$2" ;; --bottle) OPEN_BOTTLE="$2" ;; --copy-for) COPY_FOR="$2" ;; esac; shift; fi ;;
     -h|--help) POS+=(help) ;;
     --*) FLAG_ERR="Unknown option: $1" ;;
@@ -147,8 +149,8 @@ if [ "$CMD" = set ]; then
 fi
 [ "$REUSE_X$REEXTRACT" != 11 ] || FLAG_ERR="Use --reuse-extracted or --reextract, not both."
 [ "$LOG" = 0 ] || [ "$CMD" = test ] || FLAG_ERR="--log is for ./revit test only."
-[ "$DRY" = 0 ] || [ "$CMD" = remove ] || [ "$CMD" = rebuild ] || [ "$CMD" = cleanup ] || [ "$CMD" = rollback ] || [ "$CMD" = points ] || [ "$CMD" = open ] \
-  || FLAG_ERR="--dry-run is for ./revit remove, rebuild, rollback, points, cleanup and open only."
+[ "$DRY" = 0 ] || [ "$CMD" = remove ] || [ "$CMD" = rebuild ] || [ "$CMD" = update ] || [ "$CMD" = cleanup ] || [ "$CMD" = rollback ] || [ "$CMD" = points ] || [ "$CMD" = open ] \
+  || FLAG_ERR="--dry-run is for ./revit remove, rebuild, update, rollback, points, cleanup and open only."
 [ -z "$OPEN_BOTTLE$COPY_FOR" ] || [ "$CMD" = open ] || FLAG_ERR="--bottle and --copy-for are for ./revit open only."
 if [ "$CMD" = open ]; then
   [ ${#POS[@]} = 2 ] || FLAG_ERR="Usage: ./revit open <file> [--bottle <bottle>] [--copy-for <year>]"
@@ -157,7 +159,9 @@ if [ "$CMD" = open ]; then
   [ -z "$COPY_FOR" ] || [[ "$COPY_FOR" =~ ^[0-9]{4}$ ]] || FLAG_ERR="--copy-for takes a Revit year."
 fi
 [ "$VIEWER" = 0 ] || [ "$CMD" = start ] || FLAG_ERR="--viewer is for ./revit start only."
-[ "$NO_POINT" = 0 ] || [ "$CMD" = rebuild ] || FLAG_ERR="--no-point is for ./revit rebuild only."
+[ "$NO_POINT" = 0 ] || [ "$CMD" = rebuild ] || [ "$CMD" = update ] || FLAG_ERR="--no-point is for ./revit rebuild and update only."
+[ -z "$UPDATE_FROM" ] || [ "$CMD" = update ] || FLAG_ERR="--from is for ./revit update only."
+[ "$CMD" != update ] || [ "$REUSE_X$REEXTRACT" = 00 ] || FLAG_ERR="./revit update always unpacks the new installer."
 [ -z "$POINT_TO" ] || [ "$CMD" = rollback ] || FLAG_ERR="--to is for ./revit rollback only."
 [ -z "$POINT_TO" ] || [[ "$POINT_TO" =~ ^[0-9]{8}-[0-9]{6}$ ]] || FLAG_ERR="--to takes a restore point as ./revit points lists it."
 [ -z "$POINT_CLEAR" ] || [ "$CMD" = points ] || FLAG_ERR="--clear is for ./revit points only."
@@ -194,7 +198,7 @@ if [ "$CMD" = theme ]; then   # the app's: a year and a bottle, no options, no s
   [ "$ARGC" = "${#POS[@]}" ] && [ ${#POS[@]} -le 3 ] && [[ "${POS[1]:-}" =~ ^[0-9]{4}$ ]] && [[ "${POS[2]:-}" != *=* ]] \
     || usage_die "Usage: ./revit theme <year> [bottle]"
 fi
-SUPERVISED=0; case "$CMD" in install|check|addins|rebuild|test|set) SUPERVISED=1 ;; esac
+SUPERVISED=0; case "$CMD" in install|check|addins|rebuild|update|test|set) SUPERVISED=1 ;; esac
 sup_traps() { # signals noted, not ignored (an ignored signal would be inherited by the child), from here to the child
   trap 'SIG_GOT=INT' INT; trap 'SIG_GOT=TERM' TERM; trap 'SIG_GOT=HUP' HUP
 }
@@ -224,7 +228,7 @@ case "$MCPSUB" in   # no year, no bottle to check
     exec python3 -I -B "$ROOT/tools/mcp_gate.py" token-revoke --data "$DATA" --name "$YEAR_ARG" ;;
 esac
 case "$CMD" in
-  install|check|doctor|report|addins|import|cache|stop|cleanup|logs|debug|recent|rebuild|remove|status|find-installer|link-installer|test|mcp|set|hittest|theme|gdrive|rollback|points|open|start) ;;
+  install|check|doctor|report|addins|import|cache|stop|cleanup|logs|debug|recent|rebuild|update|remove|status|find-installer|link-installer|test|mcp|set|hittest|theme|gdrive|rollback|points|open|start) ;;
   ""|help|-h|--help) usage; exit 0 ;;
   *) echo "Unknown command: $CMD" >&2; echo >&2; usage >&2; exit 1 ;;
 esac
@@ -523,9 +527,11 @@ confirm() { # typing the year is harder to do by accident than y/n
   [ "$a" = "$YEAR" ] || { echo; echo "Cancelled. Nothing changed."; exit 1; }
 }
 POINT_NOTE=""   # rebuild: what happens to a restore point, the first line of docs_note
+UP_NOTES=()     # update: more lines of docs_note
 docs_note() { # the bottle's Documents is normally a link to the Mac's Documents: deleting the bottle removes the link only
   local t
   [ -z "$POINT_NOTE" ] || echo "  $POINT_NOTE"
+  [ ${#UP_NOTES[@]} = 0 ] || printf '  %s\n' "${UP_NOTES[@]}"
   if t="$(readlink "$B/drive_c/users/crossover/Documents")"; then
     echo "  Documents in this bottle is your Mac folder $(tilde "$t"). It stays."
   else
@@ -545,6 +551,65 @@ extracted_plan() { # sets X, DROP_X (1 = remove deletes the unpacked files) and 
   X="$(revit_extracted "$YEAR")"; DROP_X=0; KEEP_X=""
   [ -d "$X" ] || return 0
   if o="$(other_bottle_of_year)"; then KEEP_X="bottle $o still uses it"; else DROP_X=1; fi
+}
+
+version_newer() { # $1, $2 = a.b.c.d or "": true, false, or null when one is unknown
+  python3 -I -c 'import re, sys
+a, b = (tuple(map(int, x.split("."))) if re.fullmatch(r"\d+(\.\d+)*", x) else None for x in sys.argv[1:3])
+print("null" if a is None or b is None else "true" if a > b else "false")' "$1" "$2"
+}
+up_in() { [ -d "$2" ] && case "$1/" in "$(cd "$2" && pwd -P)"/*) true ;; *) false ;; esac; }   # $1 = a real path, inside folder $2 or $2 itself
+update_check() { # ./revit update: what --from means now, with the same answer for the plan and the run. Changes nothing.
+  # UP_FROM (the real folder), UP_SWAP (none: the install already reads it; link, real, empty: what installers/revit<year>
+  # is and how update_swap replaces it), UP_BLOCK (why not, in words), UP_NOW, UP_NEW, UP_NEWER, UP_NOTES
+  local in dl cur d ok y sl dld o
+  UP_BLOCK=""; UP_SWAP=none; UP_NOW=""; UP_NEW=""; UP_NEWER=null; UP_NOTES=()
+  UP_FROM="$(cd "$UPDATE_FROM" 2>/dev/null && pwd -P)" || { UP_FROM="$UPDATE_FROM"; UP_BLOCK="There is no folder $UPDATE_FROM."; return 0; }
+  in="$(revit_input "$YEAR")"; dl="$in-dl"
+  if up_in "$UP_FROM" "$(revit_extracted "$YEAR")" || up_in "$UP_FROM" "$B" || up_in "$UP_FROM" "$dl"; then
+    UP_BLOCK="This update replaces or deletes that folder. Choose a folder outside it."; return 0
+  fi
+  if [ -L "$in" ]; then
+    cur="$(cd "$in" 2>/dev/null && pwd -P)"; [ "$cur" = "$UP_FROM" ] || UP_SWAP=link
+  elif [ -d "$in" ]; then
+    cur="$(cd "$in" && pwd -P)"
+    if [ "$cur" != "$UP_FROM" ]; then
+      if up_in "$UP_FROM" "$in"; then UP_BLOCK="This update moves that folder away. Choose a folder outside it."; return 0; fi
+      if [ -n "$(ls -A "$in" 2>/dev/null)" ]; then
+        UP_SWAP=real
+        [ ! -e "$in.old" ] || { UP_BLOCK="The older installer in installers/revit$YEAR.old is still there. Delete it in Finder, then try again."; return 0; }
+        UP_NOTES+=("The old installer files move to installers/revit$YEAR.old. Delete them when you no longer need them.")
+      else UP_SWAP=empty; fi
+    fi
+  else UP_SWAP=link; fi
+  dld="$UP_FROM"; [ "$UP_SWAP" != none ] || dld="$(revit_downloads "$YEAR")"   # after a swap the old downloads are gone
+  d="$(python3 -I "$ROOT/tools/installer_source.py" detect "$UP_FROM" "$dld")" || { UP_BLOCK="Could not read that folder."; return 0; }
+  ok="$(/usr/bin/perl -MJSON::PP -e 'my $d = decode_json($ARGV[0]);
+    print $d->{year} // "", "\t", (($d->{kind} // "") ne "updates-only" && !$d->{problem} && ($d->{complete} || ($d->{downloadable} && $d->{kind} eq "create-installer"))) ? 1 : 0' "$d")"
+  y="${ok%%$'\t'*}"; ok="${ok#*$'\t'}"
+  [ "$y" = "$YEAR" ] || { UP_BLOCK="This folder does not hold a Revit $YEAR installer."; return 0; }
+  [ "$ok" = 1 ] || { UP_BLOCK="The installer in this folder is not complete. Download all of its files from your Autodesk Account."; return 0; }
+  if o="$(other_bottle_of_year)"; then UP_BLOCK="Revit $YEAR in $o still uses the unpacked installer files. Remove that bottle first."; return 0; fi
+  UP_NOW="$(python3 -I -B "$ROOT/tools/bottle_state.py" "$B" 2>/dev/null | /usr/bin/perl -MJSON::PP -e 'my $d = eval { decode_json(join "", <STDIN>) }; print $d->{built}{build} // "" if $d && $d->{built}')"
+  sl="$(mktemp "${TMPDIR:-/tmp}/revit-update.XXXXXX")"
+  if python3 -I "$ROOT/tools/installer_source.py" resolve "$YEAR" "$UP_FROM" "$dld" "$ROOT/installers/CHECKSUMS.txt" "$sl" >/dev/null 2>&1; then
+    UP_NEW="$(python3 -I -B "$ROOT/tools/installer_drift.py" expected-build "$YEAR" "$sl" 2>/dev/null)"; [ "$UP_NEW" != unknown ] || UP_NEW=""
+  fi
+  rm -f "$sl"; UP_NEWER="$(version_newer "$UP_NEW" "$UP_NOW")"
+  UP_NOTES+=("The unpacked installer files are replaced. Roll back brings back the bottle, not these files.")
+}
+update_swap() { # under the lock, after the restore point: installers/revit<year> becomes the chosen folder, and the
+  # downloads of the old one go, so the install reads what update_check read
+  local in; in="$(revit_input "$YEAR")"
+  [ "$UP_SWAP" != none ] || return 0
+  mkdir -p "$(dirname "$in")" || die "Cannot write to $(tilde "$(dirname "$in")")."
+  case "$UP_SWAP" in
+    real) mv "$in" "$in.old" || die "Could not move $(tilde "$in") away. Nothing was deleted." ;;
+    empty) rmdir "$in" || die "Could not replace the empty folder $(tilde "$in"). Nothing was deleted." ;;
+    link) rm -f "$in" ;;
+  esac
+  ln -s "$UP_FROM" "$in" || die "Could not link $UP_FROM. Nothing was deleted."
+  rm -rf "$in-dl"
 }
 
 # ---- run the command ----
@@ -693,8 +758,13 @@ case "$CMD" in
     need_crossover; bottle_guard must_exist "$YEAR" "$NAME"
     "$ROOT/scripts/launch.sh" "$YEAR" "$NAME" || exit $?   # 75: the lock is busy, try again
     echo "Make the problem happen, quit Revit, then run ./revit report $YEAR$SFX." ;;
-  rebuild)
+  rebuild|update)
     need_crossover; bottle_guard must_exist "$YEAR" "$NAME"; not_busy
+    if [ "$CMD" = update ]; then
+      [ -n "$UPDATE_FROM" ] || die "Which installer folder? Example: ./revit update $YEAR$SFX --from ~/Downloads/Revit$YEAR"
+      REEXTRACT=1   # before the first look at a restore point: its free space depends on it
+      update_check
+    fi
     export_source_flags
     want_point=false; no_point_why=""   # a bottle with no Revit in it has nothing to keep
     if [ "$NO_POINT" = 0 ] && [ -f "$(revit_dir_unix "$B" "$YEAR")/Revit.exe" ]; then
@@ -707,13 +777,26 @@ case "$CMD" in
     fi
     if [ "$DRY$JSON" = 11 ]; then
       ar=false; [ ${#ADDIN_STEPS[@]} -gt 0 ] && ar=true
-      printf '{"command":"rebuild","year":%s,"bottle":%s,"delete":[%s],"addins_reset":%s,"restore_point":%s,"notes":%s}\n' "$((10#$YEAR))" \
-        "$(json_str "$NAME")" "$(item_json "bottle $NAME" "$(bytes_of "$B")")" "$ar" "$want_point" "$(notes_json)"
+      del="$(item_json "bottle $NAME" "$(bytes_of "$B")")"; up=""
+      if [ "$CMD" = update ]; then
+        [ ! -d "$(revit_extracted "$YEAR")" ] || del+=",$(item_json "installers/extracted/revit$YEAR" "$(bytes_of "$(revit_extracted "$YEAR")")")"
+        [ "$UP_SWAP" = none ] || [ ! -d "$(revit_input "$YEAR")-dl" ] || del+=",$(item_json "installers/revit$YEAR-dl" "$(bytes_of "$(revit_input "$YEAR")-dl")")"
+        up=",\"from\":$(json_str "$UP_FROM"),\"build_now\":$(json_str "$UP_NOW"),\"build_new\":$(json_str "$UP_NEW"),\"newer\":$UP_NEWER,\"blocked\":$(json_str "$UP_BLOCK")"
+      fi
+      printf '{"command":%s,"year":%s,"bottle":%s,"delete":[%s],"addins_reset":%s,"restore_point":%s,"notes":%s%s}\n' "$(json_str "$CMD")" "$((10#$YEAR))" \
+        "$(json_str "$NAME")" "$del" "$ar" "$want_point" "$(notes_json)" "$up"
       exit 0
     fi
-    echo "This deletes the bottle $NAME and installs Revit $YEAR into it again (10–30 minutes)."
-    echo "  Revit is installed from the files already in installers/extracted/revit$YEAR. To get a newer Revit update,"
-    echo "  see \"Updating\" in the README."
+    if [ "$CMD" = update ]; then
+      [ -z "$UP_BLOCK" ] || die "$UP_BLOCK"
+      echo "This deletes the bottle $NAME and installs Revit $YEAR into it again from $(tilde "$UP_FROM") (10–30 minutes)."
+      echo "  Revit ${UP_NOW:-of unknown version} -> ${UP_NEW:-unknown version}."
+      [ "$UP_NEWER" != false ] || echo "  This installer is not newer than the Revit in this bottle."
+    else
+      echo "This deletes the bottle $NAME and installs Revit $YEAR into it again (10–30 minutes)."
+      echo "  Revit is installed from the files already in installers/extracted/revit$YEAR. To get a newer Revit update,"
+      echo "  see \"Updating\" in the README."
+    fi
     if [ ${#ADDIN_STEPS[@]} -gt 0 ]; then
       echo "  Revit settings and add-ins in this bottle are reset: run ./revit addins $YEAR$SFX again if you use them."
     else
@@ -724,24 +807,29 @@ case "$CMD" in
     if [ -n "$no_point_why" ]; then
       if [ "$YES" = 1 ]; then   # no one read the line above: only --no-point says that is all right
         run_ctx_new; [ "$POINT_NO_SPACE" = 0 ] || result_set reason no_space
-        die "No restore point: $no_point_why. Nothing was deleted. To rebuild without one: ./revit rebuild $YEAR$SFX --no-point"
+        die "No restore point: $no_point_why. Nothing was deleted. To go on without one: ./revit $CMD $YEAR$SFX${UPDATE_FROM:+ --from <folder>} --no-point"
       fi
       NO_POINT=1
     fi
     confirm
-    run_ctx_new; sup_traps; lock_take --no-trap "./revit rebuild $YEAR $NAME"
+    run_ctx_new; sup_traps; lock_take --no-trap "./revit $CMD $YEAR $NAME"
     bottle_guard must_exist "$YEAR" "$NAME"   # again: the bottle may have changed, or Revit started, while the user read
+    if [ "$CMD" = update ]; then update_check; [ -z "$UP_BLOCK" ] || die "$UP_BLOCK"; fi
     points_clean "$NAME" || die "Could not delete what an earlier run left in $(tilde "$(points_dir "$NAME")"). Delete it in Finder."
     if [ "$NO_POINT" = 0 ] && [ -f "$(revit_dir_unix "$B" "$YEAR")/Revit.exe" ]; then   # as things are now: what was promised holds or nothing happens
       if ! point_why_not "$B" "$YEAR"; then
         [ "$POINT_NO_SPACE" = 0 ] || result_set reason no_space
-        die "No restore point: $POINT_WHY. Nothing was deleted. To rebuild without one: ./revit rebuild $YEAR$SFX --no-point"
+        die "No restore point: $POINT_WHY. Nothing was deleted. To go on without one: ./revit $CMD $YEAR$SFX${UPDATE_FROM:+ --from <folder>} --no-point"
       fi
       echo "Keeping a restore point of ${NAME}…"
       emit message level "$(json_str info)" text "$(json_str "Keeping a restore point of ${NAME}…")"
       point_take "$NAME" "$YEAR" "$B" || die "No restore point: $POINT_WHY. Nothing was deleted."
       if [ -n "$SIG_GOT" ]; then point_drop "$NAME" "$POINT_ID"; points_tidy "$NAME"; supervise true; fi
       echo "Restore point $POINT_ID kept."
+    fi
+    if [ "$CMD" = update ]; then
+      [ -z "$SIG_GOT" ] || supervise true   # Cancel: with or without a restore point, the installer stays as it was
+      update_swap
     fi
     export CX_RECREATE=1; supervise "$ROOT/install.sh" "$YEAR" "$NAME" ;;
   rollback)
