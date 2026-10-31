@@ -299,6 +299,27 @@ bottle_guard() { # $1 = must_exist | running_ok (like must_exist, Revit may run:
     || die "Revit $year in $name is still closing. Try again in a few seconds."
 }
 
+# ---- Steel Connections (./revit set steel=, step steel): where its two manifests are ----
+STEEL_MANIFESTS=(Autodesk.SteelConnectionsDB.addin Autodesk.SteelConnectionsUI.addin)
+steel_active() { echo "$(revit_dir_unix "$1" "$2")/AddIns/SteelConnections"; }   # $1 = bottle path, $2 = year
+steel_stash() { echo "$1/revit-macos/steel-off"; }   # $1 = bottle path; outside drive_c: Revit does not look there
+steel_state() { # $1 = bottle path, $2 = year → on | off | mixed (both files, split or doubled) | missing | none (no add-in)
+  local a s f na=0 ns=0 both=0
+  a="$(steel_active "$1" "$2")"; s="$(steel_stash "$1")"
+  if [ ! -d "$a" ]; then
+    if [ -n "$(ls -A "$s" 2>/dev/null)" ]; then echo missing; else echo none; fi   # manifests kept, the add-in itself lost
+    return 0
+  fi
+  for f in "${STEEL_MANIFESTS[@]}"; do
+    [ -f "$a/$f" ] && na=$((na + 1)); [ -f "$s/$f" ] && ns=$((ns + 1))
+    [ -f "$a/$f" ] || [ -f "$s/$f" ] && both=$((both + 1))
+  done
+  if [ "$both" != "${#STEEL_MANIFESTS[@]}" ]; then echo missing
+  elif [ "$ns" = 0 ]; then echo on
+  elif [ "$na" = 0 ]; then echo off
+  else echo mixed; fi
+}
+
 # ---- the temporary copies of ./revit test (scripts/smoke.sh) and what runs in a bottle ----
 SMOKE_MARK="revit-macos/smoke-clone"   # in a copy: written before the copying starts, so even a cut-short copy has it
 smoke_clone_name() { echo "$1.test"; }   # $1 = bottle: its copy. revit_bottle_name_ok refuses the dot, so no

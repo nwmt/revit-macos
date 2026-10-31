@@ -56,6 +56,9 @@ Windows laptop, done over remote desktop, which lowers its graphics score.
   `./revit install` sets by default, the graphics set Init+Graphics_simplified took 36.4 s against 29.2 s at 96 DPI
   (+24%), and 34.9 s with `retina=compact` (+19%): 2 runs each, up to 11% apart. Modeling and large models were not
   measured with Retina.
+- **2027, first open of a model with links, Retina on, seconds:** Snowdon Towers architectural sample 85 to open and 95 for its
+  first sheet, 22–27 and 2.4–2.9 with `steel=off`; the HVAC sample 185 to open, 29–32 with `steel=off`; 3 runs each with
+  `steel=off`. Second open in a session: about 20 either way. Models without links do not change.
 - **2027, orbiting a large model:** the Snowdon Towers architectural sample (183 MB), its default 3D view, Retina on,
   one orbit of 240 mouse moves per visual style, with a frame drawn after each move: Realistic 22.8 s (16 frames per
   second), Shaded 26.5 s (9), Hidden Line 33.5 s (7.4), Consistent Colors 35.1 s (7.1), Wireframe 36.5 s (6.5),
