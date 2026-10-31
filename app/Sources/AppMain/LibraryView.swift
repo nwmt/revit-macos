@@ -62,7 +62,7 @@ struct LibraryView: View {
                 ForEach(o.points, id: \.id) { p in
                     HStack {
                         Text("Revit \(String(o.year)) · \(o.bottle)")
-                        Text(p.time).foregroundStyle(.secondary)
+                        Text(PointTime.text(p.time)).foregroundStyle(.secondary)
                         Spacer()
                         Button("Roll back…") { env.router.ask(.rollback(year: o.year, bottle: o.bottle, id: p.id)) }.disabled(app.isBusy)
                     }

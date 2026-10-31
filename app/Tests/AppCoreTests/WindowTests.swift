@@ -42,6 +42,11 @@ let bottle2027 = #"{"name":"rvt2027-a","year":"2027","revit":true,"running":fals
     #expect(VersionTab.of(bottle("x", "2025", settings: [:], support: nil)) == [.overview, .addins, .maintenance])
 }
 
+@Test func pointTimes() {
+    #expect(PointTime.text("not a date") == "not a date")
+    #expect(PointTime.text("2026-10-31T12:00:00Z").contains("2026"))
+}
+
 @Test func statusWords() {
     #expect(StatusWords.of("works") == "Works"); #expect(StatusWords.of("mostly") == "Mostly works")
     #expect(StatusWords.of("untested") == "Not tested"); #expect(StatusWords.of(nil) == "Not tested")
@@ -172,7 +177,7 @@ let bottle2027 = #"{"name":"rvt2027-a","year":"2027","revit":true,"running":fals
     runDir("d", [start])
     runDir("e", ["not json"])
     try FileManager.default.createDirectory(at: d.appending(path: "f"), withIntermediateDirectories: true)
-    let rows = ActivityLog.load(runs: d, active: d.appending(path: "d"))
+    let rows = ActivityLog.load(runs: d, active: URL(fileURLWithPath: "/private" + d.path).appending(path: "d"))   // the same run by another path
     func of(_ n: String) -> RunRow? { rows.first { $0.ctx.lastPathComponent == n } }
     #expect(rows.count == 4)
     #expect(of("a")?.outcome == .done); #expect(of("b")?.outcome == .failed); #expect(of("c")?.outcome == .interrupted); #expect(of("d")?.outcome == .running)

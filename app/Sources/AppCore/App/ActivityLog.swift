@@ -29,7 +29,7 @@ public enum ActivityLog {
             let s = RunState.replay(events)
             let y = s.year.map(String.init) ?? ""
             rows.append(RunRow(ctx: d, title: MenuContent.verb(s.command ?? "", y), bottle: s.bottle ?? "", date: date,
-                               outcome: outcome(s, active: d.standardizedFileURL == active?.standardizedFileURL), state: s))
+                               outcome: outcome(s, active: d.lastPathComponent == active?.lastPathComponent), state: s))
         }
         return rows
     }

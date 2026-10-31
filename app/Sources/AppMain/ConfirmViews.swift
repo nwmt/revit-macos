@@ -97,12 +97,12 @@ struct PlanSheet: View {
             switch plan {
             case .bottle(let p)?: bottlePlan(p)
             case .rollback(let p)?:
-                Text("Brings bottle \(p.bottle) back as it was at \(p.time).")
+                Text("Brings bottle \(p.bottle) back as it was at \(PointTime.text(p.time)).")
                 if p.bottleExists { Text("Everything in the bottle's C: drive that changed since then is deleted.").foregroundStyle(.orange) }
                 Text("The restore point stays.").foregroundStyle(.secondary)
             case .points(let p)?:
                 Text("Deleted").font(.headline)
-                lines(p.delete)
+                lines(p.delete, upTo: true)
                 if p.unfinished { Text("Files of a run that was cut short").font(.callout) }
             case nil: if problem == nil { ProgressView() }
             }
@@ -112,7 +112,7 @@ struct PlanSheet: View {
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(goWord, role: destructive ? .destructive : nil) { go() }.keyboardShortcut(.defaultAction)
+                Button(goWord) { go() }.keyboardShortcut(.defaultAction).tint(destructive ? .red : .accentColor)
                     .disabled(plan == nil || !gate.open || working || app.isBusy)
             }
         }
@@ -132,15 +132,19 @@ struct PlanSheet: View {
         lines(p.delete)
         if p.addinsReset == true { Text("Reset: Revit's settings and add-ins in the bottle.").font(.callout) }
         ForEach(p.kept ?? [], id: \.self) { Text("Kept: \($0)").font(.callout) }
-        ForEach(p.notes, id: \.self) { Text($0).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+        // a line that names a command is for the terminal: the sheet says the same in words
+        ForEach(p.notes.filter { !$0.contains("./revit") }, id: \.self) { Text($0).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
     }
 
-    private func lines(_ items: [PlanItem]) -> some View {
+    private func lines(_ items: [PlanItem], upTo: Bool = false) -> some View {
         ForEach(items, id: \.label) { i in
             HStack {
                 Text(i.label).lineLimit(1).truncationMode(.middle)
                 Spacer()
-                if let b = i.bytes { Text(ByteCountFormatter().string(fromByteCount: b)).foregroundStyle(.secondary) }
+                if let b = i.bytes {
+                    let size = ByteCountFormatter().string(fromByteCount: b)
+                    Text(upTo ? "up to \(size)" : size).foregroundStyle(.secondary)
+                }
             }
             .font(.callout)
         }

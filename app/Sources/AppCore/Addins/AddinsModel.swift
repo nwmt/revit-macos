@@ -25,6 +25,7 @@ public struct AddinRow: Equatable, Sendable {
     public private(set) var selected: Set<String> = []
     public private(set) var accepted: Set<String> = []
     public private(set) var working = false
+    public private(set) var loaded = false
     /// The Homebrew formula of an add-in's tool.
     static let formulas = ["gs": "ghostscript"]
 
@@ -34,6 +35,7 @@ public struct AddinRow: Equatable, Sendable {
 
     /// addins list <year> --json, then the bottle's installed add-ins from a fresh status.
     public func load() async {
+        defer { loaded = true }
         guard let out = await app.query(["addins", "list", String(year), "--json"]) else { error = app.engineError; return }
         guard out.exitCode == 0, let list = try? JSONDecoder.engine.decode([AddinInfo].self, from: out.stdout) else {
             error = out.stderr.trimmingCharacters(in: .whitespacesAndNewlines); return

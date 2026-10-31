@@ -19,7 +19,8 @@ struct AddinsView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Add-ins of Revit \(String(model.year)) · \(model.bottle)").font(.headline)
             ForEach(model.rows, id: \.id) { r in row(r) }
-            if model.rows.isEmpty { Text("No add-ins for Revit \(String(model.year)).").foregroundStyle(.secondary) }
+            if !model.loaded { ProgressView() }
+            else if model.rows.isEmpty { Text("No add-ins for Revit \(String(model.year)).").foregroundStyle(.secondary) }
             if let e = model.error { Text(e).foregroundStyle(.red).textSelection(.enabled) }
             HStack {
                 Spacer()

@@ -118,7 +118,7 @@ tasks from changing the same bottles at once, from any copy of the project and f
 installers, unpacked files and logs out of the project folder. With `--events <folder>` a command writes its progress as
 JSON lines to `<folder>/events.ndjson`, ending with one `end` line that carries the result. `./revit status --json`,
 `./revit find-installer <folder> --json` and `./revit addins list <year> --json` answer the app's questions;
-`./revit remove` and `rebuild` with `--dry-run --json` say what they would delete, and `./revit import msls31 <file>`
+`./revit remove`, `rebuild`, `rollback` and `points --clear` with `--dry-run --json` say what they would delete, and `./revit import msls31 <file>`
 copies the one Windows file the app asks for. `./revit cache` lists the downloaded and unpacked installer files that
 can be deleted (never an installer folder of yours, nor a file an installer still reads), and `cache clear --yes`
 deletes them. When a step or an action fails, its log's last lines go to the events as an error message, and the

@@ -47,6 +47,7 @@ struct RunWindow: View {
                         .foregroundStyle(msg.level == "error" ? .red : .orange).textSelection(.enabled)
                 }
                 if w.phase == .running || w.phase == .finishing {
+                    if w.state.actions.isEmpty && w.state.steps.isEmpty { ProgressView().controlSize(.small) }   // rollback tells nothing on the way
                     HStack {
                         if w.phase == .finishing { Text("Finishing…").foregroundStyle(.secondary) }
                         Spacer()

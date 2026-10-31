@@ -40,7 +40,7 @@ struct ActivityView: View {
     }
 
     @ViewBuilder private var detail: some View {
-        if let r = rows.first(where: { $0.id == selected }), r.ctx.standardizedFileURL != app.watched?.ctx.standardizedFileURL {
+        if let r = rows.first(where: { $0.id == selected }), r.ctx.lastPathComponent != app.watched?.ctx.lastPathComponent {
             PastRun(app: app, row: r)
         } else if app.watched != nil || app.busyText != nil {
             RunWindow(app: app, env: env)
@@ -54,7 +54,7 @@ struct ActivityView: View {
     private func reload() {
         guard let runs else { return }
         rows = ActivityLog.load(runs: runs, active: phase == .running || phase == .finishing ? app.watched?.ctx : nil)
-        if selected == nil { selected = rows.first?.id }
+        if phase == .running || selected == nil { selected = rows.first?.id }   // a task that starts comes to the front
     }
 
     private func color(_ o: RunRow.Outcome) -> Color {

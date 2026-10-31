@@ -9,11 +9,18 @@ public enum VersionTab: String, CaseIterable, Hashable, Sendable {
         let s = b?.settings ?? [:]
         return allCases.filter {
             switch $0 {
-            case .display: ["retina", "keys", "theme", "steel"].contains { s[$0] != nil && !($0 == "steel" && s[$0] == "none" && s.count == 1) }
+            case .display: SettingsDraft.keys.contains { s[$0] != nil }
             case .drive: s["gdrive"] != nil
             default: true
             }
         }
+    }
+}
+
+/// A restore point's time as the Mac writes dates; the engine's text when it is not a date.
+public enum PointTime {
+    public static func text(_ iso: String) -> String {
+        (try? Date(iso, strategy: .iso8601))?.formatted(date: .abbreviated, time: .shortened) ?? iso
     }
 }
 

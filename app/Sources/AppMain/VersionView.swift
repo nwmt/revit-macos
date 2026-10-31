@@ -311,7 +311,7 @@ private struct MaintenanceTab: View {
                 if points.isEmpty { Text("No restore points.").foregroundStyle(.secondary) }
                 ForEach(points, id: \.id) { p in
                     HStack {
-                        Text(p.time)
+                        Text(PointTime.text(p.time))
                         Text("up to \(ByteCountFormatter().string(fromByteCount: p.bytes))").foregroundStyle(.secondary)
                         Spacer()
                         Button("Roll back…") { env.router.ask(.rollback(year: ref.year, bottle: ref.bottle, id: p.id)) }

@@ -36,7 +36,7 @@ bottle.
    `python3 -I -m unittest discover -s tests -p 'test_*.py'` must pass. After a
    deliberate change to a year's plan or steps, `UPDATE=1 tests/plans.sh` rewrites
    `tests/plans/`; review that diff.
-10. The menu bar app's Swift tests run with `app/test.sh`. The app has no UI tests: check a change to a view by
+10. The app's Swift tests run with `app/test.sh`. The app has no UI tests: check a change to a view by
     running the app.
 
 ## Writing docs
@@ -45,7 +45,7 @@ Each fact lives in one place. Other pages link to it instead of repeating it.
 
 | Fact | Lives in |
 |---|---|
-| Version status | First line of `versions/<year>.md`; the summary in the README table |
+| Version status | First line of `versions/<year>.md`; the summary in the README table; `STATUS`, `TESTED` and `GAPS` in `scripts/profiles/<year>.sh` for the app (`tests/plans.sh` compares the three) |
 | Requirements for all versions (Mac, CrossOver, Rosetta 2, Homebrew, license, msls31.dll) | README |
 | Which file goes where; disk space per version | `installers/README.md` |
 | Install, `./revit` commands, updating, restore points | README |
@@ -84,7 +84,7 @@ Wording:
 
 1. `python3 -I -B tools/installer_drift.py packages installers/extracted/revit<year>` lists the installer's packages
    against the nearest year's `PKGS`.
-2. Add `scripts/profiles/<year>.sh` (copy the nearest year) and the year's cases in `tests/steps.sh` and the add-in
+2. Add `scripts/profiles/<year>.sh` (copy the nearest year; `STATUS=untested` until a real run) and the year's cases in `tests/steps.sh` and the add-in
    catalogs in `scripts/addins/`; `UPDATE=1 tests/plans.sh` writes `tests/plans/<year>.txt`. Add the year's journal
    version to the table in `tools/smoke.py` (from a journal Revit wrote for that year).
 3. Install it, sign in once, then `./revit doctor <year>`, `./revit test <year>` and `./revit report <year>`.
