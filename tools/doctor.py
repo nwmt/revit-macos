@@ -57,7 +57,7 @@ NDP_KEY = "Software\\Microsoft\\NET Framework Setup\\NDP\\v4\\Full"
 # the steps retina, mackeys and theme (scripts/steps/fixes.sh): settings, not fixes; ./revit set changes them, the
 # settings group and bottle.theme say what to do. Wine reads RetinaMode from MAC_DRIVER, the
 # keys from Revit.exe's AppDefaults first, LogPixels from DESKTOP_KEY (user.reg), then FONTS_HKLM (system.reg), then 96
-SETTING_STEPS = ("retina", "mackeys", "theme")
+SETTING_STEPS = ("retina", "mackeys", "theme", "steel")
 # steps whose absence or failure ./revit set mends, not a rebuild (SETTING_STEPS also turns on the display and keys checks)
 NOT_REBUILD_STEPS = SETTING_STEPS + ("gdrive",)
 MAC_DRIVER = "Software\\Wine\\Mac Driver"
@@ -204,6 +204,7 @@ FIXES = {
     "mackeys": _fix("Cmd works as Alt: Cmd+S opens a ribbon tab", why="the settings group reads the registry"),
     "theme": _fix("Revit keeps the theme it got at install when the Mac turns light or dark",
                   why="the theme check reads the bottle's theme file"),
+    "steel": _fix("models with links wait 1 to 3 minutes on first open", why="the settings group reads the manifests"),
     "gdrive": _fix("links to files on Google Drive's G: do not open", why="the G: check reads the bottle"),
     "revitlookup": _fix("RevitLookup", why="the add-ins checks list it"),
     "pyrevit": _fix("pyRevit", why="the add-ins checks list it"),
@@ -970,7 +971,25 @@ def collect_bottle(ctx):
     b["pymcp"] = collect_pymcp(ctx, p)
     if any(s in (ctx.profile.get("STEPS") or []) for s in SETTING_STEPS):
         b["settings"] = collect_settings(p)
+    if "steel" in (ctx.profile.get("STEPS") or []):
+        b["steel"] = collect_steel(p, ctx.year)
     return b
+
+
+STEEL_MANIFESTS = ("Autodesk.SteelConnectionsDB.addin", "Autodesk.SteelConnectionsUI.addin")
+
+
+def collect_steel(p, year):
+    """on, off, mixed, missing or none: steel_state of scripts/lib/common.sh, from the files themselves, not the run record."""
+    active = os.path.join(p, "drive_c/Program Files/Autodesk", f"Revit {year}", "AddIns/SteelConnections")
+    stash = os.path.join(p, "revit-macos/steel-off")
+    if not os.path.isdir(active):
+        return "none"
+    here = [os.path.isfile(os.path.join(active, m)) for m in STEEL_MANIFESTS]
+    away = [os.path.isfile(os.path.join(stash, m)) for m in STEEL_MANIFESTS]
+    if not all(a or s for a, s in zip(here, away)):
+        return "missing"
+    return "on" if not any(away) else "off" if not any(here) else "mixed"
 
 
 def collect_settings(p):
@@ -1498,6 +1517,23 @@ def wineserver_checks(f, b):
                   fix=f"./revit report {f['year']}{f['sfx']}", doc=DOC["report"])]
 
 
+def steel_checks(f, b):
+    """Where Steel Connections' manifests are (step steel): one note, or a warning for a state ./revit set does not leave."""
+    s = b.get("steel")
+    if s is None or s == "none":
+        return []
+    cmd = f"./revit set {f['year']}{f['sfx']}"
+    if s == "on":
+        return [Check("settings.steel", "info", "Steel Connections on: models with links wait 1 to 3 minutes on first open",
+                      fix=f"{cmd} steel=off")]
+    if s == "off":
+        return [Check("settings.steel", "info", "Steel Connections off: links open faster, no steel connection tools",
+                      fix=f"{cmd} steel=on")]
+    if s == "mixed":
+        return [Check("settings.steel", "warn", "Steel Connections is set only in part", fix=f"{cmd} steel=on")]
+    return [Check("settings.steel", "warn", "a Steel Connections manifest is missing", fix=f"./revit rebuild {f['year']}{f['sfx']}")]
+
+
 def settings_checks(f, b):
     """What the retina and mackeys steps set, for a year whose profile has them: one note, or a warning for a state no
     ./revit set gives."""
@@ -1837,7 +1873,7 @@ def bottle_checks(f):
     out += app_checks(f, b)
     out += install_checks(f, b) + since_install(f, b)
     if b.get("revit_exe"):
-        out += fixes_checks(f, b) + settings_checks(f, b) + theme_checks(f, b) + gdrive_checks(f, b) + wineserver_checks(f, b) + addin_checks(f) + pyrevit_config_checks(f, b) + mcp_checks(f, b) + pyrevit_agent_checks(f, b) + pymcp_checks(f, b)
+        out += fixes_checks(f, b) + settings_checks(f, b) + steel_checks(f, b) + theme_checks(f, b) + gdrive_checks(f, b) + wineserver_checks(f, b) + addin_checks(f) + pyrevit_config_checks(f, b) + mcp_checks(f, b) + pyrevit_agent_checks(f, b) + pymcp_checks(f, b)
     return out + logs_checks(f, b)
 
 

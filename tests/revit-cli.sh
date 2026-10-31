@@ -686,7 +686,7 @@ reset; run "" link-installer 2024 "$T"; expect "link-installer refuses a folder 
 
 # ---- set: Retina and Mac keys (2027) ----
 reset; bottle rvt2027-a 2027 2027; run "" set 2027
-expect "set without settings: the usage and where to see the current ones" 1 "Usage: ./revit set 2027 retina=on|compact|off keys=mac|windows theme=mac|light|dark gdrive=auto|off|again|<email> gdrive_names=ru. ./revit doctor 2027 shows"
+expect "set without settings: the usage and where to see the current ones" 1 "Usage: ./revit set 2027 retina=on|compact|off keys=mac|windows theme=mac|light|dark steel=on|off gdrive=auto|off|again|<email> gdrive_names=ru. ./revit doctor 2027 shows"
 check "set without settings: nothing runs" not_called "run-steps.sh"
 reset; bottle rvt2027-a 2027 2027; run "" set 2027 retina=off
 expect "set retina=off" 0 "Revit 2027 (rvt2027-a): retina=off. Applies the next time Revit starts."
@@ -705,7 +705,7 @@ reset; bottle rvt2027-b 2027 2027; run "" set 2027 retina=on rvt2027-b
 check "set: the bottle after the settings" called "run-steps.sh 2027 rvt2027-b retina |"
 reset; bottle rvt2027-b 2027 2027; run "" set 2027 rvt2027-b rvt2027-c retina=on
 expect "set: two bottles" 1 "Too many arguments. Example: ./revit set 2027 [bottle] retina=off"
-reset; bottle rvt2027-a 2027 2027; run "" set 2027 colour=red; expect "set: an unknown setting" 1 "Unknown setting: colour. Settings: retina, keys, theme, gdrive, gdrive_names"
+reset; bottle rvt2027-a 2027 2027; run "" set 2027 colour=red; expect "set: an unknown setting" 1 "Unknown setting: colour. Settings: retina, keys, theme, steel, gdrive, gdrive_names"
 reset; bottle rvt2027-a 2027 2027; run "" set 2027 retina=big; expect "set: an unknown value" 1 "retina is on, compact or off"
 reset; bottle rvt2027-a 2027 2027; run "" set 2027 keys=pc; expect "set: an unknown keys value" 1 "keys is mac or windows"
 reset; bottle rvt2027-a 2027 2027; run "" set 2027 retina=on retina=off; expect "set: a setting twice" 1 "retina is given twice."
@@ -717,6 +717,10 @@ check "set theme=dark: the theme step with its value, one steps run" eval 'calle
 check "set theme: no note on the window size" eval '! grep -q "another size" <<<"$OUT"'
 reset; bottle rvt2027-a 2027 2027; run "" set 2027 retina=on theme=mac; expect "set retina and theme" 0 ""
 check "set retina and theme: both steps in one run" called "run-steps.sh 2027 rvt2027-a retina theme |"
+reset; bottle rvt2027-a 2027 2027; run "" set 2027 steel=off; expect "set steel=off" 0 "Revit 2027 (rvt2027-a): steel=off"
+check "set steel=off: the steel step, one steps run" called "run-steps.sh 2027 rvt2027-a steel |"
+reset; bottle rvt2027-a 2027 2027; run "" set 2027 steel=maybe; expect "set: an unknown steel value" 1 "steel is on or off"
+reset; bottle rvt2020-a 2020 2020; run "" set 2020 steel=off; expect "set steel on 2020: refused" 1 "The steel setting is for Revit 2027 only."
 reset; bottle rvt2027-a 2027 2027; run "" set 2027 theme=blue; expect "set: an unknown theme" 1 "theme is mac (follow the Mac), light or dark"
 reset; bottle rvt2026-a 2026 2026; run "" set 2026 theme=mac; expect "set theme: 2027 only" 1 "The theme setting is for Revit 2027 only."
 check "set theme 2026: nothing runs" not_called "run-steps.sh"

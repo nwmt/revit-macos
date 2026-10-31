@@ -106,6 +106,47 @@ step_downloads() { # Load Autodesk Family stays at 100%: the WebView2 browser sa
   detail "Downloads (Windows) → C:\\users\\crossover\\AppData\\Local\\Downloads"
 }
 
+steel_set_off() { # the manifests go to the bottle's own folder; a file Autodesk's packages brought back goes too
+  local a s f
+  a="$(steel_active "$B" "$YEAR")"; s="$(steel_stash "$B")"
+  mkdir -p "$s" || return 1
+  for f in "${STEEL_MANIFESTS[@]}"; do
+    if [ -f "$s/$f" ]; then rm -f "$a/$f" || return 1
+    else mv "$a/$f" "$s/$f" || return 1; fi
+  done
+}
+steel_reapply() { # after packages were delivered: a bottle set to off stays off; a bottle never set is left alone
+  local s f had=0
+  s="$(steel_stash "$B")"
+  for f in "${STEEL_MANIFESTS[@]}"; do [ -f "$s/$f" ] && had=1; done
+  [ "$had" = 1 ] || return 0
+  [ "$(steel_state "$B" "$YEAR")" != missing ] || { echo "a Steel Connections manifest is missing: ./revit rebuild"; return 1; }
+  steel_set_off
+}
+step_steel() { # Models with links wait 1 to 3 minutes on first open: Steel Connections asks SQL LocalDB, which the bottle
+  # has not got, and SqlClient retries until its timeout. Revit's own add-in settings leave built-in add-ins alone, so
+  # off moves its two manifests out of the add-in's folder and on puts them back; no Autodesk file changes.
+  # REVIT_STEEL=on|off; empty (an install): keep what the bottle has. Revit must be closed (bottle_guard)
+  local mode="${REVIT_STEEL:-}" a s f
+  a="$(steel_active "$B" "$YEAR")"; s="$(steel_stash "$B")"
+  case "$mode" in
+    "") steel_reapply; return ;;
+    on|off) ;;
+    *) echo "unknown REVIT_STEEL=$mode (on, off)"; return 1 ;;
+  esac
+  case "$(steel_state "$B" "$YEAR")" in   # before anything moves: a lost file must not turn into a half-done switch
+    missing|none) echo "a Steel Connections manifest is missing: ./revit rebuild"; return 1 ;;
+  esac
+  if [ "$mode" = off ]; then steel_set_off || return 1
+  else
+    for f in "${STEEL_MANIFESTS[@]}"; do
+      [ ! -f "$s/$f" ] || mv -f "$s/$f" "$a/$f" || return 1
+    done
+    rmdir "$s" 2>/dev/null
+  fi
+  detail "Steel Connections $mode"
+}
+
 settings_saved() { # $1 = user.reg or system.reg, $2 = key as the file writes it (Software\\Wine\\Mac Driver), $3 = the
   # value's line ("RetinaMode"="y"), or -"Name": no such value there (nor the key). Names and keys in any case, as Wine.
   # Through ENVIRON: awk -v would read the backslashes as escapes

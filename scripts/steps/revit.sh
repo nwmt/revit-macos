@@ -108,6 +108,7 @@ step_pkgs() { # product packages from manifest/app.RVT.xml except RVT (step rvt)
     [ "$r" = 0 ] || rc=1
   done < <(tr '\t' '\037' < "$RUN_DIR/pkgs.tsv")
   detail "$(wc -l < "$RUN_DIR/pkgs.tsv" | tr -d ' ') packages"
+  steel_reapply || rc=1   # run-steps.sh … pkgs alone has no step steel after it
   return $rc
 }
 

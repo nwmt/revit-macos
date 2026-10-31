@@ -104,7 +104,7 @@ reset; in_repo 'load_profile 2020; profile_json; load_profile 2027; profile_json
 check "profile_json: one JSON object per profile, with its lists" eval '/usr/bin/perl -MJSON::PP -ne '"'"'my $j = decode_json($_);
   exit 1 unless ref $j->{STEPS} eq "ARRAY" && ref $j->{PKGS} eq "ARRAY" && ref $j->{RICHEDIT} eq "ARRAY"; print "$j->{YEAR} ",
   scalar @{$j->{STEPS}}, " $j->{STEPS}[0] ", scalar @{$j->{PKGS}}, " $j->{DOTNET} [$j->{ENSCAPE}] $j->{RVTFIX_ENV}[0]\n"'"'"' <<<"$OUT" |
-  tr "\n" "|" | grep -qxF "2020 24 netfx 0 netfx47 [3] RVTFIX_CEF_ARGS=|2027 26 vc 32 net10 [4] |"'
+  tr "\n" "|" | grep -qxF "2020 24 netfx 0 netfx47 [3] RVTFIX_CEF_ARGS=|2027 27 vc 32 net10 [4] |"'
 reset; mkdir -p "$T/real"; ln -s "$T/real" "$T/link"; ln -s "$T/nowhere" "$T/dangling"
 in_repo 'for p in "$HOME/not/there/yet" "'"$T"'/link/sub" "'"$T"'/dangling"; do free_gb "$p"; volume_id "$p"; done'
 check "free_gb and volume_id: a number for a path that is not there, a link, a link to nothing" \
@@ -608,6 +608,44 @@ run_steps 2027 rvt2027-t mackeys; expect "mackeys=windows: Wine's default, with 
 check "mackeys=windows: n" called "Mac Driver] [/v] [LeftCommandIsCtrl] [/d] [n] [/f]"
 reset; mkbottle rvt2027-t 2027 2027; STEP_ENV=(REVIT_KEYS=pc); run_steps 2027 rvt2027-t mackeys
 expect "mackeys: an unknown value fails the step" 1 "mackeys"; check "mackeys: nothing done for it" not_called "[reg]"
+# steel: the two manifests of Steel Connections move out of the add-in's folder and back; Wine is not needed
+steel_world() { # $1 = names of the manifests in the add-in's folder, $2 = in the bottle's own folder
+  local f; reset; mkbottle rvt2027-t 2027 2027
+  SA="$BOTTLES/rvt2027-t/drive_c/Program Files/Autodesk/Revit 2027/AddIns/SteelConnections"; SS="$BOTTLES/rvt2027-t/revit-macos/steel-off"
+  mkdir -p "$SA"; for f in $1; do echo a > "$SA/Autodesk.SteelConnections$f.addin"; done
+  [ -z "${2:-}" ] || mkdir -p "$SS"; for f in ${2:-}; do echo s > "$SS/Autodesk.SteelConnections$f.addin"; done
+}
+steel_run() { STEP_ENV=("$@"); run_steps 2027 rvt2027-t steel; }
+steel_is() { # $1 = in the add-in's folder, $2 = in the bottle's own folder, sorted
+  [ "$(cd "$SA" && ls 2>/dev/null | sed 's/Autodesk.SteelConnections//; s/.addin//' | xargs)" = "$1" ] \
+    && [ "$(cd "$SS" 2>/dev/null && ls | sed 's/Autodesk.SteelConnections//; s/.addin//' | xargs)" = "$2" ]
+}
+steel_world "DB UI"; steel_run REVIT_STEEL=off; expect "steel=off" 0 "Steel Connections off"; check "steel=off: both moved" steel_is "" "DB UI"
+steel_run REVIT_STEEL=off; expect "steel=off again" 0 "Steel Connections off"; check "steel=off again: nothing changes" steel_is "" "DB UI"
+steel_run REVIT_STEEL=on; expect "steel=on" 0 "Steel Connections on"; check "steel=on: both back" steel_is "DB UI" ""
+check "steel=on: no empty folder left" test ! -d "$SS"
+steel_run REVIT_STEEL=on; expect "steel=on again" 0 "Steel Connections on"; check "steel=on again: nothing changes" steel_is "DB UI" ""
+steel_world "DB" "UI"; steel_run REVIT_STEEL=off; expect "steel=off from a split state" 0 "off"; check "steel=off from a split state: both away" steel_is "" "DB UI"
+steel_world "DB" "UI"; steel_run REVIT_STEEL=on; expect "steel=on from a split state" 0 "on"; check "steel=on from a split state: both back" steel_is "DB UI" ""
+steel_world "DB UI" "DB UI"; steel_run REVIT_STEEL=off; expect "steel=off with both places full" 0 "off"; check "steel=off with both places full: the folder is empty" steel_is "" "DB UI"
+steel_world "DB UI" "DB UI"; steel_run REVIT_STEEL=on; expect "steel=on with both places full" 0 "on"; check "steel=on: the kept file wins" grep -qx s "$SA/Autodesk.SteelConnectionsDB.addin"
+steel_world "DB" ""; steel_run REVIT_STEEL=off; expect "steel=off with a file lost" 1 "steel"; check "steel=off with a file lost: nothing moved" steel_is "DB" ""
+steel_world "" "DB"; steel_run REVIT_STEEL=on; expect "steel=on with a file lost" 1 "steel"; check "steel=on with a file lost: nothing moved" steel_is "" "DB"
+steel_world "DB UI" ""; steel_run REVIT_STEEL=big; expect "steel: an unknown value fails" 1 "steel"; check "steel: nothing moved for an unknown value" steel_is "DB UI" ""
+steel_world "DB UI" ""; steel_run; expect "steel with no value on a clean bottle" 0 ""; check "steel with no value: stays on" steel_is "DB UI" ""
+steel_world "" "DB UI"; steel_run; expect "steel with no value on an off bottle" 0 ""; check "steel with no value: stays off" steel_is "" "DB UI"
+steel_world "DB UI" "DB UI"; steel_run; expect "steel with no value after packages came back" 0 ""; check "steel with no value: off again" steel_is "" "DB UI"
+in_repo 'B="$BOTTLES/rvt2027-t"; steel_state "$B" 2027'; expect "steel_state after off" 0 "off"
+steel_pkgs() { # one ADIX package that brings nothing; the step ends with the bottle's choice applied again
+  local D="$R/installers/extracted/revit2027"; mkdist 2027; mkdir -p "$D/x64/OK"
+  printf '<Packages><Package name="OK" path="x64/OK/pkg.OK.xml"/></Packages>' > "$D/manifest/app.RVT.xml"
+  echo '<Package><InstallFile type="ADIX" file="x64/OK/OK.adix"/></Package>' > "$D/x64/OK/pkg.OK.xml"
+  python3 -I -c 'import sys, zipfile; z = zipfile.ZipFile(sys.argv[1], "w"); z.writestr("Registry.dat", b""); z.close()' "$D/x64/OK/OK.adix"
+  STEP_ENV=(ODIS_PKGS=OK); run_steps 2027 rvt2027-t pkgs
+}
+steel_world "DB UI" "DB UI"; steel_pkgs; check "pkgs alone on an off bottle: off again" steel_is "" "DB UI"
+steel_world "" "DB"; steel_pkgs; check "pkgs: a stash that cannot be applied fails the step" grep -qx pkgs "$RUN/failed.txt"
+
 # theme: themeset.exe and the mode file in the bottle, Revit.ini, the Windows theme; outside an install the Revit app
 # again (make-apps.sh here records its call and fails while $T/apps-fail exists)
 TDIR="$BOTTLES/rvt2027-t/drive_c/Program Files/revit-macos"

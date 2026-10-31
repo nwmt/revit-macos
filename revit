@@ -230,8 +230,9 @@ if [ "$CMD" = status ]; then
     case "$tm" in mac|light|dark) ;; *) tm="" ;; esac
     gd="$(python3 -I "$ROOT/tools/gdrive.py" state "$b" 2>/dev/null)" || gd=null   # G:: no email, no folder names
     n="$(basename "$b")"; rv=false; [ -f "$(revit_dir_unix "$b" "$ys")/Revit.exe" ] && rv=true
+    sj=""; [ "$ys" != 2027 ] || sj=",\"steel\":$(json_str "$(steel_state "$b" "$ys")")"   # the step steel's profile only
     pids="$(revit_pids "$b" "$ys" | paste -sd, -)"; run_=false; [ -z "$pids" ] || run_=true
-    b_json+="${b_json:+,}{\"name\":$(json_str "$n"),\"year\":$(json_str "$ys"),\"revit\":$rv,\"running\":$run_,\"revit_pids\":[$pids],\"addins\":[$(status_addins "$b" "$ys")],\"theme_mode\":$(json_str "$tm"),\"gdrive\":$gd}"
+    b_json+="${b_json:+,}{\"name\":$(json_str "$n"),\"year\":$(json_str "$ys"),\"revit\":$rv,\"running\":$run_,\"revit_pids\":[$pids],\"addins\":[$(status_addins "$b" "$ys")],\"theme_mode\":$(json_str "$tm")$sj,\"gdrive\":$gd}"
     human+="$(printf '  %-14s Revit %s%s' "$n" "$ys" "$([ $run_ = true ] && echo ', running')")"$'\n'
   done
   p_json=""; p_left=""; p_human=""   # restore points, of bottles that are gone too; sizes from point.conf: status runs often
@@ -599,7 +600,7 @@ case "$CMD" in
     bottle_guard running_ok "$YEAR" "$NAME"
     exec python3 -I "$ROOT/tools/gdrive.py" warm "$B" "$GPATH" "$YEAR$SFX" ${WARM_OPTS[@]+"${WARM_OPTS[@]}"} ;;
   set)   # Retina, Mac keys, the theme and G:: the steps retina, mackeys, theme and gdrive (scripts/steps/fixes.sh)
-    [ ${#SETS[@]} -gt 0 ] || die "Usage: ./revit set $YEAR$SFX retina=on|compact|off keys=mac|windows theme=mac|light|dark gdrive=auto|off|again|<email> gdrive_names=ru. ./revit doctor $YEAR$SFX shows the current ones."
+    [ ${#SETS[@]} -gt 0 ] || die "Usage: ./revit set $YEAR$SFX retina=on|compact|off keys=mac|windows theme=mac|light|dark steel=on|off gdrive=auto|off|again|<email> gdrive_names=ru. ./revit doctor $YEAR$SFX shows the current ones."
     list=(); seen=" "; shown=()   # shown: the settings as the line below prints them (no email, no folder names)
     for kv in "${SETS[@]}"; do
       k="${kv%%=*}"; v="${kv#*=}"
@@ -608,6 +609,7 @@ case "$CMD" in
         retina=on|retina=compact|retina=off) export REVIT_RETINA="$v"; list+=(retina) ;;
         keys=mac|keys=windows) export REVIT_KEYS="$v"; list+=(mackeys) ;;
         theme=mac|theme=light|theme=dark) export REVIT_THEME="$v"; list+=(theme) ;;
+        steel=on|steel=off) export REVIT_STEEL="$v"; list+=(steel) ;;
         gdrive=auto|gdrive=off|gdrive=again) export REVIT_GDRIVE="$v"; list+=(gdrive); shown+=("$kv"); continue ;;
         gdrive=*@*.*) case "$v" in *[[:space:]]*|*@*@*) die "gdrive is auto, off, again or the email of a Google Drive account." ;; esac
           export REVIT_GDRIVE="$v"; list+=(gdrive); shown+=(gdrive=account); continue ;;
@@ -619,7 +621,8 @@ case "$CMD" in
         retina=*) die "retina is on, compact or off: ./revit set $YEAR$SFX retina=off" ;;
         keys=*) die "keys is mac or windows: ./revit set $YEAR$SFX keys=windows" ;;
         theme=*) die "theme is mac (follow the Mac), light or dark: ./revit set $YEAR$SFX theme=dark" ;;
-        *) die "Unknown setting: $k. Settings: retina, keys, theme, gdrive, gdrive_names" ;;
+        steel=*) die "steel is on or off: ./revit set $YEAR$SFX steel=off" ;;
+        *) die "Unknown setting: $k. Settings: retina, keys, theme, steel, gdrive, gdrive_names" ;;
       esac
       shown+=("$kv")
     done
@@ -631,6 +634,7 @@ case "$CMD" in
       in_list "$s" ${STEPS[@]+"${STEPS[@]}"} && continue
       [ "$s" = gdrive ] && continue   # every profile has it; a bottle of an older profile gets it here
       [ "$s" = theme ] && die "The theme setting is for Revit 2027 only."
+      [ "$s" = steel ] && die "The steel setting is for Revit 2027 only."
       die "Retina and Mac keys are tested on Revit 2020 and 2027 only."
     done
     need_crossover; bottle_guard must_exist "$YEAR" "$NAME"; not_busy

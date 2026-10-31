@@ -1066,6 +1066,33 @@ class Settings(Sandbox):
         self.regs()
         self.assertEqual(self.group(profile=dict(PROFILE, STEPS=list(PROFILE["STEPS"]) + ["gdrive"])), {})
 
+    def test_steel_note_and_commands_name_the_bottle(self):
+        for state, status, title, fix in (
+                ("on", "info", "Steel Connections on: models with links wait 1 to 3 minutes on first open", "./revit set 2027 rvt2027-b steel=off"),
+                ("off", "info", "Steel Connections off: links open faster, no steel connection tools", "./revit set 2027 rvt2027-b steel=on"),
+                ("mixed", "warn", "Steel Connections is set only in part", "./revit set 2027 rvt2027-b steel=on"),
+                ("missing", "warn", "a Steel Connections manifest is missing", "./revit rebuild 2027 rvt2027-b")):
+            with self.subTest(state):
+                c = dr.steel_checks({"year": 2027, "sfx": " rvt2027-b"}, {"steel": state})[0]
+                self.assertEqual((c.id, c.status, c.title, c.fix), ("settings.steel", status, title, fix))
+        self.assertEqual(dr.steel_checks({"year": 2027, "sfx": ""}, {"steel": "none"}), [])
+        self.assertEqual(dr.steel_checks({"year": 2020, "sfx": ""}, {}), [])
+
+    def test_steel_state_comes_from_the_files(self):
+        with tempfile.TemporaryDirectory() as t:
+            a = os.path.join(t, "drive_c/Program Files/Autodesk/Revit 2027/AddIns/SteelConnections")
+            s = os.path.join(t, "revit-macos/steel-off")
+            self.assertEqual(dr.collect_steel(t, 2027), "none")
+            os.makedirs(a); os.makedirs(s)
+            self.assertEqual(dr.collect_steel(t, 2027), "missing")
+            for m in dr.STEEL_MANIFESTS:
+                open(os.path.join(a, m), "w").close()
+            self.assertEqual(dr.collect_steel(t, 2027), "on")
+            os.rename(os.path.join(a, dr.STEEL_MANIFESTS[0]), os.path.join(s, dr.STEEL_MANIFESTS[0]))
+            self.assertEqual(dr.collect_steel(t, 2027), "mixed")
+            os.rename(os.path.join(a, dr.STEEL_MANIFESTS[1]), os.path.join(s, dr.STEEL_MANIFESTS[1]))
+            self.assertEqual(dr.collect_steel(t, 2027), "off")
+
     def test_no_settings_group_without_the_steps_or_the_registry(self):
         self.regs()
         self.assertEqual(self.group(profile=PROFILE), {})

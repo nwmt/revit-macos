@@ -25,6 +25,13 @@ struct SettingsView: View {
                 Toggle("Check for updates once a day", isOn: $settings.checkForUpdates)
             }
             if let t = env.trackpad { TrackpadSection(model: t) }
+            if let b = app.status?.bottles.first(where: { $0.steel == "on" }) {
+                Section("Models with links") {
+                    Text("They wait 1 to 3 minutes on first open: Steel Connections looks for a database the bottle does not have. Turning it off removes the steel connection tools.")
+                        .font(.callout)
+                    Text("./revit set \(b.year) \(b.name) steel=off").font(.callout.monospaced()).textSelection(.enabled)
+                }
+            }
             Section("Installer files") {
                 if let c = settings.cache {
                     Text(c.removableBytes > 0 ? "\(ByteCountFormatter().string(fromByteCount: c.removableBytes)) can be deleted" : "Nothing to delete")
