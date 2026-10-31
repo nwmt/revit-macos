@@ -83,7 +83,8 @@ took() { # DDE acks a command that a modal dialog then swallows: Revit holds the
   local p i n=$(( ${REVIT_OPEN_TOOK_S:-20} * 2 ))
   for ((i = 0; i < n; i++)); do
     tail -c +"$(($1 + 1))" "$(journal)" 2>/dev/null | LC_ALL=C grep -aq TaskDialog_Model_Upgrade && return 0
-    for p in $(revit_pids "$B" "$YEAR"); do lsof -p "$p" -Fn 2>/dev/null | grep -qxF "n$(cd "$(dirname "$FILE")" && pwd -P)/$(basename "$FILE")" && return 0; done
+    # by inode: lsof escapes names that are not ASCII
+    for p in $(revit_pids "$B" "$YEAR"); do lsof -p "$p" -Fi 2>/dev/null | grep -qxF "i$(stat -f %i "$FILE")" && return 0; done
     sleep 0.5
   done
   return 1
