@@ -632,6 +632,8 @@ steel_world "DB UI" "DB UI"; steel_run REVIT_STEEL=on; expect "steel=on with bot
 steel_world "DB" ""; steel_run REVIT_STEEL=off; expect "steel=off with a file lost" 1 "steel"; check "steel=off with a file lost: nothing moved" steel_is "DB" ""
 steel_world "" "DB"; steel_run REVIT_STEEL=on; expect "steel=on with a file lost" 1 "steel"; check "steel=on with a file lost: nothing moved" steel_is "" "DB"
 steel_world "DB UI" ""; steel_run REVIT_STEEL=big; expect "steel: an unknown value fails" 1 "steel"; check "steel: nothing moved for an unknown value" steel_is "DB UI" ""
+steel_world "" "DB UI"; rm -rf "$SA"; steel_run; expect "steel with no value: kept manifests, add-in folder lost" 1 "steel"; check "steel: the kept files stay" test -f "$SS/Autodesk.SteelConnectionsDB.addin"
+steel_world "" "DB UI"; rm -rf "$SA"; steel_run REVIT_STEEL=on; expect "steel=on with the add-in folder lost" 1 "steel"; check "steel=on: the kept files stay there" test -f "$SS/Autodesk.SteelConnectionsDB.addin"
 steel_world "DB UI" ""; steel_run; expect "steel with no value on a clean bottle" 0 ""; check "steel with no value: stays on" steel_is "DB UI" ""
 steel_world "" "DB UI"; steel_run; expect "steel with no value on an off bottle" 0 ""; check "steel with no value: stays off" steel_is "" "DB UI"
 steel_world "DB UI" "DB UI"; steel_run; expect "steel with no value after packages came back" 0 ""; check "steel with no value: off again" steel_is "" "DB UI"

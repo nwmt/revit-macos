@@ -1083,6 +1083,11 @@ class Settings(Sandbox):
             a = os.path.join(t, "drive_c/Program Files/Autodesk/Revit 2027/AddIns/SteelConnections")
             s = os.path.join(t, "revit-macos/steel-off")
             self.assertEqual(dr.collect_steel(t, 2027), "none")
+            os.makedirs(s)
+            self.assertEqual(dr.collect_steel(t, 2027), "missing")   # manifests kept, no add-in folder
+            os.rmdir(s); os.makedirs(os.path.dirname(os.path.dirname(a)))
+            open(os.path.join(os.path.dirname(os.path.dirname(a)), "Revit.exe"), "w").close()
+            self.assertEqual(dr.collect_steel(t, 2027), "missing")   # Revit without the add-in
             os.makedirs(a); os.makedirs(s)
             self.assertEqual(dr.collect_steel(t, 2027), "missing")
             for m in dr.STEEL_MANIFESTS:

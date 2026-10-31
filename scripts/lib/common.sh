@@ -306,7 +306,10 @@ steel_stash() { echo "$1/revit-macos/steel-off"; }   # $1 = bottle path; outside
 steel_state() { # $1 = bottle path, $2 = year → on | off | mixed (both files, split or doubled) | missing | none (no add-in)
   local a s f na=0 ns=0 both=0
   a="$(steel_active "$1" "$2")"; s="$(steel_stash "$1")"
-  [ -d "$a" ] || { echo none; return 0; }
+  if [ ! -d "$a" ]; then
+    if [ -n "$(ls -A "$s" 2>/dev/null)" ]; then echo missing; else echo none; fi   # manifests kept, the add-in itself lost
+    return 0
+  fi
   for f in "${STEEL_MANIFESTS[@]}"; do
     [ -f "$a/$f" ] && na=$((na + 1)); [ -f "$s/$f" ] && ns=$((ns + 1))
     [ -f "$a/$f" ] || [ -f "$s/$f" ] && both=$((both + 1))

@@ -980,11 +980,12 @@ STEEL_MANIFESTS = ("Autodesk.SteelConnectionsDB.addin", "Autodesk.SteelConnectio
 
 
 def collect_steel(p, year):
-    """on, off, mixed, missing or none: steel_state of scripts/lib/common.sh, from the files themselves, not the run record."""
+    """on, off, mixed, missing or none (no Revit yet): as steel_state of scripts/lib/common.sh, from the files, not the run record."""
     active = os.path.join(p, "drive_c/Program Files/Autodesk", f"Revit {year}", "AddIns/SteelConnections")
     stash = os.path.join(p, "revit-macos/steel-off")
-    if not os.path.isdir(active):
-        return "none"
+    if not os.path.isdir(active):   # Revit there and no add-in, or manifests kept without it: the bottle lost something
+        revit = os.path.isfile(os.path.join(os.path.dirname(os.path.dirname(active)), "Revit.exe"))
+        return "missing" if revit or os.path.isdir(stash) else "none"
     here = [os.path.isfile(os.path.join(active, m)) for m in STEEL_MANIFESTS]
     away = [os.path.isfile(os.path.join(stash, m)) for m in STEEL_MANIFESTS]
     if not all(a or s for a, s in zip(here, away)):
