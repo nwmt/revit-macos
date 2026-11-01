@@ -17,6 +17,7 @@ see the same thing. The record goes to disk before the message goes out. A new R
 import contextlib
 import fcntl
 import json
+import math
 import os
 
 QUIET_S = 20          # no new lines this long: a barrier that was sent and not seen is taken as lost
@@ -25,6 +26,7 @@ POLL_S = 0.25
 VALID_S = 2           # a command the bridge has not posted by then is dropped: see _fence
 DIALOG_WAIT_S = 1.5   # the journal line comes before the command's dialog is up
 UIA_WAIT_S = 120
+UIA_WAIT_MAX_S = 480   # a failed walk doubles the wait up to here
 INTERNAL = "Internal"
 
 
@@ -257,5 +259,10 @@ class Runner:
                 self._quarantine(u)
             self.st.save(d)
 
+    def uia_left(self):
+        """Seconds until a new walk may start: 0 when it may now."""
+        with self.st.locked():
+            return max(0, math.ceil(self.st.load()["uia"]["until"] - self.now()))
+
     def _quarantine(self, u):
-        u.update(owner=None, until=self.now() + u["wait"], wait=u["wait"] * 2)
+        u.update(owner=None, until=self.now() + u["wait"], wait=min(u["wait"] * 2, UIA_WAIT_MAX_S))

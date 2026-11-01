@@ -331,6 +331,42 @@ class Tree(Case):
         self.assertEqual(self.server().call("ui_tree", {}) and self.call("ui_tree")["status"], "busy")
         self.assertEqual(len([c for c in self.b.calls if c[0] == "tree"]), 1)
 
+    def test_busy_says_how_long_to_wait(self):
+        self.b.tree_status = "busy"
+        self.assertEqual(self.call("ui_tree")["retry_after"], 120)
+        self.assertEqual(self.call("ui_tree")["retry_after"], 120)
+
+    def test_a_wpf_dialog_says_it_too(self):
+        self.b.s["dialogs"] = [Dialogs.WPF]
+        self.b.tree_status = "busy"
+        got = self.call("ui_dialog", hwnd="cc")
+        self.assertEqual((got["status"], got["retry_after"], got["title"], got["elements"]), ("busy", 120, "Shortcuts", []))
+        self.assertEqual(self.call("press_button", dialog="cc", button="OK")["retry_after"], 120)
+
+    def test_home_is_not_walked(self):
+        self.b.s["title"] = "Autodesk Revit 2099 - [Home]"
+        got = self.call("ui_tree")
+        self.assertEqual((got["status"], self.b.calls), ("refused", []))
+        self.assertIn("Open a model", got["why"])
+
+    def test_a_blocked_main_window_is_not_walked(self):
+        self.b.s["enabled"] = False
+        got = self.call("ui_tree")
+        self.assertEqual((got["status"], self.b.calls), ("refused", []))
+        self.assertIn("Close the dialog", got["why"])
+
+    def test_a_refusal_costs_no_wait(self):
+        self.b.s["enabled"] = False
+        self.call("ui_tree")
+        self.b.s["enabled"] = True
+        self.assertEqual(self.call("ui_tree")["status"], "complete")
+
+    def test_a_window_over_home_can_be_walked(self):
+        self.b.s["title"] = "Autodesk Revit 2099 - [Home]"
+        self.b.s["enabled"] = False
+        self.b.s["dialogs"] = [Dialogs.WPF]
+        self.assertEqual(self.call("ui_tree", hwnd="cc")["status"], "complete")
+
 
 class Fields(Case):
     """Everything a client sends ends up in a line to the bridge: one field must stay one field."""

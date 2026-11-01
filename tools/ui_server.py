@@ -224,7 +224,8 @@ TOOLS = [
      {}, []),
     ("ui_dialog", "The text, buttons and fields of an open dialog.", {"hwnd": "string"}, ["hwnd"]),
     ("ui_tree", "The tree of the main window or a WPF window: ribbon tabs, Quick Access, palettes. Not the ribbon's panels, "
-                "the Properties grid, the Project Browser or the drawing area. About 7 elements a second.",
+                "the Properties grid, the Project Browser or the drawing area. The main window needs a model open and no "
+                "dialog over it. About 7 elements a second. busy gives retry_after in seconds: wait that long, repeating adds to it.",
      {"hwnd": "string", "depth": "integer", "limit": "integer"}, []),
     ("ui_screenshot", "A picture of a window. Needed before click.", {"hwnd": "string"}, []),
     ("ui_commands", "Find Revit commands: words in their ID_ names.", {"words": "string"}, ["words"]),
@@ -294,6 +295,19 @@ class Server:
             r.uia_end(status != "busy")
         return nodes, status
 
+    def _busy(self, why):
+        left = self._runner().uia_left()
+        return {"status": "busy", "why": why, "retry_after": left} if left else {"status": "busy", "why": why}
+
+    @staticmethod
+    def _unwalkable(s):
+        """A walk of the main window stalls in these two states, and every stall lengthens the wait for the next walk."""
+        if s["title"].endswith("[Home]"):
+            return "The Home screen has no tree to read. Open a model first, or use ui_screenshot."
+        if not s["enabled"]:
+            return "A dialog blocks the main window. Close the dialog first: ui_dialog reads it."
+        return None
+
     @staticmethod
     def _wpf(window):
         return window["cls"].startswith("HwndWrapper")
@@ -305,15 +319,21 @@ class Server:
         if not self._wpf(w):
             return {"status": "ok", "title": w["title"], "controls": self.b.dialog(hwnd)}
         nodes, status = self._nodes(hwnd, 7, 200)
+        if status == "busy":
+            return dict(self._busy("Revit is busy or the last walk is not over. Try later."), title=w["title"], elements=[])
         return {"status": status, "title": w["title"], "elements": nodes}
 
     def ui_tree(self, hwnd=None, depth=6, limit=400):
-        h = hwnd or self.b.state()["main"]
+        s = self.b.state()
+        h = hwnd or s["main"]
         if not h or not self._window(h):
             return {"status": "refused", "why": "no such window open"}
+        why = self._unwalkable(s) if h == s["main"] else None
+        if why:
+            return {"status": "refused", "why": why}
         nodes, status = self._nodes(h, int(depth), int(limit))
         if status == "busy":
-            return {"status": "busy", "why": "Revit is busy or the last walk is not over. Try later."}
+            return self._busy("Revit is busy or the last walk is not over. Try later.")
         return {"status": status, "elements": nodes}
 
     def ui_screenshot(self, hwnd=None):
@@ -408,7 +428,7 @@ class Server:
         if self._wpf(w):
             nodes, status = self._nodes(dialog, 7, 200)
             if status == "busy":
-                return {"status": "busy", "why": "Revit is busy."}
+                return self._busy("Revit is busy.")
             hit = next((n for n in nodes if n["control"] == BUTTON and n["enabled"] and button in (n["name"], n["aid"])), None)
             if not hit:
                 return {"status": "refused", "why": "no such button"}

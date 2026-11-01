@@ -262,7 +262,9 @@ Screen Recording: System Settings, Privacy & Security, Screen Recording.
 `ui_state` lists the windows, `ui_dialog` reads a dialog, `ui_screenshot` takes a picture of a window. `ui_tree` shows what
 Windows accessibility offers: ribbon tabs, Quick Access, palettes and WPF dialogs. It does not show the buttons inside
 ribbon panels, the Properties grid, the Project Browser or the drawing area: those need a picture, or the other servers.
-It reads about 7 elements a second and may answer `busy`, for example on the Home screen. It then waits at least 2 minutes.
+It reads about 7 elements a second. The main window needs a model open and no dialog over it: on the Home screen or under a
+dialog `ui_tree` refuses and says so. If a walk stalls it answers `busy`, and `retry_after` says how many seconds to wait:
+2 minutes at first, doubling up to 8 for each walk that stalls.
 
 `ui_commands` finds a command by words in its name, such as `purge unused`. `run_command` runs it and answers:
 

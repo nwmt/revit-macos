@@ -522,6 +522,23 @@ class Uia(Case):
         self.c.sleep(41)
         self.assertTrue(self.r.uia_begin())
 
+    def test_the_wait_stops_growing(self):
+        for _ in range(6):
+            self.assertTrue(self.r.uia_begin())
+            self.r.uia_end(False)
+            self.c.sleep(481)
+        self.assertTrue(self.r.uia_begin())
+
+    def test_the_wait_left_is_known(self):
+        self.assertEqual(self.r.uia_left(), 0)
+        self.r.uia_begin()
+        self.r.uia_end(False)
+        self.assertEqual(self.r.uia_left(), 120)
+        self.c.sleep(100.5)
+        self.assertEqual(self.r.uia_left(), 20)
+        self.c.sleep(20)
+        self.assertEqual(self.r.uia_left(), 0)
+
     def test_a_lost_owner_quarantines(self):
         self.r.uia_begin()
         other = Bridge(self.j, (51, 501.0))     # the first bridge died in the middle of its walk
