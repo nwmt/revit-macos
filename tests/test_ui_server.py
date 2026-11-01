@@ -220,6 +220,16 @@ class Commands(Case):
         self.assertEqual(self.call("run_command", id="ID_FAKE_WALL")["status"], "refused")
         self.assertEqual(self.b.calls, [])
 
+    def test_a_journal_that_starts_after_connecting(self):
+        self.table()
+        data = open(self.journal).read()
+        os.remove(self.journal)
+        self.srv = self.server()
+        self.assertEqual(self.call("run_command", id="ID_FAKE_WALL")["status"], "refused")
+        self.log(data)
+        self.ran("ID_FAKE_WALL")
+        self.assertEqual(self.call("run_command", id="ID_FAKE_WALL")["status"], "ran")
+
     def test_search(self):
         self.table()
         self.assertEqual(self.call("ui_commands", words="wall")["ids"], ["ID_FAKE_WALL"])

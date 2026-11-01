@@ -246,19 +246,26 @@ TOOLS = [
 class Server:
     def __init__(self, cfg, bridge, mac, now=time.time, sleep=time.sleep):
         self.cfg, self.b, self.m, self.now, self.sleep = cfg, bridge, mac, now, sleep
-        self.journal = ui_journal.find(cfg.bottle, cfg.year, cfg.started)
-        self.build = ui_journal.build(self.journal) if self.journal else None
+        self.journal = self.build = None
         self.state = ui_run.State(cfg.bottle, "%s %s" % (cfg.revit_pid, cfg.revit_start))
         self.shots = {}
+
+    def _pin_journal(self):
+        """A client may connect while Revit starts: its journal, and the build line in it, may come later."""
+        if not self.build:
+            self.journal = ui_journal.find(self.cfg.bottle, self.cfg.year, self.cfg.started)
+            self.build = ui_journal.build(self.journal) if self.journal else None
 
     def _reader(self, offset, identity):
         return ui_journal.Reader(self.journal or os.devnull + ".none", offset, identity)
 
     def _runner(self):
+        self._pin_journal()
         table = ui_commands.load(self.cfg.bottle, self.build) if self.build else None
         return ui_run.Runner(self.state, self.b, self._reader, table, self.now, self.sleep, BARRIER)
 
     def _commands_status(self):
+        self._pin_journal()
         return ui_commands.status(self.cfg.bottle, self.build) if self.build else "error"
 
     # ---- tools ----
@@ -339,6 +346,7 @@ class Server:
         return abs((r - l) / max(b - t, 1) - width / max(height, 1))
 
     def ui_commands(self, words):
+        self._pin_journal()
         t = ui_commands.load(self.cfg.bottle, self.build) if self.build else None
         if not t:
             return {"status": "refused", "why": self._table_problem()}
@@ -346,7 +354,7 @@ class Server:
 
     def _table_problem(self):
         if not self.build:
-            return "The build of this Revit is not known: its journal has no build line."
+            return "The build of this Revit is not known yet: its journal has no build line."
         if self._commands_status() == "missing":
             return MISSING
         return ui_commands.error_text(self.cfg.bottle, self.build)
