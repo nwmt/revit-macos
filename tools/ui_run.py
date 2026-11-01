@@ -145,7 +145,7 @@ class Runner:
         s = self.b.state()
         new = [x for x in s["dialogs"] if x["hwnd"] not in before]
         end = self.now() + DIALOG_WAIT_S
-        while status == "ran" and not new and s["enabled"] and self.now() < end:
+        while status == "ran" and not new and self.now() < end:
             self.sleep(POLL_S)
             s = self.b.state()
             new = [x for x in s["dialogs"] if x["hwnd"] not in before]

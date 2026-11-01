@@ -239,6 +239,16 @@ class Plain(Case):
         self.b.on_command = play
         self.assertEqual(self.r.run(X, 10)["dialogs"][0]["title"], "Slow dialog")
 
+    def test_it_waits_too_when_the_main_window_is_greyed_before_the_dialog_shows(self):
+        def show():
+            self.b.dialogs = [{"hwnd": 7, "title": "Slow dialog", "enabled": True}]
+        def play(n):
+            self.j.add(X)
+            self.b.main_enabled = False
+            self.c.after(1.0, show)
+        self.b.on_command = play
+        self.assertEqual(self.r.run(X, 10)["dialogs"][0]["title"], "Slow dialog")
+
     def test_a_command_without_a_dialog_does_not_wait_long(self):
         self.echo(X)
         t0 = self.c.t
