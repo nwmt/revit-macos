@@ -129,7 +129,7 @@ struct AppMain: App {
                                   ask: FileOpenDialogs(router: router))
             let w = WarmModel(engine: ProcessEngine(engine: engine, environment: EngineEnvironment.make(from: env)))
             warm = w
-            LaunchInfo.quitting = { w.cancel() }
+            LaunchInfo.quitting = { w.cancel(); TokenClipboard.shared.clear() }
         } else {
             app = nil
             warm = nil

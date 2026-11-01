@@ -1,4 +1,5 @@
 // The AI Assistant tab: nothing is granted before the system has asked, and a token never stays half made.
+import AppKit
 import Foundation
 import Testing
 @testable import AppCore
@@ -106,5 +107,23 @@ import Testing
         let d = Data(#"{"calls":[{"ts":"1","tool":"t","ms":null,"outcome":"no_answer","token":null,"client":null}]}"#.utf8)
         #expect(try JSONDecoder.engine.decode(McpCalls.self, from: d).calls[0].outcome == "no_answer")
         #expect("a b'c".shellQuoted == #"'a b'"'"'c'"#)
+    }
+
+    @Test func theClipboardKeepsATokenShortAndMarked() async throws {
+        let b = NSPasteboard(name: .init("token-\(UUID().uuidString)"))
+        let c = TokenClipboard(b)
+        c.copy("secret")
+        #expect(b.string(forType: .string) == "secret")
+        #expect(TokenClipboard.marks.allSatisfy { b.types?.contains($0) == true })
+        c.clear()
+        #expect(b.string(forType: .string) == nil)
+        c.copy("secret")
+        b.clearContents(); b.setString("other", forType: .string)
+        c.clear()
+        #expect(b.string(forType: .string) == "other")   // what the person copied since stays
+        c.copy("secret", keepFor: 0.05)
+        for _ in 0..<100 where b.string(forType: .string) != nil { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(b.string(forType: .string) == nil)
+        b.releaseGlobally()
     }
 }

@@ -182,12 +182,12 @@ private struct NewConnectionSheet: View {
         HStack {
             Text(i.token).font(.system(.callout, design: .monospaced)).lineLimit(1).truncationMode(.middle)
             Spacer()
-            Button("Copy") { Clip.copy(i.token) }
+            Button("Copy") { TokenClipboard.shared.copy(i.token) }
         }
         if i.client == .claudeCode {
             Text("Run this in Terminal. The token then sits in plain text in ~/.claude.json and in your shell history.")
                 .font(.callout).fixedSize(horizontal: false, vertical: true)
-            Button("Copy the command") { Clip.copy(i.addCommand) }
+            Button("Copy the command") { TokenClipboard.shared.copy(i.addCommand) }
             Text("If it says the name exists, first run: \(i.removeCommand)").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
         } else if let b = i.bundle {
             Text("In Claude Desktop: Settings, Extensions, Advanced settings, Install Extension. Choose the file and paste the token.")
@@ -195,16 +195,6 @@ private struct NewConnectionSheet: View {
             Button("Show the file") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: b)]) }
         }
         Text("The assistant starts Revit's server when it connects: reconnect it after Revit is open.").font(.caption).foregroundStyle(.secondary)
-        HStack { Spacer(); Button("I saved it") { issued = nil; dismiss() }.keyboardShortcut(.defaultAction) }
-    }
-}
-
-/// A token does not stay on the clipboard: after a minute it goes, unless something else was copied since.
-@MainActor private enum Clip {
-    static func copy(_ s: String) {
-        let p = NSPasteboard.general
-        p.clearContents(); p.setString(s, forType: .string)
-        let n = p.changeCount
-        Task { try? await Task.sleep(for: .seconds(60)); if p.changeCount == n { p.clearContents() } }
+        HStack { Spacer(); Button("I saved it") { TokenClipboard.shared.clear(); issued = nil; dismiss() }.keyboardShortcut(.defaultAction) }
     }
 }
