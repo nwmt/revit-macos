@@ -21,7 +21,9 @@ For all of them:
 
 ## Tokens and tiers
 
-`./revit mcp` starts only with a token. You make one in Terminal, once for each assistant:
+`./revit mcp` starts only with a token. In the app, open a Revit's **AI Assistant** tab and choose **New connection**:
+your Mac asks for Touch ID or its password, then the token is shown once. Without the app, make one in Terminal, once for
+each assistant:
 
 ```bash
 ./revit mcp token 2027 --server pyrevit --tier code --name my-assistant
@@ -45,6 +47,10 @@ Every connection is logged in `mcp/audit/<bottle>.jsonl`, under the project fold
 `~/Library/Application Support/` for the app): when, which token, which tool, allowed or refused, and how it went.
 It keeps the first 4 KB of what the assistant sent, so it may hold anything the assistant put in a script. It keeps no
 answers, and `./revit report` leaves it out. If the log cannot be written, the call is not made.
+
+The tab also lists connections, revokes them and shows the calls. Its log says whether a call was refused or answered,
+not what Revit did with it. **Show Revit to computer use** does what `./revit agent-view` does, after the same question.
+Revoke does not end that: it ends when Revit quits.
 
 **What a token does not do.** It says what a connection may do; it is not a lock. A program that runs under your macOS
 account and sets out to get around it can: it can start Wine itself, edit the token file or read your models from disk.

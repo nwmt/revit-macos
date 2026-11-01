@@ -25,6 +25,7 @@ struct VersionView: View {
                         case .display: DisplayKeysTab(app: app, env: env, ref: ref, bottle: b)
                         case .drive: GoogleDriveTab(app: app, env: env, ref: ref, bottle: b)
                         case .addins: AddinsTab(app: app, env: env, ref: ref)
+                        case .ai: AiTab(app: app, env: env, ref: ref, bottle: b)
                         case .maintenance: MaintenanceTab(app: app, env: env, ref: ref, bottle: b)
                         }
                     }
@@ -69,6 +70,7 @@ struct VersionView: View {
         case .display: String(localized: "Display & Keys")
         case .drive: String(localized: "Google Drive")
         case .addins: String(localized: "Add-ins")
+        case .ai: String(localized: "AI Assistant")
         case .maintenance: String(localized: "Maintenance")
         }
     }

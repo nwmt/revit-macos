@@ -695,7 +695,7 @@ def bundle(a):
 def server_info(a):
     """What the app needs of a server: the tiers it can have, its name in Claude Code, the engine's arguments."""
     print(json.dumps({"tiers": [t for t in TIERS if not tier_problem(a.server, t, a.experimental)],
-                      "claude_name": registration_name(a),
+                      "claude_name": registration_name(a), "engine": os.path.join(a.root, "revit"),
                       "args": ["mcp", a.year, a.bottle, "--server", a.server]}))
 
 

@@ -3,7 +3,7 @@
 import Foundation
 
 public enum VersionTab: String, CaseIterable, Hashable, Sendable {
-    case overview, display, drive, addins, maintenance
+    case overview, display, drive, addins, ai, maintenance
 
     public static func of(_ b: Bottle?) -> [VersionTab] {
         let s = b?.settings ?? [:]

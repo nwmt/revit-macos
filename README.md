@@ -129,7 +129,7 @@ Run them in Terminal, in the project folder. In a new Terminal window, first typ
 ## Good to know
 
 - **The app:** Mac BIM Dock has a window and a Dock icon. The Library lists your Revit versions; each version has its
-  display, keys, Google Drive and add-in settings, health check, restore points, rebuild and remove, and Activity shows
+  display, keys, Google Drive, add-in and AI assistant settings, health check, restore points, rebuild and remove, and Activity shows
   past tasks and programs left running. Settings → **The menu bar only** hides the Dock icon.
 - **Finder:** with the menu bar app, a double click on a Revit file does what `./revit open` does. If the file's Revit
   is not on this Mac, the app says which one saved it and offers to add that Revit or to open a copy in a newer one.

@@ -36,10 +36,10 @@ let bottle2027 = #"{"name":"rvt2027-a","year":"2027","revit":true,"running":fals
 }
 
 @Test func tabsFollowTheProfile() {
-    #expect(VersionTab.of(bottle()) == [.overview, .display, .drive, .addins, .maintenance])
-    #expect(VersionTab.of(bottle("rvt2020-a", "2020", settings: ["retina": "on", "keys": "mac", "gdrive": "auto"])) == [.overview, .display, .drive, .addins, .maintenance])
-    #expect(VersionTab.of(bottle("rvt2025-a", "2025", settings: ["gdrive": "auto"])) == [.overview, .drive, .addins, .maintenance])
-    #expect(VersionTab.of(bottle("x", "2025", settings: [:], support: nil)) == [.overview, .addins, .maintenance])
+    #expect(VersionTab.of(bottle()) == [.overview, .display, .drive, .addins, .ai, .maintenance])
+    #expect(VersionTab.of(bottle("rvt2020-a", "2020", settings: ["retina": "on", "keys": "mac", "gdrive": "auto"])) == [.overview, .display, .drive, .addins, .ai, .maintenance])
+    #expect(VersionTab.of(bottle("rvt2025-a", "2025", settings: ["gdrive": "auto"])) == [.overview, .drive, .addins, .ai, .maintenance])
+    #expect(VersionTab.of(bottle("x", "2025", settings: [:], support: nil)) == [.overview, .addins, .ai, .maintenance])
 }
 
 @Test func pointTimes() {
