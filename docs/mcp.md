@@ -1,13 +1,14 @@
 # Connect an AI assistant to Revit
 
 An AI assistant on your Mac (Claude Code, Claude Desktop, Cursor) can read the model open in Revit and, if you allow
-it, change it, through an MCP server. This project starts three of them for you:
+it, change it, through an MCP server. This project starts four of them for you:
 
 | Server | Revit versions | What the assistant can do | What it turns on |
 |---|---|---|---|
 | [Autodesk Revit MCP Server](#autodesk-revit-mcp-server) | 2027 | Ready-made tools: query the model, read elements, change parameters, move and rotate. No new walls, floors or doors | Autodesk analytics (ADP); a Technical Preview |
 | [pyRevit's agent](#pyrevits-agent) | 2023–2027, with the pyRevit that `./revit addins` installs | Runs Python inside Revit: reads the model, builds elements, captures views | Nothing else |
 | [MCP server for Revit (Python)](#mcp-server-for-revit-python) | 2020 | Ready-made tools (model, levels, views as pictures, families, colors, save) and Python inside Revit; you approve each change in Revit | pyRevit Routes, on this Mac only |
+| [Revit's windows](#revits-windows) | 2027 | Works Revit's interface, not the model: sees windows and dialogs, runs any command by name, answers dialogs, clicks. For what the API does not reach | Nothing in the model. Needs pyRevit once, for the command table |
 
 What has been tried on which version is on the [version pages](../versions/).
 
@@ -220,3 +221,68 @@ the bottle. Start Revit from `~/Applications` instead. Close documents in Revit 
   and attach the report to an issue.
 - **"Revit does not answer":** a dialog in Revit is waiting for you. Close it, or run `./revit stop 2020`.
 - **"pyRevit Routes listens on the network":** run the install command again; it puts Routes back on this Mac only.
+
+## Revit's windows
+
+The other servers work with the model. This one works with Revit's interface, the way a person does: it reads what is
+on screen, runs commands, answers dialogs and clicks. Use it next to one of them, for what the API does not reach.
+
+Before you connect it:
+
+- **`write` means the whole interface.** An assistant can press any button of any dialog, so it can confirm what you
+  would confirm. Exit, save, close and synchronize as commands need a `code` token, but a dialog that offers them
+  does not ask for one. A token is a grant, not a wall: a program under your account can start the same helper.
+- **It sends pictures of Revit's windows and the text of its dialogs** to your AI assistant's provider.
+- **Your mouse pointer jumps for a moment on each click.** A click waits until nobody has used the mouse or keyboard for 3
+  seconds, but you can still grab the mouse in the 0.3 seconds it takes. Other actions do not touch the mouse.
+
+### Install
+
+1. If pyRevit is not there yet, quit Revit and install it: `./revit addins 2027 --only pyrevit`.
+2. Add the command table: `./revit mcp commands 2027`. The next time Revit starts, it writes the list of its commands
+   into the bottle, once for each Revit build. After a Revit update it does so again by itself. Nothing is sent anywhere.
+
+`./revit agent-view 2027` is separate and needs none of this: it makes the running Revit visible to computer use tools
+until Revit quits. They can then see it and click dialogs and the Project Browser, but clicks on the ribbon and in the
+drawing area do not arrive; use this server for those.
+
+### Connect
+
+Open Revit and make a token: `read` looks, `write` also acts, `code` adds exit, save, close and synchronize.
+
+```bash
+./revit mcp token 2027 --server ui --tier write
+```
+
+Then run the `claude mcp add` command it prints. For a picture of a window, the app that runs the assistant needs
+Screen Recording: System Settings, Privacy & Security, Screen Recording.
+
+### What the assistant sees
+
+`ui_state` lists the windows, `ui_dialog` reads a dialog, `ui_screenshot` takes a picture of a window. `ui_tree` shows what
+Windows accessibility offers: ribbon tabs, Quick Access, palettes and WPF dialogs. It does not show the buttons inside
+ribbon panels, the Properties grid, the Project Browser or the drawing area: those need a picture, or the other servers.
+It reads about 7 elements a second and may answer `busy`, for example on the Home screen. It then waits at least 2 minutes.
+
+`ui_commands` finds a command by words in its name, such as `purge unused`. `run_command` runs it and answers:
+
+| Status | Meaning |
+|---|---|
+| `ran` | Revit's journal shows the command |
+| `not_run` | Revit did not run it: it is not available here. This takes about 10 seconds, and it briefly flips Select Pinned Elements and back to prove it |
+| `blocked` | A dialog is open or Revit does not answer. Nothing was sent |
+| `unconfirmed`, `pending` | Not known yet: the command may be in Revit's queue. Do not repeat it. No other command goes out until it is settled or Revit quits |
+
+If a dialog opens in the instant between the check and the command, the command still goes through and both dialogs
+stay open; the answer says `overlapped`. `set_text` works in Win32 dialogs only, and a file dialog may keep its own name:
+check the file afterwards. Password fields are never read or set.
+
+### Troubleshoot
+
+- **`There is no command table`:** run `./revit mcp commands 2027`, then restart Revit.
+- **The table has an error:** Revit reads the list of commands from an internal class that a new version may not have.
+  `run_command` shows the reason; everything else still works. Report it with `./revit report 2027`.
+- **`user_active`:** somebody is using the mouse or keyboard. Wait, or let go of the mouse.
+- **`pending` that never ends:** Revit hangs. Quit it with `./revit stop 2027`.
+- **No picture of the window:** see Screen Recording above.
+- **`More than one Revit`:** the server works with one Revit in a bottle.
