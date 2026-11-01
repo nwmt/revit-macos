@@ -251,6 +251,11 @@ class CallLog(unittest.TestCase):
         self.assertNotIn("secret", json.dumps(rows))
         self.assertEqual([r["tool"] for r in gate.call_rows(lines, 2)], ["c", "d"])
 
+    def test_damaged_lines_and_no_limit(self):
+        call = {"event": "call", "session": "s", "id": 1, "tool": "a", "decision": "deny"}
+        self.assertEqual(len(gate.call_rows([{"session": []}, {"event": "call"}, call], 9)), 1)
+        self.assertEqual(gate.call_rows([call], 0), [])
+
     def test_a_lost_session_start_is_unknown(self):
         rows = gate.call_rows([{"event": "call", "session": "x", "id": 1, "tool": "a", "decision": "allow", "ts": "1"}], 9)
         self.assertIsNone(rows[0]["token"])

@@ -42,8 +42,8 @@ public enum Grant: Equatable, Sendable { case allowed, refused(String) }
 
     public enum IssueOutcome: Equatable, Sendable { case issued(McpIssued), refused(String) }
 
-    /// The order counts: a Desktop bundle first, so nothing that can fail after it leaves a token no one saw; the log's
-    /// line before the token is shown, and without that line no token stays.
+    /// The order counts: the token comes last, so nothing that fails leaves a token no one saw. The log's line says the
+    /// person granted it, and comes before it: no token without its line.
     public func issue(server s: McpServerInfo, tier: String, client: McpClient) async -> IssueOutcome {
         guard let data = app.dataFolder else { return .refused(String(localized: "The data folder is not known yet.")) }
         let name = client.tokenName(bottle: bottle, server: s.id)
@@ -57,15 +57,13 @@ public enum Grant: Equatable, Sendable { case allowed, refused(String) }
             }
             path = b.path
         }
-        let store = TokenStore(data: data)
-        let value: String
-        do { value = try store.add(name: name, year: year, bottle: bottle, server: s.id, tier: tier) }
-        catch { return .refused("\(error)") }
         let note = await app.query(["mcp", "note-created", String(year), bottle, "--server", s.id, "--name", name, "--tier", tier])
         guard note?.exitCode == 0 else {
-            try? store.remove(name: name, sha256: TokenStore.sha256(value))
             return .refused(note?.stderr.trimmingCharacters(in: .whitespacesAndNewlines) ?? String(localized: "Could not write the log of MCP calls."))
         }
+        let value: String
+        do { value = try TokenStore(data: data).add(name: name, year: year, bottle: bottle, server: s.id, tier: tier) }
+        catch { return .refused("\(error)") }
         await load()
         let add = (["claude", "mcp", "add", s.claudeName, "-e", "REVIT_MCP_TOKEN=\(value)", "--", s.engine] + s.args).map(\.shellQuoted).joined(separator: " ")
         return .issued(McpIssued(token: value, name: name, client: client, addCommand: add,

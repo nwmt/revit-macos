@@ -69,16 +69,6 @@ import Testing
         #expect(tokens(d).isEmpty)
     }
 
-    @Test func takingBackLeavesATokenThatTookTheName() throws {
-        let d = FileManager.default.temporaryDirectory.appending(path: "mcp-\(UUID().uuidString)")
-        let s = TokenStore(data: d)
-        let v = try s.add(name: "n", year: 2027, bottle: "b", server: "ui", tier: "read")
-        try s.remove(name: "n", sha256: String(repeating: "0", count: 64))
-        #expect(tokens(d).count == 1)
-        try s.remove(name: "n", sha256: TokenStore.sha256(v))
-        #expect(tokens(d).isEmpty)
-    }
-
     @Test func theRealGateAcceptsATokenMadeHere() throws {
         let d = FileManager.default.temporaryDirectory.appending(path: "mcp-\(UUID().uuidString)")
         let v = try TokenStore(data: d).add(name: "n", year: 2027, bottle: "b", server: "ui", tier: "write")

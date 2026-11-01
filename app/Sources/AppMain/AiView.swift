@@ -131,6 +131,7 @@ private struct NewConnectionSheet: View {
             if let i = issued { result(i) } else { form }
         }
         .padding(20).frame(width: 560, alignment: .topLeading)
+        .interactiveDismissDisabled(working || issued != nil)   // a token is being made, or is shown only here
         .onAppear { server = model.servers.first(where: \.ready)?.id ?? model.servers.first?.id ?? "" }
     }
 
@@ -159,7 +160,7 @@ private struct NewConnectionSheet: View {
         if let p = problem { Text(p).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
         HStack {
             Spacer()
-            Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+            Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction).disabled(working)
             Button("Create…") { create() }.keyboardShortcut(.defaultAction).disabled(picked?.ready != true || working)
         }
     }
@@ -179,7 +180,7 @@ private struct NewConnectionSheet: View {
     @ViewBuilder private func result(_ i: McpIssued) -> some View {
         Text("This token is shown once.").font(.headline)
         HStack {
-            Text(i.token).font(.system(.callout, design: .monospaced)).textSelection(.enabled).lineLimit(1).truncationMode(.middle)
+            Text(i.token).font(.system(.callout, design: .monospaced)).lineLimit(1).truncationMode(.middle)
             Spacer()
             Button("Copy") { Clip.copy(i.token) }
         }

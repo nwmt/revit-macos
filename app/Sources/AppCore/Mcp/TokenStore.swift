@@ -75,13 +75,4 @@ public struct TokenStore: Sendable {
         }
         return value
     }
-
-    /// Takes back a token this app has just made: only that one, not one that has taken its name since.
-    public func remove(name: String, sha256: String) throws {
-        try locked {
-            let rows = try load()
-            let kept = rows.filter { !($0["name"] as? String == name && $0["sha256"] as? String == sha256) }
-            if kept.count != rows.count { try save(kept) }
-        }
-    }
 }

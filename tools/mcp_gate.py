@@ -700,9 +700,9 @@ def server_info(a):
 
 
 def note_created(a):
-    """A line in the log for a token the app made. It grants nothing."""
+    """A line in the log: the person confirmed a token, which the app makes next. The line itself grants nothing."""
     try:
-        Audit(a.data, a.bottle).write({"ts": now(), "event": "token_created", "via": "app", "token": a.name, "tier": a.tier,
+        Audit(a.data, a.bottle).write({"ts": now(), "event": "token_granted", "via": "app", "token": a.name, "tier": a.tier,
                                        "bottle": a.bottle, "year": a.year, "server": a.server})
     except OSError as e:
         raise GateError("Cannot write the log of MCP calls: %s" % e)
@@ -730,6 +730,8 @@ def call_rows(lines, limit):
     sessions, rows, open_calls = {}, [], {}
     for r in lines:
         s, ev = r.get("session"), r.get("event")
+        if not isinstance(s, str):   # a damaged line, or a line of no session
+            continue
         info = sessions.setdefault(s, {})
         if ev == "session_start":
             info["token"] = r.get("token")
@@ -746,7 +748,7 @@ def call_rows(lines, limit):
             if row:
                 row.update(outcome="error" if r.get("is_error") else "answered", ms=r.get("ms"))
     out = []
-    for row in rows[-limit:]:
+    for row in rows[-limit:] if limit > 0 else []:
         info = sessions.get(row.pop("session"), {})
         out.append(dict(row, token=info.get("token"), client=info.get("client")))
     return out
