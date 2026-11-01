@@ -108,6 +108,11 @@
  * 4, 5 and 10 run when the DLL loads (LdrRegisterDllNotification), or at once if it is already loaded.
  *
  * Diagnostics: OutputDebugString with the "[rvtfix]" prefix (CX_DEBUGMSG=+debugstr).
+ * 13. Models that crash on open while pyRevit is loaded (2020: ArchiveException 105, "can't fix the ordering of
+ *    container", then Revit quits): pyRevit's output window is a WebBrowser, so Wine Gecko loads into Revit, and xul.dll
+ *    and mozglue.dll call setlocale(). On Windows no such library comes into Revit; here they share ucrtbase with it, so
+ *    the C locale of the whole process leaves "C", and Revit, reading a model's elements, finds their order wrong.
+ *    Fix: in the import address tables of these two DLLs setlocale only answers what is set and sets nothing.
  */
 #include <windows.h>
 #include <ole2.h>
@@ -198,6 +203,7 @@ typedef VOID (CALLBACK *dll_notif_fn)(ULONG reason, const dll_notif_data *data, 
 typedef NTSTATUS (NTAPI *ldr_register_fn)(ULONG, dll_notif_fn, void *, void **);
 
 static void patch_autodesk(HMODULE mod, const WCHAR *name); /* 4, 5 */
+static void patch_gecko(BYTE *base, const WCHAR *name); /* 13 */
 
 static VOID CALLBACK on_dll(ULONG reason, const dll_notif_data *d, void *ctx)
 {
@@ -207,7 +213,8 @@ static VOID CALLBACK on_dll(ULONG reason, const dll_notif_data *d, void *ctx)
     if (wv2_args[0] && !lstrcmpiW(name, L"WebView2Loader.dll")) {
         WCHAR full[MAX_PATH]; lstrcpynW(full, d->FullDllName->Buffer, min(MAX_PATH, d->FullDllName->Length / 2 + 1));
         patch_loader((HMODULE)d->DllBase, full);
-    } else patch_autodesk((HMODULE)d->DllBase, name);
+    } else if (!lstrcmpiW(name, L"xul.dll") || !lstrcmpiW(name, L"mozglue.dll")) patch_gecko((BYTE *)d->DllBase, name);
+    else patch_autodesk((HMODULE)d->DllBase, name);
 }
 
 static void fix_webview2(void)
@@ -315,6 +322,38 @@ static void patch_mfc(BYTE *base)
         }
     }
     trace("DesktopMFC.dll: USER32!%s: %s\n", from, how);
+}
+
+/* --- 13. Wine Gecko: the C locale stays Revit's --- */
+typedef char *(__cdecl *setlocale_fn)(int, const char *);
+static setlocale_fn orig_setlocale;
+
+static char *__cdecl gecko_setlocale(int category, const char *locale)
+{
+    return orig_setlocale(category, NULL);
+}
+
+static void patch_gecko(BYTE *base, const WCHAR *name)
+{
+    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+    IMAGE_DATA_DIRECTORY dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    IMAGE_IMPORT_DESCRIPTOR *imp;
+    const char *how = "not imported";
+    for (imp = (IMAGE_IMPORT_DESCRIPTOR *)(base + dir.VirtualAddress); dir.VirtualAddress && imp->Name; imp++) {
+        if (lstrcmpiA((char *)(base + imp->Name), "api-ms-win-crt-locale-l1-1-0.dll") || !imp->OriginalFirstThunk) continue;
+        IMAGE_THUNK_DATA *names = (IMAGE_THUNK_DATA *)(base + imp->OriginalFirstThunk);
+        IMAGE_THUNK_DATA *iat = (IMAGE_THUNK_DATA *)(base + imp->FirstThunk);
+        for (; names->u1.AddressOfData; names++, iat++) {
+            if (IMAGE_SNAP_BY_ORDINAL(names->u1.Ordinal)) continue;
+            IMAGE_IMPORT_BY_NAME *ibn = (IMAGE_IMPORT_BY_NAME *)(base + names->u1.AddressOfData);
+            if (lstrcmpA((char *)ibn->Name, "setlocale")) continue;
+            if (iat->u1.Function == names->u1.Function) { how = "not bound yet: left as is"; continue; }
+            ULONG_PTR fn = (ULONG_PTR)gecko_setlocale;
+            orig_setlocale = (setlocale_fn)iat->u1.Function;
+            how = write_mem(&iat->u1.Function, &fn, sizeof(fn)) ? "only answers now" : "IAT write failed";
+        }
+    }
+    trace("%ls: setlocale: %s\n", name, how);
 }
 
 /* --- 10. Textures: cache of OIIOImageHandler::GetImageDesc --- */
