@@ -235,6 +235,35 @@ class Audits(World):
         self.assertEqual(len({(r["p"], r["i"]) for r in rows}), 300)
 
 
+class CallLog(unittest.TestCase):
+    def test_built_by_session_and_id_with_no_arguments(self):
+        lines = [{"event": "session_start", "session": "s", "token": "t"}, {"event": "client", "session": "s", "name": "claude"},
+                 {"event": "call", "session": "s", "id": 1, "tool": "a", "decision": "allow", "ts": "1", "args": "secret"},
+                 {"event": "result", "session": "s", "id": 1, "ms": 5, "is_error": False},
+                 {"event": "call", "session": "s", "id": 2, "tool": "b", "decision": "deny", "ts": "2", "args": "secret"},
+                 {"event": "call", "session": "s", "id": 3, "tool": "c", "decision": "allow", "ts": "3"},
+                 {"event": "result", "session": "s", "id": 3, "ms": 1, "is_error": True},
+                 {"event": "call", "session": "s", "id": 4, "tool": "d", "decision": "allow", "ts": "4"}]
+        rows = gate.call_rows(lines, 200)
+        self.assertEqual([r["outcome"] for r in rows], ["answered", "refused", "error", "no_answer"])
+        self.assertEqual(rows[0]["token"], "t")
+        self.assertEqual(rows[0]["client"], "claude")
+        self.assertNotIn("secret", json.dumps(rows))
+        self.assertEqual([r["tool"] for r in gate.call_rows(lines, 2)], ["c", "d"])
+
+    def test_a_lost_session_start_is_unknown(self):
+        rows = gate.call_rows([{"event": "call", "session": "x", "id": 1, "tool": "a", "decision": "allow", "ts": "1"}], 9)
+        self.assertIsNone(rows[0]["token"])
+        self.assertIsNone(rows[0]["client"])
+
+    def test_rotated_and_broken_lines(self):
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(d + "/mcp/audit")
+            open(d + "/mcp/audit/b.jsonl.1", "w").write('{"event":"call","session":"s","id":1,"tool":"old","decision":"deny"}\nnot json\n')
+            open(d + "/mcp/audit/b.jsonl", "w").write('{"event":"call","session":"s","id":2,"tool":"new","decision":"deny"}\n')
+            self.assertEqual([r["tool"] for r in gate.call_rows(gate.audit_lines(d, "b"), 9)], ["old", "new"])
+
+
 class Tiers(World):
     def test_every_server_and_tier(self):
         cases = [("autodesk", "read", "query_model", "modify_element_parameters"),

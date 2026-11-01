@@ -1344,6 +1344,13 @@ mcp_world; (cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" script -q /d
 check "mcp token in a terminal: shown once, with the command to connect" eval 'grep -qF "tier write" "$T/tok" && grep -qF "claude mcp add revit-rvt2027-a-autodesk -e REVIT_MCP_TOKEN=" "$T/tok" && grep -q "\"name\": \"mine\"" "$R/mcp/tokens.json"'
 cp "$R/mcp/tokens.json" "$T/keep"; mcp_cli() { (cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" /bin/bash "$R/revit" "$@" </dev/null >"$T/mcp-out" 2>"$T/mcp-err"); RC=$?; OUT="$(cat "$T/mcp-out")"; ERR="$(cat "$T/mcp-err")"; }
 mcp_cli mcp tokens; check "mcp tokens lists without secrets" eval 'grep -q "^mine" <<<"$OUT" && ! grep -q sha256 <<<"$OUT"'
+mcp_cli mcp tokens --json; check "mcp tokens --json has no hash" eval 'grep -q "\"name\": \"mine\"" <<<"$OUT" && ! grep -q sha256 <<<"$OUT"'
+mcp_cli mcp log 2027 --json; check "mcp log --json" eval '[ "$RC" = 0 ] && grep -q "\"calls\"" <<<"$OUT"'
+mcp_cli mcp log 2027 --limit x; check "mcp log --limit takes a number" eval '[ "$RC" != 0 ] && grep -q "takes a number" <<<"$ERR"'
+mcp_cli mcp tokens --limit 3; check "--limit is for mcp log" eval '[ "$RC" != 0 ] && grep -q "for ./revit mcp log only" <<<"$ERR"'
+mcp_cli mcp servers 2027 --json; check "mcp servers: one JSON object, 2027 has ui" eval '[ "$RC" = 0 ] && python3 -c "import json, sys; d = json.load(sys.stdin); assert d[\"command\"] == \"mcp-servers\" and \"ui\" in [s[\"id\"] for s in d[\"servers\"]]" <<<"$OUT"'
+mcp_cli mcp note-created 2027 --name n1 --tier read; check "mcp note-created: a line, no token" eval '[ "$RC" = 0 ] && grep -q "\"token_created\"" "$R/mcp/audit/rvt2027-a.jsonl" && ! grep -q "\"n1\"" "$R/mcp/tokens.json"'
+mcp_cli mcp bundle-file 2027 --server pyrevit; check "mcp bundle-file: a file and no token" eval '[ "$RC" = 0 ] && grep -q "\.mcpb" <<<"$OUT" && [ "$(grep -c "\"name\"" "$R/mcp/tokens.json")" = 1 ]'
 mcp_cli mcp tokens extra; check "mcp tokens: no extra arguments" eval '[ "$RC" != 0 ] && grep -q "Too many arguments" <<<"$ERR"'
 mcp_cli mcp revoke mine other; check "mcp revoke: no extra arguments, nothing revoked" eval '[ "$RC" != 0 ] && grep -q "\"name\": \"mine\"" "$R/mcp/tokens.json"'
 mcp_cli mcp revoke mine; check "mcp revoke" eval '[ "$RC" = 0 ] && grep -qF "Token mine is revoked" <<<"$OUT"'

@@ -617,6 +617,10 @@ def token_create(a):
 
 def token_list(a):
     rows = load_tokens(a.data)
+    if a.json:
+        keep = ("name", "bottle", "year", "server", "tier", "created")
+        print(json.dumps({"tokens": [{k: r.get(k) for k in keep} for r in rows]}, ensure_ascii=False))
+        return
     if not rows:
         print("No MCP tokens.")
     for r in rows:
@@ -660,22 +664,96 @@ def bundle_bytes(a):
     return out.getvalue()
 
 
-def bundle(a):
-    need_terminal()
-    why = tier_problem(a.server, a.tier, a.experimental)
-    if why:
-        raise GateError(why)
+def write_bundle(a):
     body = bundle_bytes(a)
     path = os.path.join(a.out_dir, "revit-%s-%s.mcpb" % (a.bottle, a.server))
-    name = "claude-desktop-%s-%s" % (a.bottle, a.server)
     os.makedirs(a.out_dir, exist_ok=True)
     tmp = path + ".tmp.%d" % os.getpid()
     with open(tmp, "wb") as f:
         f.write(body)
     os.replace(tmp, path)
+    return path
+
+
+def bundle_file(a):
+    """The file alone: it holds no token, so this needs no terminal. The app makes the token after asking the system."""
+    print(json.dumps({"path": write_bundle(a)}, ensure_ascii=False))
+
+
+def bundle(a):
+    need_terminal()
+    why = tier_problem(a.server, a.tier, a.experimental)
+    if why:
+        raise GateError(why)
+    path = write_bundle(a)
+    name = "claude-desktop-%s-%s" % (a.bottle, a.server)
     show_token(create_token(a.data, name, a.year, a.bottle, a.server, a.tier), a, name)
     print("Claude Desktop: Settings → Extensions → Advanced settings → Install Extension, choose\n\n  %s\n\n"
           "and paste the token when it asks. Claude Desktop keeps it in your Keychain." % path)
+
+
+def server_info(a):
+    """What the app needs of a server: the tiers it can have, its name in Claude Code, the engine's arguments."""
+    print(json.dumps({"tiers": [t for t in TIERS if not tier_problem(a.server, t, a.experimental)],
+                      "claude_name": registration_name(a),
+                      "args": ["mcp", a.year, a.bottle, "--server", a.server]}))
+
+
+def note_created(a):
+    """A line in the log for a token the app made. It grants nothing."""
+    try:
+        Audit(a.data, a.bottle).write({"ts": now(), "event": "token_created", "via": "app", "token": a.name, "tier": a.tier,
+                                       "bottle": a.bottle, "year": a.year, "server": a.server})
+    except OSError as e:
+        raise GateError("Cannot write the log of MCP calls: %s" % e)
+
+
+def audit_lines(data, bottle):
+    d = os.path.join(data, "mcp", "audit", bottle + ".jsonl")
+    for path in (d + ".1", d):
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    try:
+                        r = json.loads(line)
+                    except ValueError:
+                        continue
+                    if isinstance(r, dict):
+                        yield r
+        except OSError:
+            continue
+
+
+def call_rows(lines, limit):
+    """The calls, oldest first, from the log's lines: what the log can say and no more. No arguments, no answers. The
+    log knows an MCP error, not what Revit did: `ui` answers refused inside a reply that is no error."""
+    sessions, rows, open_calls = {}, [], {}
+    for r in lines:
+        s, ev = r.get("session"), r.get("event")
+        info = sessions.setdefault(s, {})
+        if ev == "session_start":
+            info["token"] = r.get("token")
+        elif ev == "client":
+            info["client"] = r.get("name")
+        elif ev == "call":
+            row = {"ts": r.get("ts"), "tool": r.get("tool"), "ms": None, "session": s,
+                   "outcome": "refused" if r.get("decision") == "deny" else "no_answer"}
+            rows.append(row)
+            if row["outcome"] == "no_answer":
+                open_calls[(s, json.dumps(r.get("id")))] = row
+        elif ev == "result":
+            row = open_calls.pop((s, json.dumps(r.get("id"))), None)
+            if row:
+                row.update(outcome="error" if r.get("is_error") else "answered", ms=r.get("ms"))
+    out = []
+    for row in rows[-limit:]:
+        info = sessions.get(row.pop("session"), {})
+        out.append(dict(row, token=info.get("token"), client=info.get("client")))
+    return out
+
+
+def call_log(a):
+    print(json.dumps({"calls": call_rows(audit_lines(a.data, a.bottle), a.limit)}, ensure_ascii=False))
 
 
 def parser():
@@ -704,7 +782,22 @@ def parser():
     c.add_argument("--tier", default="read")
     c.add_argument("--out-dir", required=True)
     c.add_argument("--experimental", action="store_true")
-    common(sub.add_parser("token-list"), root=False, target=False)
+    c = sub.add_parser("token-list")
+    common(c, root=False, target=False)
+    c.add_argument("--json", action="store_true")
+    c = sub.add_parser("bundle-file")
+    common(c)
+    c.add_argument("--out-dir", required=True)
+    c = sub.add_parser("server-info")
+    common(c)
+    c.add_argument("--experimental", action="store_true")
+    c = sub.add_parser("note-created")
+    common(c)
+    c.add_argument("--name", required=True)
+    c.add_argument("--tier", required=True)
+    c = sub.add_parser("call-log")
+    common(c)
+    c.add_argument("--limit", type=int, default=200)
     c = sub.add_parser("token-revoke")
     common(c, root=False, target=False)
     c.add_argument("--name", required=True)
@@ -714,7 +807,8 @@ def parser():
 def main(argv):
     a = parser().parse_args(argv)
     run = {"serve": serve, "token-create": token_create, "token-list": token_list, "token-revoke": token_revoke,
-           "bundle": bundle}[a.cmd]
+           "bundle": bundle, "bundle-file": bundle_file, "server-info": server_info, "note-created": note_created,
+           "call-log": call_log}[a.cmd]
     try:
         run(a)
     except GateError as e:

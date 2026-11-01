@@ -101,6 +101,42 @@ plain_host_ensure() { # our mcphost.exe for --plain in the bottle, equal to $(sh
   cmp -s "$src" "$t" && return 0
   mkdir -p "$(dirname "$t")" && cp "$src" "$t.tmp.$$" && mv -f "$t.tmp.$$" "$t" || { rm -f "$t.tmp.$$"; echo "cannot write $t"; return 1; }
 }
+mcp_server_row() { # $1 = id, $2 = name in words, $3 = missing, $4 = what only a connection shows, $5.. = gate arguments:
+  # one object of ./revit mcp servers
+  local id="$1" n="$2" miss="$3" note="$4" st=ready; shift 4; [ -z "$miss" ] || st=missing
+  printf '{"id":%s,"name":%s,"state":%s,"missing":%s,"note":%s,%s' "$(json_str "$id")" "$(json_str "$n")" "$(json_str "$st")" \
+    "$(json_str "$miss")" "$(json_str "$note")" "$(python3 -I -B "$ROOT/tools/mcp_gate.py" server-info "$@" --server "$id" | sed 's/^{//')"
+}
+mcp_servers_json() { # the servers of $YEAR in bottle $B for the app: files and settings only, no Wine, nothing changes.
+  # What depends on a running Revit is said in note: the launch checks it when an assistant connects
+  local rows=() m g=(--root "$ROOT" --data "$DATA" --year "$YEAR" --bottle "$NAME") open="Revit $YEAR must be open with a model when the assistant connects."
+  [ "$(mcp_installed_variant)" != revitmcp-experimental ] || g+=(--experimental)
+  addin_load revitmcp
+  if addin_available; then
+    ID="$(mcp_installed_variant)"; m=""
+    if [ -z "$ID" ]; then m="Install it on the Add-ins tab."
+    elif ! mcp_ready "$ID"; then m="Install it again on the Add-ins tab: $(mcp_missing "$ID") is missing."; fi
+    rows+=("$(mcp_server_row autodesk "Autodesk Revit MCP Server" "$m" "$open" "${g[@]}")")
+  fi
+  m="$(pyrevit_mcp_missing "$YEAR")"
+  case "$m" in
+    not-offered|no-agent-runtime) ;;
+    not-installed) rows+=("$(mcp_server_row pyrevit "pyRevit's agent" "Install pyRevit on the Add-ins tab." "$open" "${g[@]}")") ;;
+    agent-off) rows+=("$(mcp_server_row pyrevit "pyRevit's agent" "In Revit: pyRevit, Settings, Agent Runtime, turn on Agent Host, then reload pyRevit." "$open" "${g[@]}")") ;;
+    *) rows+=("$(mcp_server_row pyrevit "pyRevit's agent" "" "$open pyRevit's agent must be running in it." "${g[@]}")") ;;
+  esac
+  addin_load python-mcp
+  if addin_available; then
+    m=""; addin_is_installed || m="Install it on the Add-ins tab."
+    rows+=("$(mcp_server_row python "MCP server for Revit (Python)" "$m" "$open In Revit: MCP, Bridge, Connect." "${g[@]}")")
+  fi
+  if [ "$YEAR" = 2027 ]; then
+    m=""; [ -f "$(shim_dir)/uibridge/uibridge.exe" ] || m="A file this app needs is missing. Get the app again."
+    rows+=("$(mcp_server_row ui "Revit's windows" "$m" "Revit $YEAR must be open when the assistant connects." "${g[@]}")")
+  fi
+  local IFS=,
+  printf '{"command":"mcp-servers","year":%s,"bottle":%s,"servers":[%s]}\n' "$((10#$YEAR))" "$(json_str "$NAME")" "${rows[*]}"
+}
 ui_commands_extension() { # $1 = year, $2 = bottle: puts tools/revitmacos-ui.extension into the bottle's pyRevit; from the
   # next start of Revit on it writes the command table of each new build (./revit mcp --server ui)
   local year="$1" name="$2" b ext sfx; b="$(bottle_path "$name")"; sfx="$(bottle_sfx "$name" "$year")"

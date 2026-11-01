@@ -14,6 +14,7 @@ VIEWER=0; NO_POINT=0; POINT_TO=""; POINT_CLEAR=""; POINT_IDS=""; POINT_LEFT=0   
 # (the app: --clear-ids <id,…> only those, --clear-unfinished the files of a run cut short)
 OPEN_BOTTLE=""; COPY_FOR=""   # ./revit open --bottle <bottle>, --copy-for <year>
 UPDATE_FROM=""   # ./revit update --from <folder>
+LOG_LIMIT=""   # ./revit mcp log --limit N
 RESULT_HINT=usage   # what an exit before the child means: usage until the arguments check out (Task 5 reads it)
 sup_end() { # $1 = exit status: the one end event, from the child's result file or from what an early exit means
   [ "$END_DONE" = 0 ] || return 0; END_DONE=1
@@ -114,9 +115,9 @@ while [ $# -gt 0 ]; do
     --keep) KEEP=1 ;;
     --write) WRITE=1 ;;
     --no-point) NO_POINT=1 ;;
-    --events|--only|--accept-eula|--run|--exclude|--server|--tier|--name|--targets|--depth|--max|--to|--clear|--clear-ids|--from|--bottle|--copy-for)
+    --events|--only|--accept-eula|--run|--exclude|--server|--tier|--name|--targets|--depth|--max|--to|--clear|--clear-ids|--from|--limit|--bottle|--copy-for)
       if [ $# -lt 2 ]; then FLAG_ERR="$1 needs a value"
-      else case "$1" in --from) UPDATE_FROM="$2" ;; --events) EVENTS_DIR="$2" ;; --only) ONLY="$2" ;; --accept-eula) EULA="$2" ;;
+      else case "$1" in --limit) LOG_LIMIT="$2" ;; --from) UPDATE_FROM="$2" ;; --events) EVENTS_DIR="$2" ;; --only) ONLY="$2" ;; --accept-eula) EULA="$2" ;;
         --run) RUN_ARG="$2" ;; --exclude) EXCL+=("$2") ;; --server) SERVER="$2" ;; --tier) TIER="$2" ;; --name) TOKEN_NAME="$2" ;; --depth|--max) WARM_OPTS+=("$1" "$2") ;; --targets) TARGETS="$2" ;; --to) POINT_TO="$2" ;; --clear) POINT_CLEAR="$2" ;; --clear-ids) POINT_IDS="$2" ;; --bottle) OPEN_BOTTLE="$2" ;; --copy-for) COPY_FOR="$2" ;; esac; shift; fi ;;
     -h|--help) POS+=(help) ;;
     --*) FLAG_ERR="Unknown option: $1" ;;
@@ -125,10 +126,10 @@ while [ $# -gt 0 ]; do
   shift
 done
 CMD="${POS[0]:-}"; YEAR_ARG="${POS[1]:-}"; NAME="${POS[2]:-}"
-MCPSUB=""   # ./revit mcp token|bundle|tokens|revoke|commands
+MCPSUB=""   # ./revit mcp token|bundle|tokens|revoke|commands, and for the app servers|log|bundle-file|note-created
 if [ "$CMD" = mcp ]; then
   case "$YEAR_ARG" in
-    token|bundle|tokens|revoke|commands) MCPSUB="$YEAR_ARG"; POS=(mcp ${POS[@]+"${POS[@]:2}"}); YEAR_ARG="${POS[1]:-}"; NAME="${POS[2]:-}" ;;
+    token|bundle|tokens|revoke|commands|servers|log|bundle-file|note-created) MCPSUB="$YEAR_ARG"; POS=(mcp ${POS[@]+"${POS[@]:2}"}); YEAR_ARG="${POS[1]:-}"; NAME="${POS[2]:-}" ;;
   esac
 fi
 GPATH=""   # ./revit gdrive warm <year> [bottle] <folder> [--depth N] [--max N]: the folder (WARM_OPTS: the options)
@@ -174,7 +175,9 @@ fi
 [ -z "$RUN_ARG" ] || [ "$CMD" = report ] || FLAG_ERR="--run is for ./revit report only."
 [ ${#EXCL[@]} = 0 ] || [ "$CMD" = report ] || FLAG_ERR="--exclude is for ./revit report only."
 [ "$WRITE" = 0 ] || [ "$CMD" = mcp ] || FLAG_ERR="Unknown option: --write"
-[ -z "$TIER$TOKEN_NAME" ] || [ "$MCPSUB" = token ] || [ "$MCPSUB" = bundle ] || FLAG_ERR="--tier and --name are for ./revit mcp token and bundle only."
+[ -z "$TIER$TOKEN_NAME" ] || [ "$MCPSUB" = token ] || [ "$MCPSUB" = bundle ] || [ "$MCPSUB" = note-created ] || FLAG_ERR="--tier and --name are for ./revit mcp token and bundle only."
+[ -z "$LOG_LIMIT" ] || [ "$MCPSUB" = log ] || FLAG_ERR="--limit is for ./revit mcp log only."
+[[ "$LOG_LIMIT" =~ ^[0-9]{0,5}$ ]] || FLAG_ERR="--limit takes a number."
 [ -z "$SERVER" ] || [ "$CMD" = mcp ] || FLAG_ERR="--server is for ./revit mcp only."
 [ -z "$TARGETS" ] || [ "$CMD" = cleanup ] || FLAG_ERR="--targets is for ./revit cleanup only."
 [ -z "$TARGETS" ] || [[ "$TARGETS" =~ ^[0-9]+:[0-9]+(,[0-9]+:[0-9]+)*$ ]] || FLAG_ERR="--targets takes <pid>:<start>,… as cleanup --dry-run --json lists them."
@@ -224,7 +227,7 @@ if [ -n "$EVENTS_DIR" ]; then
 fi
 [ -z "$FLAG_ERR" ] || die "$FLAG_ERR"
 case "$MCPSUB" in   # no year, no bottle to check
-  tokens) exec python3 -I -B "$ROOT/tools/mcp_gate.py" token-list --data "$DATA" ;;
+  tokens) exec python3 -I -B "$ROOT/tools/mcp_gate.py" token-list --data "$DATA" $([ "$JSON" = 0 ] || echo --json) ;;
   revoke) [ -n "$YEAR_ARG" ] || die "Usage: ./revit mcp revoke <name> (./revit mcp tokens lists them)"
     exec python3 -I -B "$ROOT/tools/mcp_gate.py" token-revoke --data "$DATA" --name "$YEAR_ARG" ;;
 esac
@@ -698,6 +701,13 @@ case "$CMD" in
       bottle_guard running_ok "$YEAR" "$NAME"; lock_take "./revit mcp commands $YEAR $NAME"
       ui_commands_extension "$YEAR" "$NAME"; exit 0
     fi
+    case "$MCPSUB" in   # for the app's AI Assistant tab: none of these makes a token
+      servers) bottle_guard running_ok "$YEAR" "$NAME"; . "$ROOT/scripts/lib/shims.sh"; mcp_servers_json; exit 0 ;;
+      log) exec python3 -I -B "$ROOT/tools/mcp_gate.py" call-log --root "$ROOT" --data "$DATA" --year "$YEAR" --bottle "$NAME" --server "$SERVER" --limit "${LOG_LIMIT:-200}" ;;
+      bundle-file) bottle_guard running_ok "$YEAR" "$NAME"
+        exec python3 -I -B "$ROOT/tools/mcp_gate.py" bundle-file --root "$ROOT" --data "$DATA" --year "$YEAR" --bottle "$NAME" --server "$SERVER" --out-dir "$HOME/Downloads" ;;
+      note-created) exec python3 -I -B "$ROOT/tools/mcp_gate.py" note-created --root "$ROOT" --data "$DATA" --year "$YEAR" --bottle "$NAME" --server "$SERVER" --name "$TOKEN_NAME" --tier "$TIER" ;;
+    esac
     if [ -n "$MCPSUB" ]; then   # a token for a connection: docs/mcp.md
       gate=(--root "$ROOT" --data "$DATA" --year "$YEAR" --bottle "$NAME" --server "$SERVER" --tier "${TIER:-read}")
       [ "$(mcp_installed_variant)" != revitmcp-experimental ] || gate+=(--experimental)
