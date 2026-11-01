@@ -275,7 +275,9 @@ It reads about 7 elements a second and may answer `busy`, for example on the Hom
 
 If a dialog opens in the instant between the check and the command, the command still goes through and both dialogs
 stay open; the answer says `overlapped`. `set_text` works in Win32 dialogs only, and a file dialog may keep its own name:
-check the file afterwards. Password fields are never read or set.
+check the file afterwards. Password fields are never read or set. `press_button` tells whether the dialog is still open:
+a button may do nothing, and the Cancel of Keyboard Shortcuts does not react to a click. `close_dialog` closes a dialog as
+its X does.
 
 ### Troubleshoot
 

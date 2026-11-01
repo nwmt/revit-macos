@@ -551,7 +551,7 @@ class UiServer(unittest.TestCase):
     def test_tiers(self):
         for name in "ui_state ui_dialog ui_tree ui_screenshot ui_commands".split():
             self.assertTrue(gate.tool_allowed("ui", "read", name), name)
-        for name in "run_command press_button set_text click".split():
+        for name in "run_command press_button set_text click close_dialog".split():
             self.assertFalse(gate.tool_allowed("ui", "read", name), name)
             self.assertTrue(gate.tool_allowed("ui", "write", name), name)
         self.assertFalse(gate.tool_allowed("ui", "write", "run_file_command"))

@@ -62,7 +62,7 @@ TOOLS = {
     },
     "ui": {
         "read": frozenset("ui_state ui_dialog ui_tree ui_screenshot ui_commands".split()),
-        "write": frozenset("run_command press_button set_text click".split()),
+        "write": frozenset("run_command press_button set_text click close_dialog".split()),
         "code": frozenset(("run_file_command",)),
     },
     "python": {

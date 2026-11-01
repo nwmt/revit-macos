@@ -173,6 +173,10 @@ class Bridge:
         _, status, f = self._ask(["click", hwnd(h), x, y, kind])
         return status, " ".join(f)
 
+    def close(self, h):
+        _, status, f = self._ask(["close", hwnd(h)])
+        return status, " ".join(f)
+
     def pid_start(self):
         return (self.proc.pid, self.start)
 
@@ -193,7 +197,7 @@ class Bridge:
             time.sleep(0.1)
         return False
 
-    def close(self):
+    def end(self):
         try:
             self.proc.stdin.close()
         except OSError:
@@ -234,6 +238,7 @@ TOOLS = [
     ("click", "Click a point of the last picture of a window. The Mac's cursor jumps there for a moment; it waits until "
               "nobody uses the mouse.", {"window": "string", "x": "integer", "y": "integer", "kind": "string"},
      ["window", "x", "y"]),
+    ("close_dialog", "Close an open dialog as its X does, for a dialog with no button for it.", {"dialog": "string"}, ["dialog"]),
     ("run_file_command", "run_command for exit, save, close and synchronize.", {"id": "string", "wait_s": "number"}, ["id"]),
 ]
 
@@ -409,6 +414,14 @@ class Server:
             got["dialog_open"] = bool(self._window(dialog))
         return got
 
+    def close_dialog(self, dialog):
+        w = self._window(dialog)
+        if not w or dialog == self.b.state()["main"]:
+            return {"status": "refused", "why": "no such dialog open"}
+        with self.state.locked():
+            status, detail = self.b.close(dialog)
+        return self._after_press(dialog, {"status": status, "detail": detail})
+
     def set_text(self, dialog, field, text):
         w = self._window(dialog)
         if not w:
@@ -522,7 +535,7 @@ def main(argv):
         serve(server)
     finally:
         server.close()
-        bridge.close()
+        bridge.end()
     return 0
 
 

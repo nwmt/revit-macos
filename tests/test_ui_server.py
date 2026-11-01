@@ -40,6 +40,11 @@ class Bridge:
         self.calls.append(("settext", h, text))
         return "ok", self.back if self.back is not None else text
 
+    def close(self, h):
+        self.calls.append(("close", h))
+        self.s["dialogs"] = []
+        return "ok", "closed"
+
     def click(self, h, x, y, kind):
         self.calls.append(("click", h, x, y, kind))
         return "ok", "restored"
@@ -128,7 +133,7 @@ class Protocol(Case):
     def test_tools_list_has_every_tool(self):
         names = {t["name"] for t in self.rpc("tools/list")["result"]["tools"]}
         self.assertEqual(names, set("ui_state ui_dialog ui_tree ui_screenshot ui_commands run_command press_button set_text "
-                                    "click run_file_command".split()))
+                                    "click close_dialog run_file_command".split()))
 
     def test_a_notification_gets_no_answer(self):
         self.assertIsNone(self.srv.handle({"jsonrpc": "2.0", "method": "notifications/initialized"}))
@@ -269,6 +274,21 @@ class Dialogs(Case):
         self.b.s["dialogs"] = [self.WIN32]
         self.b.controls = [{"hwnd": "e1", "cls": "Edit", "text": "", "enabled": True}]
         self.assertEqual(self.call("set_text", dialog="bb", field="e1", text="a\tb")["status"], "refused")
+
+
+class CloseDialog(Case):
+    def test_a_dialog_without_buttons(self):
+        self.b.s["dialogs"] = [Dialogs.WIN32]
+        got = self.call("close_dialog", dialog="bb")
+        self.assertEqual(self.b.calls, [("close", "bb")])
+        self.assertFalse(got["dialog_open"])
+
+    def test_not_the_main_window(self):
+        self.assertEqual(self.call("close_dialog", dialog="aa")["status"], "refused")
+        self.assertEqual(self.b.calls, [])
+
+    def test_a_dialog_that_is_not_open(self):
+        self.assertEqual(self.call("close_dialog", dialog="zz")["status"], "refused")
 
 
 class PressResult(Case):

@@ -25,6 +25,7 @@
  *   command <id>          WM_COMMAND to the main window, if it is enabled and answers: ok posted, else blocked <why>
  *   press <hwnd>          BM_CLICK to a button of Revit: ok pressed
  *   settext <hwnd> <text> WM_SETTEXT to an Edit of Revit: ok <the text read back>
+ *   close <hwnd>          WM_CLOSE to a dialog of Revit, not the main window: ok closed
  *   tree <hwnd> <depth> <limit>
  *                         UI Automation: + <depth> <control type> <name> <automation id> <class> <enabled> <rect> for each
  *                         element, then ok <count> complete|partial. One at a time; the answer comes while other requests
@@ -478,6 +479,14 @@ static void do_press(long seq, HWND h)
     finish(seq, "ok", "pressed");
 }
 
+static void do_close(long seq, HWND h)
+{
+    if (!ours(h) || GetParent(h)) { finish(seq, "refused", "not a window of Revit"); return; }
+    if (h == main_window()) { finish(seq, "refused", "the main window"); return; }
+    if (!PostMessageW(h, WM_CLOSE, 0, 0)) { finish(seq, "error", "PostMessage failed"); return; }
+    finish(seq, "ok", "closed");
+}
+
 static void do_settext(long seq, HWND h, const char *text)
 {
     WCHAR c[32];
@@ -543,6 +552,7 @@ static void line(char *s)
     if (!strcmp(verb, "state") && !p) { do_state(seq); return; }
     if (!strcmp(verb, "dialog") && hwnd_of(next_field(&p), &h) && !p) { do_dialog(seq, h); return; }
     if (!strcmp(verb, "press") && hwnd_of(next_field(&p), &h) && !p) { do_press(seq, h); return; }
+    if (!strcmp(verb, "close") && hwnd_of(next_field(&p), &h) && !p) { do_close(seq, h); return; }
     if (!strcmp(verb, "settext") && hwnd_of(next_field(&p), &h) && p) { do_settext(seq, h, p); return; }
     if (!strcmp(verb, "command") && (a = next_field(&p)) && !p) {
         long id;
