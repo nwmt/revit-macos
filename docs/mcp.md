@@ -286,5 +286,5 @@ its X does.
   `run_command` shows the reason; everything else still works. Report it with `./revit report 2027`.
 - **`user_active`:** somebody is using the mouse or keyboard. Wait, or let go of the mouse.
 - **`pending` that never ends:** Revit hangs. Quit it with `./revit stop 2027`.
-- **No picture of the window:** see Screen Recording above.
+- **No picture of the window:** see Screen Recording above. With the display asleep there are no pictures either.
 - **`More than one Revit`:** the server works with one Revit in a bottle.

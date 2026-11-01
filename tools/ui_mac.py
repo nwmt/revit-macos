@@ -51,7 +51,7 @@ def png_size(path):
     return struct.unpack(">II", head[16:24])
 
 
-def screenshot(window, dst, run=None):
+def screenshot(window, dst, run=None, asleep=None):
     """(width, height) of the picture of the window written to dst."""
     try:
         os.unlink(dst)
@@ -61,6 +61,8 @@ def screenshot(window, dst, run=None):
         (run or _capture)(window, dst)
         return png_size(dst)
     except (OSError, ValueError, struct.error, subprocess.SubprocessError):
+        if (asleep or display_asleep)():
+            raise NoPicture("No picture: the display is asleep. Wake the Mac.")
         raise NoPicture("No picture of the window. The app that runs this needs Screen Recording: System Settings, "
                         "Privacy & Security, Screen Recording.")
 
@@ -138,6 +140,13 @@ def windows():
 
 def window_id(pid, title):
     return pick(windows(), pid, title)
+
+
+def display_asleep():
+    cg = _frameworks()[0]
+    cg.CGMainDisplayID.restype = ctypes.c_uint32
+    cg.CGDisplayIsAsleep.argtypes = [ctypes.c_uint32]
+    return bool(cg.CGDisplayIsAsleep(cg.CGMainDisplayID()))
 
 
 def idle_seconds():

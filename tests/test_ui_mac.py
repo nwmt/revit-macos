@@ -87,8 +87,14 @@ class Picture(unittest.TestCase):
 
     def test_no_picture_names_the_permission(self):
         with self.assertRaises(ui_mac.NoPicture) as e:
-            ui_mac.screenshot(1, os.path.join(self.d, "none.png"), run=lambda *a: None)
+            ui_mac.screenshot(1, os.path.join(self.d, "none.png"), run=lambda *a: None, asleep=lambda: False)
         self.assertIn("Screen Recording", str(e.exception))
+
+    def test_a_sleeping_display_is_named(self):
+        with self.assertRaises(ui_mac.NoPicture) as e:
+            ui_mac.screenshot(1, os.path.join(self.d, "none.png"), run=lambda *a: None, asleep=lambda: True)
+        self.assertIn("asleep", str(e.exception))
+        self.assertNotIn("Screen Recording", str(e.exception))
 
     def test_a_capture_that_times_out_is_no_picture(self):
         def run(window, dst):
