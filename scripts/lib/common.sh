@@ -256,20 +256,40 @@ pymcp_wrappers() { # $1 = bottle real path: PIDs of tools/python_mcp_run.py for 
     ps -o command= -p "$p" 2>/dev/null | grep -qF -- " revit-macos-python-mcp $1 " && echo "$p"
   done
 }
+uiserver_wrappers() { # $1 = bottle real path: PIDs of tools/ui_server.py for that bottle (./revit mcp --server ui)
+  local p; for p in $(pgrep -f 'revit-macos-ui-server' 2>/dev/null); do
+    ps -o command= -p "$p" 2>/dev/null | grep -qF -- " revit-macos-ui-server $1 " && echo "$p"
+  done
+}
+uibridge_running() { # $1 = bottle path: uibridge.exe (scripts/uibridge-launch.sh) with files open in that bottle
+  local p rb out; rb="$(cd "$1" 2>/dev/null && pwd -P)" || return 1
+  for p in $(pgrep -f 'uibridge\.exe' 2>/dev/null); do
+    out="$(lsof -p "$p" -Fn 2>/dev/null)"
+    grep -qF "n$rb/" <<<"$out" && return 0
+  done
+  return 1
+}
+uiserver_stop() { # $1 = bottle path: end its uiserver_wrappers; each ends its bridge
+  wrappers_stop uiserver_wrappers "$1"
+}
 pymcp_stop() { # $1 = bottle path: end its pymcp_wrappers (TERM, then KILL after 3 s)
-  local rb left i; rb="$(cd "$1" 2>/dev/null && pwd -P)" || return 0; left="$(pymcp_wrappers "$rb")"
+  wrappers_stop pymcp_wrappers "$1"
+}
+wrappers_stop() { # $1 = function that lists the PIDs, $2 = bottle path
+  local rb left i; rb="$(cd "$2" 2>/dev/null && pwd -P)" || return 0; left="$("$1" "$rb")"
   [ -n "$left" ] || return 0
   # shellcheck disable=SC2086   # one PID per word
   kill -TERM $left 2>/dev/null
-  for i in $(seq 1 30); do [ -n "$(pymcp_wrappers "$rb")" ] || return 0; sleep 0.1; done
+  for i in $(seq 1 30); do [ -n "$("$1" "$rb")" ] || return 0; sleep 0.1; done
   # shellcheck disable=SC2086
-  kill -KILL $(pymcp_wrappers "$rb") 2>/dev/null; return 0
+  kill -KILL $("$1" "$rb") 2>/dev/null; return 0
 }
 mcp_running() { # $1 = bottle path: our MCP launcher (mcphost.exe, scripts/mcp-launch.sh) with files open in that
   # bottle; the CrossOver loader that has mcphost.exe in its arguments counts too; the Mac-side server of
-  # --server python (pymcp_wrappers). Output through variables, as above
+  # --server python (pymcp_wrappers) or --server ui (uiserver_wrappers, uibridge_running). Output through variables, as above
   local p rb out; rb="$(cd "$1" 2>/dev/null && pwd -P)" || return 1
-  [ -z "$(pymcp_wrappers "$rb")" ] || return 0
+  [ -z "$(pymcp_wrappers "$rb")" ] && [ -z "$(uiserver_wrappers "$rb")" ] || return 0
+  ! uibridge_running "$1" || return 0
   for p in $(pgrep -f 'mcphost\.exe' 2>/dev/null); do
     out="$(lsof -p "$p" -Fn 2>/dev/null)"
     grep -qF "n$rb/" <<<"$out" && return 0

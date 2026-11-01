@@ -60,6 +60,11 @@ TOOLS = {
         "write": frozenset(),
         "code": frozenset("run_query run_modify run_automation".split()),
     },
+    "ui": {
+        "read": frozenset("ui_state ui_dialog ui_tree ui_screenshot ui_commands".split()),
+        "write": frozenset("run_command press_button set_text click".split()),
+        "code": frozenset(("run_file_command",)),
+    },
     "python": {
         "read": frozenset("get_revit_status get_revit_model_info get_current_view_info get_current_view_elements "
                           "get_revit_view list_levels list_revit_views list_families list_family_categories "

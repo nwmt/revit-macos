@@ -71,7 +71,7 @@ reset() { # a fresh sandbox for each test
   cp "$REPO/revit" "$R/"; cp -R "$REPO/tools" "$R/"; cp "$REPO/scripts/lib/common.sh" "$REPO/scripts/lib/versions.sh" "$R/scripts/lib/"
   mkdir -p "$R/scripts/profiles"; cp "$REPO"/scripts/profiles/*.sh "$R/scripts/profiles/"
   cp "$REPO/scripts/lib/addins.sh" "$REPO/scripts/lib/points.sh" "$REPO/scripts/lib/mcp.sh" "$REPO/scripts/lib/pymcp.sh" "$REPO/scripts/lib/shims.sh" "$REPO/scripts/lib/handoff.sh" "$R/scripts/lib/" 2>/dev/null
-  [ ! -f "$REPO/scripts/mcp-launch.sh" ] || cp "$REPO/scripts/mcp-launch.sh" "$R/scripts/"; cp "$REPO/scripts/hittest-launch.sh" "$REPO/scripts/theme-launch.sh" "$REPO/scripts/open-file.sh" "$R/scripts/"; cp "$REPO/scripts/lib/wine.sh" "$R/scripts/lib/"; cp -R "$REPO/scripts/addins" "$REPO/scripts/steps" "$R/scripts/" 2>/dev/null
+  [ ! -f "$REPO/scripts/mcp-launch.sh" ] || cp "$REPO/scripts/mcp-launch.sh" "$R/scripts/"; cp "$REPO/scripts/hittest-launch.sh" "$REPO/scripts/uibridge-launch.sh" "$REPO/scripts/theme-launch.sh" "$REPO/scripts/open-file.sh" "$R/scripts/"; cp "$REPO/scripts/lib/wine.sh" "$R/scripts/lib/"; cp -R "$REPO/scripts/addins" "$REPO/scripts/steps" "$R/scripts/" 2>/dev/null
   stub "$R/install.sh"; stub "$R/scripts/run-steps.sh"; stub "$R/scripts/launch.sh"; stub "$R/scripts/smoke.sh"
   # ensure_shim's builder: done when build/<shim>/ holds a file, else it fails
   printf '#!/bin/bash\nfor f in "$(dirname "$0")/../build/$1"/*; do [ -f "$f" ] && exit 0; done\necho "no $1 to build"; exit 1\n' \
@@ -1173,7 +1173,7 @@ mcp_seed() { # what a server gets: a fake MCP server, and tools/mcp_gate.py a to
   python3 -I -c 'import hashlib, json, sys
 sha = hashlib.sha256(sys.argv[1].encode()).hexdigest()
 json.dump([{"name": b + s, "sha256": sha, "tier": sys.argv[2], "bottle": b, "server": s}
-           for b in ("rvt2027-a", "rvt2020-a", "rvt2021-a") for s in ("autodesk", "pyrevit", "python")], open(sys.argv[3], "w"))' \
+           for b in ("rvt2027-a", "rvt2020-a", "rvt2021-a") for s in ("autodesk", "pyrevit", "python", "ui")], open(sys.argv[3], "w"))' \
     "$MCP_TOKEN" "$MCP_TIER" "$R/mcp/tokens.json"
 }
 run_mcp() { # stdin from $MCP_IN (default: nothing), rest = ./revit arguments; OUT = stdout only, ERR = stderr, RC
@@ -1214,7 +1214,7 @@ reset; bottle rvt2027-a 2027 2027; mcp_cx; fake_revit rvt2027-a 2027; run_mcp mc
 check "mcp: not installed → the install command" eval '[ "$RC" != 0 ] && grep -qF "Install it: ./revit addins 2027 --only revitmcp --accept-eula revitmcp" <<<"$ERR" && mcp_stdout_empty'
 reset; bottle rvt2027-a 2027 2027; run_mcp status --write; check "--write on another command" eval '[ "$RC" != 0 ] && grep -qx "Unknown option: --write" <<<"$ERR"'
 reset; run_mcp mcp 2027 rvt2027-a extra; check "mcp: extra arguments" eval '[ "$RC" != 0 ] && grep -q "Too many arguments" <<<"$ERR" && mcp_stdout_empty'
-reset; run "" --help; check "mcp is in the help" grep -qF "  mcp       connect an AI assistant to a running Revit (--server pyrevit|python; docs/mcp.md); first give it a token:" <<<"$OUT"
+reset; run "" --help; check "mcp is in the help" grep -qF "  mcp       connect an AI assistant to a running Revit (--server pyrevit|python|ui; docs/mcp.md); first give it a token:" <<<"$OUT"
 for c in "$MCPW|read|--tool-permission=StableReadOnly" "$MCPW|write|--tool-permission=Stable --tool-min-permission=StableReadOnly" \
   "$MCPE|read|--tool-permission=StableReadOnly" "$MCPE|write|--tool-permission=Experimental --tool-min-permission=StableReadOnly"; do
   v="${c%%|*}"; f="$(cut -d'|' -f2 <<<"$c")"; want="${c##*|}"
@@ -1586,6 +1586,33 @@ hit_world; mcp_bg a hittest 2027; mcp_wait '[ -s "$T/mcp-out-a" ]' 100; mcp_wait
 check "hittest: the lock is released once it is ready" lock_is_free
 echo "7 1 2" >&5; mcp_wait 'grep -qx "7 1 2" "$T/mcp-out-a"' 50; check "hittest: requests after the handoff reach it" grep -qx "7 1 2" "$T/mcp-out-a"
 exec 5>&-; wait "$LPID_a"; check "hittest: end of input after the handoff → 0" test "$?" = 0
+# ---- ./revit mcp --server ui: tools/ui_server.py and uibridge.exe (played by hit_cx, whose wine echoes) ----
+ui_shim() { mkdir -p "$R/build/uibridge"; echo "fake uibridge.exe" > "$R/build/uibridge/uibridge.exe"; }
+ui_world() { reset; bottle rvt2027-a 2027 2027; ui_shim; hit_cx; fake_revit rvt2027-a 2027; REVITP=$!; }
+ui_server_alive() { sandboxed 'revit-macos-ui-server'; }
+ui_bridge_alive() { sandboxed 'revit-uibridge\.'; }
+UI_INIT='{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocolVersion":"2099-01-01"}}'
+reset; run_mcp mcp 2027 --server nonsense
+check "ui: named among the servers" eval '[ "$RC" != 0 ] && grep -q "Known: autodesk, pyrevit, python, ui" <<<"$ERR"'
+reset; ui_shim; hit_cx; run_mcp mcp 2027 --server ui
+check "ui: no bottle → refused, stdout empty" eval '[ "$RC" != 0 ] && grep -q "There is no bottle rvt2027-a" <<<"$ERR" && mcp_stdout_empty'
+reset; bottle rvt2027-a 2027 2027; ui_shim; hit_cx; run_mcp mcp 2027 --server ui
+check "ui: no Revit → open Revit first, wine never started" eval '[ "$RC" != 0 ] && grep -q "Open Revit 2027 first" <<<"$ERR" && mcp_stdout_empty && [ ! -e "$T/hit-argv" ]'
+ui_world; rm -rf "$R/build/uibridge"; run_mcp mcp 2027 --server ui
+check "ui: no uibridge.exe → how to get it, wine never started" eval '[ "$RC" != 0 ] && grep -q "build-shims.sh uibridge" <<<"$ERR" && mcp_stdout_empty && [ ! -e "$T/hit-argv" ]'
+ui_world; printf '%s\n' "$UI_INIT" > "$T/in"; MCP_IN="$T/in"; run_mcp mcp 2027 --server ui
+check "ui: stdout is the MCP answer alone" eval '[ "$RC" = 0 ] && [ "$(wc -l <<<"$OUT" | tr -d " ")" = 1 ] && grep -qE "\"protocolVersion\": ?\"2099-01-01\"" <<<"$OUT"'
+check "ui: the shim by its Mac path, --ready, the year" eval '[ "$(sed -n 1p "$T/hit-argv")" = "$R/build/uibridge/uibridge.exe" ] && [ "$(sed -n 2p "$T/hit-argv")" = --ready ] && sed -n 3p "$T/hit-argv" | grep -q "revit-uibridge\." && [ "$(sed -n 4p "$T/hit-argv")" = 2027 ]'
+check "ui: neither the lock (fd 9) nor fd 8 reaches it" eval '! grep -qx -e FD9 -e FD8 "$T/hit-argv"'
+check "ui: nothing left after the client went" eval 'mcp_wait "! ui_server_alive && ! ui_bridge_alive" 50'
+ui_world; mcp_bg a mcp 2027 --server ui; mcp_wait ui_bridge_alive 100; mcp_wait lock_is_free 50
+check "ui: the lock is free once it runs" lock_is_free
+check "ui: the server is marked with the bottle" eval 'o="$(ps -axww -o command=)"; grep -qF "revit-macos-ui-server $(cd "$BOTTLES/rvt2027-a" && pwd -P) " <<<"$o"'
+run_mcp stop 2027; check "ui: ./revit stop ends the server and the bridge" eval '[ "$RC" = 0 ] && mcp_wait "! ui_server_alive && ! ui_bridge_alive" 50'
+exec 5>&-; wait "$LPID_a" 2>/dev/null
+ui_world; mcp_bg a mcp 2027 --server ui; mcp_wait ui_bridge_alive 100; stop_fakes; run_mcp rebuild 2027 --yes
+check "ui: a connected server keeps rebuild away" eval '[ "$RC" != 0 ] && grep -q "An AI assistant is using Revit 2027" <<<"$ERR"'
+exec 5>&-; wait "$LPID_a" 2>/dev/null; mcp_wait "! ui_server_alive" 50
 hit_world; fake_lock "install.sh 2025 rvt2025-a"; locker=$!; run_mcp hittest 2027
 check "hittest: lock busy → 75 at once, wine never started" eval '[ "$RC" = 75 ] && grep -q "Another task is running" <<<"$ERR" && [ ! -e "$T/hit-argv" ]'
 run_mcp hittest 2027; check "hittest: still busy → 75 again" test "$RC" = 75

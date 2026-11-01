@@ -3,20 +3,21 @@
 # a bottle, through Autodesk's Revit MCP Server (scripts/addins/revitmcp.sh) or pyRevit's agent (pyrevit.exe mcp), and
 # our launcher mcphost.exe (tools/shims/mcphost; --plain for pyRevit, which finds Revit without the pipe listing). The MCP
 # client starts this command and talks to the server over stdin/stdout, so stdout carries MCP only: everything of this
-# script goes to stderr. Exit code: the server's. docs/mcp.md is the how-to.
+# script goes to stderr. Exit code: the server's. docs/mcp.md is the how-to. --server ui runs tools/ui_server.py on the
+# Mac, and that starts uibridge.exe through scripts/uibridge-launch.sh.
 # The lock is held only while the launcher starts: until mcphost.exe has written its launch confirmation, nothing else
 # may delete or change the bottle; afterwards a running mcphost.exe counts as activity for bottle_guard, as Revit does.
 # On a signal, the deadline or an error, only this connection's own processes are ended (never wineserver -k: Revit and
 # other clients keep running).
-# Usage: scripts/mcp-launch.sh <year> <bottle> <0|1: the tier allows writing> <autodesk|pyrevit|python>
+# Usage: scripts/mcp-launch.sh <year> <bottle> <0|1: the tier allows writing> <autodesk|pyrevit|python|ui>
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/scripts/lib/common.sh"; . "$ROOT/scripts/lib/addins.sh"; . "$ROOT/scripts/lib/shims.sh"
 . "$ROOT/scripts/lib/handoff.sh"
 exec 3>&1 1>&2   # fd 3 = the client's stdout, for the server only
 [ $# = 4 ] && [[ "$1" =~ ^[0-9]{4}$ ]] && { [ "$3" = 0 ] || [ "$3" = 1 ]; } \
-  && { [ "$4" = autodesk ] || [ "$4" = pyrevit ] || [ "$4" = python ]; } \
-  || { echo "Usage: scripts/mcp-launch.sh <year> <bottle> <0|1> <autodesk|pyrevit|python>"; exit 2; }
+  && { [ "$4" = autodesk ] || [ "$4" = pyrevit ] || [ "$4" = python ] || [ "$4" = ui ]; } \
+  || { echo "Usage: scripts/mcp-launch.sh <year> <bottle> <0|1> <autodesk|pyrevit|python|ui>"; exit 2; }
 YEAR="$1"; NAME="$2"; WRITE="$3"; SERVER="$4"; B="$(bottle_path "$NAME")"; SFX="$(bottle_sfx "$NAME" "$YEAR")"
 TOKEN=""; WPID=""; LF=""; PHASE=starting; SEEN=""
 HANDOFF_S="${MCP_HANDOFF_S:-30}"   # how long the launcher may take to confirm (tests shorten it)
@@ -24,6 +25,7 @@ HANDOFF_S="${MCP_HANDOFF_S:-30}"   # how long the launcher may take to confirm (
 checks() { # the bottle, a running Revit, a complete MCP Server install (sets ID, its variant) or pyRevit's agent
   bottle_guard running_ok "$YEAR" "$NAME"
   [ "$SERVER" != python ] || { checks_python; return; }
+  [ "$SERVER" != ui ] || { checks_ui; return; }
   [ "$SERVER" = autodesk ] || { checks_pyrevit; return; }
   addin_load revitmcp; addin_available || die "Autodesk's Revit MCP Server is for Revit ${ADDIN_TESTED[*]} only."
   revit_running "$B" "$YEAR" || die "Open Revit $YEAR with a model first."
@@ -90,6 +92,26 @@ python_status() { # $1 = token: GET /revit_mcp/status/ within PYMCP_STATUS_S (10
     *) die "Unexpected answer from Revit (HTTP $code)." ;;
   esac
 }
+checks_ui() { # a running Revit and uibridge.exe
+  revit_running "$B" "$YEAR" || die "Open Revit $YEAR first."
+  [ -f "$(shim_dir)/uibridge/uibridge.exe" ] || die "There is no $(tilde "$(shim_dir)/uibridge/uibridge.exe"). Build it: ./scripts/build-shims.sh uibridge"
+}
+ui_revit_pid() { # the one Revit.exe of this bottle: revit_pids also lists the CrossOver loader that started it
+  local p pids=()
+  for p in $(revit_pids "$B" "$YEAR"); do
+    ps -o command= -p "$p" 2>/dev/null | grep -q winewrapper || pids+=("$p")
+  done
+  [ ${#pids[@]} = 1 ] || die "More than one Revit $YEAR runs in $NAME."
+  echo "${pids[0]}"
+}
+ui_launch() { # under the lock, after checks: exec the marked server with the lock (fd 9): it closes fd 9 before it
+  # starts the bridge, whose launcher takes the lock itself; from here the server keeps the bottle guarded
+  local rb pid bridge
+  rb="$(cd "$B" && pwd -P)"; pid="$(ui_revit_pid)" || exit 1
+  bridge="$(printf '%q %q %q' "$ROOT/scripts/uibridge-launch.sh" "$YEAR" "$NAME")"
+  exec python3 -I -B "$ROOT/tools/ui_server.py" revit-macos-ui-server "$rb" --year "$YEAR" --revit-pid "$pid" --write "$WRITE" \
+    --lock-fd 9 --bridge "$bridge" >&3 3>&- 7>&- 8>&-
+}
 python_launch() { # under the lock, after checks: dpapi.exe, the token, the status, then exec the marked wrapper with
   # the token on a pipe (fd 4) and the lock (fd 9): the wrapper closes fd 9 once it runs, so the bottle is never
   # unguarded between the two
@@ -110,6 +132,7 @@ trap 'on_signal INT 130' INT; trap 'on_signal TERM 143' TERM; trap 'on_signal HU
 lock_take --no-trap "./revit mcp $YEAR $NAME"
 checks   # again, under the lock: the bottle or Revit may have changed meanwhile
 [ "$SERVER" != python ] || python_launch
+[ "$SERVER" != ui ] || ui_launch
 if [ "$SERVER" = pyrevit ]; then why="$(plain_host_ensure)" || die "Cannot get mcphost.exe: $why"; fi
 
 TOKEN="revit-mcp-$(uuidgen | tr 'A-Z' 'a-z')"

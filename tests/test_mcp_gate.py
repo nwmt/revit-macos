@@ -547,5 +547,23 @@ class Bundle(World):
         self.assertNotEqual(a["display_name"], b["display_name"])
 
 
+class UiServer(unittest.TestCase):
+    def test_tiers(self):
+        for name in "ui_state ui_dialog ui_tree ui_screenshot ui_commands".split():
+            self.assertTrue(gate.tool_allowed("ui", "read", name), name)
+        for name in "run_command press_button set_text click".split():
+            self.assertFalse(gate.tool_allowed("ui", "read", name), name)
+            self.assertTrue(gate.tool_allowed("ui", "write", name), name)
+        self.assertFalse(gate.tool_allowed("ui", "write", "run_file_command"))
+        self.assertTrue(gate.tool_allowed("ui", "code", "run_file_command"))
+
+    def test_an_unknown_tool_is_hidden_below_code(self):
+        self.assertFalse(gate.tool_allowed("ui", "write", "something_new"))
+
+    def test_every_tier_can_be_issued(self):
+        for tier in gate.TIERS:
+            self.assertIsNone(gate.tier_problem("ui", tier, False))
+
+
 if __name__ == "__main__":
     unittest.main()

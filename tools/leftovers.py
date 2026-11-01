@@ -44,6 +44,7 @@ LIBC = ctypes.CDLL(None, use_errno=True)
 TRACKPAD = re.compile(r"/Contents/Helpers/[^/]+ Trackpad\.app/Contents/MacOS/[^/]+ Trackpad$")   # <App> Trackpad
 REVIT = re.compile(r"(^|\\)Revit\.exe$", re.I)   # argv[0] of Revit, as Wine sets it
 PYMCP = "revit-macos-python-mcp"
+UI_SERVER = "revit-macos-ui-server"
 MCP_GATE = "revit-macos-mcp-gate"
 SZOMB = 5
 
@@ -163,7 +164,7 @@ def parent_gone(p, started):
             return False   # not ours to judge
         got = started(int(pid)) if pid.isdigit() else None
         return got is None or int(got // 1000000) != int(want)
-    return (PYMCP in p["argv"] or MCP_GATE in p["argv"]) and p["ppid"] == 1
+    return (PYMCP in p["argv"] or UI_SERVER in p["argv"] or MCP_GATE in p["argv"]) and p["ppid"] == 1
 
 
 def name_of(p):
@@ -171,6 +172,8 @@ def name_of(p):
         return "gdrive.py warm"
     if PYMCP in p["argv"]:
         return "python MCP server"
+    if UI_SERVER in p["argv"]:
+        return "MCP server"
     if MCP_GATE in p["argv"]:
         return "MCP gate"
     a0 = p["argv"][0] if p["argv"] else ""

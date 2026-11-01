@@ -283,6 +283,57 @@ class Tree(Case):
         self.assertEqual(len([c for c in self.b.calls if c[0] == "tree"]), 1)
 
 
+class Fields(Case):
+    """Everything a client sends ends up in a line to the bridge: one field must stay one field."""
+
+    def bridge(self):
+        class Pipe:
+            data = b""
+
+            def write(self, b):
+                Pipe.data += b
+
+        b = ui_server.Bridge.__new__(ui_server.Bridge)
+        b.proc = type("P", (), {"stdin": Pipe()})()
+        b.lock, b.seq, b.buf = ui_server.threading.Lock(), 0, b""
+        return b, Pipe
+
+    def test_a_line_break_in_a_field_never_reaches_the_bridge(self):
+        b, pipe = self.bridge()
+        for bad in ("aa\n2\tcommand\t1", "aa\tx", "aa\rb", "aa\0"):
+            with self.assertRaises(ValueError):
+                b.press(bad)
+        self.assertEqual(pipe.data, b"")
+
+    def test_a_hwnd_is_hexadecimal(self):
+        b, pipe = self.bridge()
+        with self.assertRaises(ValueError):
+            b.press("xyz")
+        self.assertEqual(pipe.data, b"")
+
+    def test_a_tree_only_of_a_window_that_is_there(self):
+        self.assertEqual(self.call("ui_tree", hwnd="dead")["status"], "refused")
+        self.assertEqual(self.b.calls, [])
+
+    def test_an_unknown_kind_of_click_is_refused(self):
+        self.srv.call("ui_screenshot", {})
+        self.assertEqual(self.call("click", window="aa", x=1, y=1, kind="left\t1")["status"], "refused")
+        self.assertEqual(self.b.calls, [])
+
+    def test_a_long_wait_is_cut(self):
+        self.table()
+        self.t0 = self.t
+        self.call("run_command", id="ID_FAKE_WALL", wait_s=100000)
+        self.assertLess(self.t - self.t0, 90)
+
+    def test_a_wait_that_is_no_number(self):
+        self.table()
+        got = self.srv.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                               "params": {"name": "run_command", "arguments": {"id": "ID_FAKE_WALL", "wait_s": "nan"}}})
+        self.assertTrue(got["result"]["isError"])
+        self.assertEqual(self.b.calls, [])
+
+
 class Click(Case):
     def shot(self):
         r = self.srv.call("ui_screenshot", {})
