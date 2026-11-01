@@ -361,9 +361,9 @@ static DWORD WINAPI tree_thread(void *unused)
             if (why) finish(job.seq, "error", why);
             else { head(job.seq, "ok"); say("\t"); num(count); say(job.partial ? "\tpartial\n" : "\tcomplete\n"); }
         }
+        SetEvent(job.done);   /* before the slot is free: do_tree resets it for the next walk, under this lock */
         job.busy = 0;
         LeaveCriticalSection(&lock);
-        SetEvent(job.done);
     }
     return 0;
 }
