@@ -271,6 +271,24 @@ class Dialogs(Case):
         self.assertEqual(self.call("set_text", dialog="bb", field="e1", text="a\tb")["status"], "refused")
 
 
+class PressResult(Case):
+    def test_the_answer_says_whether_the_dialog_is_still_open(self):
+        self.b.s["dialogs"] = [Dialogs.WIN32]
+        self.b.controls = [{"hwnd": "b1", "cls": "Button", "text": "OK", "enabled": True}]
+        self.assertTrue(self.call("press_button", dialog="bb", button="OK")["dialog_open"])
+
+    def test_a_dialog_that_closed(self):
+        self.b.s["dialogs"] = [Dialogs.WIN32]
+        self.b.controls = [{"hwnd": "b1", "cls": "Button", "text": "OK", "enabled": True}]
+        press = self.b.press
+
+        def closing(h):
+            self.b.s["dialogs"] = []
+            return press(h)
+        self.b.press = closing
+        self.assertFalse(self.call("press_button", dialog="bb", button="OK")["dialog_open"])
+
+
 class Tree(Case):
     def test_defaults(self):
         self.call("ui_tree")
@@ -346,6 +364,18 @@ class Click(Case):
         self.assertEqual((got["width"], got["height"]), (1500, 1000))
         self.assertEqual(self.call("click", window="aa", x=150, y=100)["status"], "ok")
         self.assertEqual(self.b.calls[-1], ("click", "aa", 310, 220, "left"))
+
+    def test_a_dialog_pictured_with_its_parent_maps_through_the_parent(self):
+        self.b.s["dialogs"] = [dict(Dialogs.WIN32, hwnd="bb", rect=(1000, 500, 1600, 1100))]
+        self.srv.call("ui_screenshot", {"hwnd": "bb"})   # the picture is 3:2, as the main window; the dialog is square
+        self.assertEqual(self.call("click", window="bb", x=750, y=500)["status"], "ok")
+        self.assertEqual(self.b.calls[-1], ("click", "bb", 1510, 1020, "left"))
+
+    def test_the_dialog_moved_since_the_picture_with_its_parent(self):
+        self.b.s["dialogs"] = [dict(Dialogs.WIN32, hwnd="bb", rect=(1000, 500, 1600, 1100))]
+        self.srv.call("ui_screenshot", {"hwnd": "bb"})
+        self.b.s["dialogs"] = [dict(Dialogs.WIN32, hwnd="bb", rect=(900, 500, 1500, 1100))]
+        self.assertEqual(self.call("click", window="bb", x=750, y=500)["status"], "refused")
 
     def test_no_picture_no_click(self):
         self.assertEqual(self.call("click", window="aa", x=1, y=1)["status"], "refused")

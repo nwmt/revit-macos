@@ -221,6 +221,31 @@ class Plain(Case):
         self.assertTrue(self.r.run(X, 10)["overlapped"])
 
 
+    def test_a_palette_greyed_by_the_commands_dialog_is_not_overlap(self):
+        palette = {"hwnd": 5, "title": "pyRevit", "enabled": True}
+        self.b.dialogs = [palette]
+        def play(n):
+            self.j.add(X)
+            self.b.dialogs = [dict(palette, enabled=False), {"hwnd": 7, "title": "Its dialog", "enabled": True}]
+        self.b.on_command = play
+        self.assertFalse(self.r.run(X, 10)["overlapped"])
+
+    def test_the_answer_waits_for_the_dialog_the_journal_announced(self):
+        def show():
+            self.b.dialogs = [{"hwnd": 7, "title": "Slow dialog", "enabled": True}]
+        def play(n):
+            self.j.add(X)
+            self.c.after(1.0, show)
+        self.b.on_command = play
+        self.assertEqual(self.r.run(X, 10)["dialogs"][0]["title"], "Slow dialog")
+
+    def test_a_command_without_a_dialog_does_not_wait_long(self):
+        self.echo(X)
+        t0 = self.c.t
+        self.r.run(X, 10)
+        self.assertLess(self.c.t - t0, 2.5)
+
+
 class Barrier(Case):
     def test_nothing_recorded_then_barrier_means_not_run(self):
         self.echo(B)

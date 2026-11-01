@@ -321,8 +321,17 @@ class Server:
                 data = base64.b64encode(f.read()).decode("ascii")
         finally:
             shutil.rmtree(d, ignore_errors=True)
-        self.shots[h] = {"size": (width, height), "rect": tuple(w["rect"])}
+        main = tuple(self.b.state()["rect"])
+        rect = tuple(w["rect"])
+        if self._aspect(rect, width, height) > self._aspect(main, width, height):
+            rect = main     # a dialog that is a child window on the Mac comes in the picture of its parent
+        self.shots[h] = {"size": (width, height), "rect": rect, "window": tuple(w["rect"])}
         return {"status": "ok", "hwnd": h, "width": width, "height": height}, data
+
+    @staticmethod
+    def _aspect(rect, width, height):
+        l, t, r, b = rect
+        return abs((r - l) / max(b - t, 1) - width / max(height, 1))
 
     def ui_commands(self, words):
         t = ui_commands.load(self.cfg.bottle, self.build) if self.build else None
@@ -384,14 +393,21 @@ class Server:
             if not hit:
                 return {"status": "refused", "why": "no such button"}
             l, t, r, b = hit["rect"]
-            return self._click(dialog, (l + r) // 2, (t + b) // 2, "left")
+            return self._after_press(dialog, self._click(dialog, (l + r) // 2, (t + b) // 2, "left"))
         hit = next((c for c in self.b.dialog(dialog) if c["cls"] == "Button" and button in (c["text"].replace("&", ""), c["hwnd"])),
                    None)
         if not hit:
             return {"status": "refused", "why": "no such button"}
         with self.state.locked():
             status, detail = self.b.press(hit["hwnd"])
-        return {"status": status, "detail": detail}
+        return self._after_press(dialog, {"status": status, "detail": detail})
+
+    def _after_press(self, dialog, got):
+        """A press is only sent: the answer says what came of it."""
+        if got["status"] == "ok":
+            self.sleep(1)
+            got["dialog_open"] = bool(self._window(dialog))
+        return got
 
     def set_text(self, dialog, field, text):
         w = self._window(dialog)
@@ -416,7 +432,7 @@ class Server:
         shot, w = self.shots.get(window), self._window(window)
         if not shot:
             return {"status": "refused", "why": "Take ui_screenshot of this window first."}
-        if not w or tuple(w["rect"]) != shot["rect"]:
+        if not w or tuple(w["rect"]) != shot["window"]:
             return {"status": "refused", "why": "The window changed since the picture. Take a new one."}
         try:
             wx, wy = ui_mac.to_wine(x, y, shot["size"][0], shot["size"][1], shot["rect"])

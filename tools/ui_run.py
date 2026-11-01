@@ -22,6 +22,7 @@ import os
 QUIET_S = 20          # no new lines this long: parity() may send
 BARRIER_WAIT_S = 20
 POLL_S = 0.25
+DIALOG_WAIT_S = 1.5   # the journal line comes before the command's dialog is up
 UIA_WAIT_S = 120
 INTERNAL = "Internal"
 
@@ -140,10 +141,17 @@ class Runner:
             return self._wait(d, BARRIER_WAIT_S)
         return True
 
-    def _answer(self, status, cid, previous=None):
+    def _answer(self, status, cid, previous=None, before=()):
         s = self.b.state()
-        got = {"status": status, "id": cid, "dialogs": s["dialogs"], "overlapped": any(not x["enabled"] for x in s["dialogs"]),
-               "other_activity": self.activity}
+        new = [x for x in s["dialogs"] if x["hwnd"] not in before]
+        end = self.now() + DIALOG_WAIT_S
+        while status == "ran" and not new and s["enabled"] and self.now() < end:
+            self.sleep(POLL_S)
+            s = self.b.state()
+            new = [x for x in s["dialogs"] if x["hwnd"] not in before]
+        # one dialog is the command's; two new ones, the lower greyed, is a command that went over a dialog just opened
+        got = {"status": status, "id": cid, "dialogs": s["dialogs"],
+               "overlapped": len(new) > 1 and any(not x["enabled"] for x in new), "other_activity": self.activity}
         if previous:
             got["previous"] = previous
         return got
@@ -172,6 +180,7 @@ class Runner:
             if not self._usable(s):
                 self.st.save(d)
                 return self._answer("blocked", cid, previous)
+            before = [x["hwnd"] for x in s["dialogs"]]
             d["pending"] = {"id": cid, "need": max(0, d["sent"] - d["seen"]) + 1, "after": 0, "bridge": list(self.b.pid_start())}
             self.st.save(d)
             sent = self.b.command(n)
@@ -187,7 +196,7 @@ class Runner:
                 return got
             status, d["last"] = d["last"]["status"], None
             self.st.save(d)
-            return self._answer(status, cid, previous)
+            return self._answer(status, cid, previous, before)
 
     def reconcile(self):
         """What is known now. Sends nothing."""
