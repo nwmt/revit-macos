@@ -1,5 +1,5 @@
 --- a/revit_mcp/colors.py	2026-11-01 22:45:53
-+++ b/revit_mcp/colors.py	2026-11-01 22:49:57
++++ b/revit_mcp/colors.py	2026-11-01 23:22:12
 @@ -10,7 +10,7 @@
  from .security import authorize_request
  import random
@@ -37,7 +37,7 @@
          with DB.Transaction(doc, "Clear Element Colors") as t:
              t.Start()
 --- a/revit_mcp/security.py	2026-11-01 22:45:53
-+++ b/revit_mcp/security.py	2026-11-01 22:49:57
++++ b/revit_mcp/security.py	2026-11-01 23:22:12
 @@ -1,10 +1,20 @@
  # -*- coding: utf-8 -*-
  """Authentication and in-Revit review for bridge requests."""
@@ -69,7 +69,7 @@
              return routes.make_response(data={"error": "Invalid request payload."}, status=400)
          warning = "An MCP client requests: {}.\nReview the full request below before allowing it.".format(action)
 --- a/revit_mcp/utils.py	2026-11-01 22:45:53
-+++ b/revit_mcp/utils.py	2026-11-01 22:49:57
++++ b/revit_mcp/utils.py	2026-11-01 23:22:12
 @@ -47,6 +47,14 @@
          return int(element_id.IntegerValue)
  
@@ -86,17 +86,16 @@
      """
      Get the name of a Revit element.
 --- a/revit_mcp/views.py	2026-11-01 22:45:53
-+++ b/revit_mcp/views.py	2026-11-01 22:49:57
-@@ -26,7 +26,7 @@
-     def unquote(s):
-         return Uri.UnescapeDataString(s)
++++ b/revit_mcp/views.py	2026-11-01 23:22:12
+@@ -12,6 +12,7 @@
+ import json
+ import logging
+ from .security import authorize_request
++from .utils import active_graphical_view
+ from System.Collections.Generic import List
  
--from .utils import normalize_string, get_element_name, element_id_value
-+from .utils import normalize_string, get_element_name, element_id_value, active_graphical_view
- 
- logger = logging.getLogger(__name__)
- 
-@@ -328,7 +328,7 @@
+ try:
+@@ -328,7 +329,7 @@
                      data={"error": "No active Revit document"}, status=503
                  )
  
@@ -105,7 +104,7 @@
              if not current_view:
                  return routes.make_response(
                      data={"error": "No active view found"}, status=404
-@@ -416,7 +416,7 @@
+@@ -416,7 +417,7 @@
                      data={"error": "No active Revit document"}, status=503
                  )
  
@@ -115,7 +114,7 @@
                  return routes.make_response(
                      data={"error": "No active view found"}, status=404
 --- a/tools/document_tools.py	2026-11-01 22:45:53
-+++ b/tools/document_tools.py	2026-11-01 22:49:57
++++ b/tools/document_tools.py	2026-11-01 23:22:12
 @@ -65,7 +65,7 @@
              file_path: Optional path for Save As. If omitted, saves in place.
          """
