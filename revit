@@ -79,7 +79,7 @@ Usage: ./revit <command> <year> [bottle]
   debug     start Revit and record a log
   mcp       connect an AI assistant to a running Revit (--server pyrevit|python|ui; docs/mcp.md); first give it a token:
             mcp token <year> [bottle] [--tier read|write|code] [--name n], mcp bundle <year> for Claude Desktop,
-            mcp tokens (list), mcp revoke <name>
+            mcp tokens (list), mcp revoke <name>; mcp commands <year> [bottle] prepares --server ui
   hittest   for the app: the Windows window under a point (stdin/stdout)
   theme     for the app: Revit's theme follows the Mac's light or dark look now
   rebuild   keep a restore point, delete the bottle and install Revit again (--no-point: keep none)
@@ -124,10 +124,10 @@ while [ $# -gt 0 ]; do
   shift
 done
 CMD="${POS[0]:-}"; YEAR_ARG="${POS[1]:-}"; NAME="${POS[2]:-}"
-MCPSUB=""   # ./revit mcp token|bundle|tokens|revoke
+MCPSUB=""   # ./revit mcp token|bundle|tokens|revoke|commands
 if [ "$CMD" = mcp ]; then
   case "$YEAR_ARG" in
-    token|bundle|tokens|revoke) MCPSUB="$YEAR_ARG"; POS=(mcp ${POS[@]+"${POS[@]:2}"}); YEAR_ARG="${POS[1]:-}"; NAME="${POS[2]:-}" ;;
+    token|bundle|tokens|revoke|commands) MCPSUB="$YEAR_ARG"; POS=(mcp ${POS[@]+"${POS[@]:2}"}); YEAR_ARG="${POS[1]:-}"; NAME="${POS[2]:-}" ;;
   esac
 fi
 GPATH=""   # ./revit gdrive warm <year> [bottle] <folder> [--depth N] [--max N]: the folder (WARM_OPTS: the options)
@@ -693,6 +693,10 @@ case "$CMD" in
     echo "Open the folder: open \"$DATA/logs/$NAME\""
     echo "To report a problem, see \"Report a problem\" in docs/troubleshooting.md." ;;
   mcp)
+    if [ "$MCPSUB" = commands ]; then   # the command table of --server ui: docs/mcp.md
+      bottle_guard running_ok "$YEAR" "$NAME"; lock_take "./revit mcp commands $YEAR $NAME"
+      ui_commands_extension "$YEAR" "$NAME"; exit 0
+    fi
     if [ -n "$MCPSUB" ]; then   # a token for a connection: docs/mcp.md
       gate=(--root "$ROOT" --data "$DATA" --year "$YEAR" --bottle "$NAME" --server "$SERVER" --tier "${TIER:-read}")
       [ "$(mcp_installed_variant)" != revitmcp-experimental ] || gate+=(--experimental)

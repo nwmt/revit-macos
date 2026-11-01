@@ -101,3 +101,13 @@ plain_host_ensure() { # our mcphost.exe for --plain in the bottle, equal to $(sh
   cmp -s "$src" "$t" && return 0
   mkdir -p "$(dirname "$t")" && cp "$src" "$t.tmp.$$" && mv -f "$t.tmp.$$" "$t" || { rm -f "$t.tmp.$$"; echo "cannot write $t"; return 1; }
 }
+ui_commands_extension() { # $1 = year, $2 = bottle: puts tools/revitmacos-ui.extension into the bottle's pyRevit; from the
+  # next start of Revit on it writes the command table of each new build (./revit mcp --server ui)
+  local year="$1" name="$2" b ext sfx; b="$(bottle_path "$name")"; sfx="$(bottle_sfx "$name" "$year")"
+  ext="$b/$PYREVIT_CLONE_REL/extensions/revitmacos-ui.extension"
+  [ -d "$b/$PYREVIT_CLONE_REL/extensions" ] || die "pyRevit is not installed in $name. Install it: ./revit addins $year$sfx --only pyrevit"
+  rm -rf "$ext.new"; cp -R "$ROOT/tools/revitmacos-ui.extension" "$ext.new" || die "Cannot write to $(tilde "$ext")."
+  rm -rf "$ext"; mv "$ext.new" "$ext" || die "Cannot write to $(tilde "$ext")."
+  if revit_running "$b" "$year"; then echo "Quit Revit and start it again: it then writes the command table."
+  else echo "The command table appears the next time Revit starts."; fi
+}

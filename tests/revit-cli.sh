@@ -1613,6 +1613,18 @@ exec 5>&-; wait "$LPID_a" 2>/dev/null
 ui_world; mcp_bg a mcp 2027 --server ui; mcp_wait ui_bridge_alive 100; stop_fakes; run_mcp rebuild 2027 --yes
 check "ui: a connected server keeps rebuild away" eval '[ "$RC" != 0 ] && grep -q "An AI assistant is using Revit 2027" <<<"$ERR"'
 exec 5>&-; wait "$LPID_a" 2>/dev/null; mcp_wait "! ui_server_alive" 50
+EXT="drive_c/users/crossover/AppData/Roaming/pyRevit-Master/extensions/revitmacos-ui.extension"
+reset; bottle rvt2027-a 2027 2027; run_mcp mcp commands 2027
+check "commands: no pyRevit → how to install it" eval '[ "$RC" != 0 ] && grep -q "./revit addins 2027 --only pyrevit" <<<"$ERR" && [ ! -e "$BOTTLES/rvt2027-a/$EXT" ]'
+reset; bottle rvt2027-a 2027 2027; bottle rvt2027-b 2027 2027; mkdir -p "$BOTTLES/rvt2027-a/drive_c/users/crossover/AppData/Roaming/pyRevit-Master/extensions" "$BOTTLES/rvt2027-b/drive_c/users/crossover/AppData/Roaming/pyRevit-Master/extensions"
+run_mcp mcp commands 2027 rvt2027-b
+check "commands: the extension in that bottle only, and what happens next" eval '[ "$RC" = 0 ] && [ -f "$BOTTLES/rvt2027-b/$EXT/startup.py" ] && [ ! -e "$BOTTLES/rvt2027-a/$EXT" ] && grep -q "next time Revit starts" <<<"$OUT$ERR"'
+echo old > "$BOTTLES/rvt2027-b/$EXT/startup.py"; touch "$BOTTLES/rvt2027-b/$EXT/stale"; run_mcp mcp commands 2027 rvt2027-b
+check "commands: again replaces it whole" eval '[ "$RC" = 0 ] && grep -q ShortcutsHelper "$BOTTLES/rvt2027-b/$EXT/startup.py" && [ ! -e "$BOTTLES/rvt2027-b/$EXT/stale" ]'
+ui_world; mkdir -p "$BOTTLES/rvt2027-a/drive_c/users/crossover/AppData/Roaming/pyRevit-Master/extensions"; run_mcp mcp commands 2027
+check "commands: with Revit open it says to restart" eval '[ "$RC" = 0 ] && grep -q "Quit Revit and start it again" <<<"$OUT$ERR"'
+reset; run_mcp mcp commands; check "commands: needs a year" eval '[ "$RC" != 0 ]'
+reset; run "" --help; check "commands is in the help" grep -qF "mcp commands <year> [bottle]" <<<"$OUT"
 hit_world; fake_lock "install.sh 2025 rvt2025-a"; locker=$!; run_mcp hittest 2027
 check "hittest: lock busy → 75 at once, wine never started" eval '[ "$RC" = 75 ] && grep -q "Another task is running" <<<"$ERR" && [ ! -e "$T/hit-argv" ]'
 run_mcp hittest 2027; check "hittest: still busy → 75 again" test "$RC" = 75
