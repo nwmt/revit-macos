@@ -170,7 +170,7 @@ check "bundle: no tests, docs, git, app sources or dev-only scripts" [ -z "$extr
 # stdin a terminal, as the command asks; script(1) refuses when stdout is a socket, as it can be under a harness
 in_sandbox env REVIT_DATA="$T/appdata" python3 -I -c 'import os, pty, subprocess, sys
 m, s = pty.openpty(); sys.exit(subprocess.run(sys.argv[1:], stdin=s).returncode)' /bin/bash "$E/revit" mcp token 2027 --server python
-expect "bundle: an MCP token" 0 "claude mcp add revit-2027"
+expect "bundle: an MCP token" 0 "claude mcp add revit-rvt2027-a-python"
 check "bundle: tokens live in the app's data folder, not in the app" eval '[ -f "$T/appdata/mcp/tokens.json" ] && [ ! -e "$E/mcp" ]'
 check "bundle: the shims are release v$SHIMS_VERSION" eval '[ "$(cat "$E/build/.prebuilt")" = "$SHIMS_VERSION" ] && [ -f "$E/build/rvtfix/rvtfix.dll" ]'
 check "bundle: the marker names the app and the tools" eval 'grep -qx "app_name=Test App" "$E/.app-bundle" &&

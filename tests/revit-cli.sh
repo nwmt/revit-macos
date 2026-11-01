@@ -1341,7 +1341,7 @@ check "mcp without a token → the command to get one, wine never started" eval 
 mcp_world; run_mcp mcp 2027; check "a session is in the log of its bottle" eval 'grep -q "\"event\": \"session_end\"" "$R/mcp/audit/rvt2027-a.jsonl" && ! grep -q "$MCP_TOKEN" "$R/mcp/audit/rvt2027-a.jsonl"'
 mcp_world; run_mcp mcp token 2027; check "mcp token without a terminal → refused" eval '[ "$RC" = 1 ] && grep -qF "Run this in Terminal" <<<"$ERR"'
 mcp_world; (cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" script -q /dev/null /bin/bash "$R/revit" mcp token 2027 --tier write --name mine </dev/null >"$T/tok" 2>&1)
-check "mcp token in a terminal: shown once, with the command to connect" eval 'grep -qF "tier write" "$T/tok" && grep -qF "claude mcp add revit-2027 -e REVIT_MCP_TOKEN=" "$T/tok" && grep -q "\"name\": \"mine\"" "$R/mcp/tokens.json"'
+check "mcp token in a terminal: shown once, with the command to connect" eval 'grep -qF "tier write" "$T/tok" && grep -qF "claude mcp add revit-rvt2027-a-autodesk -e REVIT_MCP_TOKEN=" "$T/tok" && grep -q "\"name\": \"mine\"" "$R/mcp/tokens.json"'
 cp "$R/mcp/tokens.json" "$T/keep"; mcp_cli() { (cd / && env "${CLEAN_ENV[@]}" HOME="$H" REVIT_CX="$CXF" /bin/bash "$R/revit" "$@" </dev/null >"$T/mcp-out" 2>"$T/mcp-err"); RC=$?; OUT="$(cat "$T/mcp-out")"; ERR="$(cat "$T/mcp-err")"; }
 mcp_cli mcp tokens; check "mcp tokens lists without secrets" eval 'grep -q "^mine" <<<"$OUT" && ! grep -q sha256 <<<"$OUT"'
 mcp_cli mcp tokens extra; check "mcp tokens: no extra arguments" eval '[ "$RC" != 0 ] && grep -q "Too many arguments" <<<"$ERR"'

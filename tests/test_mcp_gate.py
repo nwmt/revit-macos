@@ -171,7 +171,7 @@ class Tokens(World):
         self.assertEqual(gate.load_tokens(self.data), [])
         r = self.run_cli(*a, tty=True)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("claude mcp add", r.stdout)
+        self.assertIn("claude mcp add revit-rvt2027-a-python -e", r.stdout)   # each server its own name
         self.assertEqual(gate.load_tokens(self.data)[0]["tier"], "write")
         r = self.run_cli("token-list", "--data", self.data, tty=False)
         self.assertIn("rvt2027-a-python-write", r.stdout)

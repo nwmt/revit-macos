@@ -593,6 +593,10 @@ def serve(a):
 
 
 # ---- commands ----
+def registration_name(a):
+    return "revit-%s-%s" % (a.bottle.lower(), a.server)
+
+
 def show_token(value, a, name):
     args = "%s %s --server %s" % (a.year, a.bottle, a.server)
     print("Token %s (%s, tier %s). It is shown once:\n\n  %s\n" % (name, a.bottle, a.tier, value))
@@ -607,8 +611,8 @@ def token_create(a):
     name = a.name or "%s-%s-%s" % (a.bottle, a.server, a.tier)
     value = create_token(a.data, name, a.year, a.bottle, a.server, a.tier)
     args = show_token(value, a, name)
-    print("Claude Code:\n\n  claude mcp add revit-%s -e %s=%s -- %s mcp %s\n"
-          % (a.year, TOKEN_ENV, value, shlex.quote(os.path.join(a.root, "revit")), args))
+    print("Claude Code:\n\n  claude mcp add %s -e %s=%s -- %s mcp %s\n"
+          % (registration_name(a), TOKEN_ENV, value, shlex.quote(os.path.join(a.root, "revit")), args))
 
 
 def token_list(a):
@@ -632,7 +636,7 @@ def token_revoke(a):
 def manifest(a):
     return {
         "manifest_version": "0.3",
-        "name": "revit-%s-%s" % (a.bottle.lower(), a.server),
+        "name": registration_name(a),
         "display_name": "Revit %s, %s (%s)" % (a.year, a.bottle, a.server),
         "version": "1.0.0",
         "description": "Connects Claude to Revit %s in bottle %s on this Mac." % (a.year, a.bottle),
