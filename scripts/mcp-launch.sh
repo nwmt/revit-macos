@@ -96,14 +96,6 @@ checks_ui() { # a running Revit and uibridge.exe
   revit_running "$B" "$YEAR" || die "Open Revit $YEAR first."
   [ -f "$(shim_dir)/uibridge/uibridge.exe" ] || die "There is no $(tilde "$(shim_dir)/uibridge/uibridge.exe"). Build it: ./scripts/build-shims.sh uibridge"
 }
-ui_revit_pid() { # the one Revit.exe of this bottle: revit_pids also lists the CrossOver loader that started it
-  local p pids=()
-  for p in $(revit_pids "$B" "$YEAR"); do
-    ps -o command= -p "$p" 2>/dev/null | grep -q winewrapper || pids+=("$p")
-  done
-  [ ${#pids[@]} = 1 ] || die "More than one Revit $YEAR runs in $NAME."
-  echo "${pids[0]}"
-}
 ui_launch() { # under the lock, after checks: exec the marked server with the lock (fd 9): it closes fd 9 before it
   # starts the bridge, whose launcher takes the lock itself; from here the server keeps the bottle guarded
   local rb pid bridge

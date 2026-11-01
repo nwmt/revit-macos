@@ -111,3 +111,25 @@ ui_commands_extension() { # $1 = year, $2 = bottle: puts tools/revitmacos-ui.ext
   if revit_running "$b" "$year"; then echo "Quit Revit and start it again: it then writes the command table."
   else echo "The command table appears the next time Revit starts."; fi
 }
+ui_revit_pid() { # the one Revit.exe of this bottle: revit_pids also lists the CrossOver loader that started it
+  local p pids=()
+  for p in $(revit_pids "$B" "$YEAR"); do
+    ps -o command= -p "$p" 2>/dev/null | grep -q winewrapper || pids+=("$p")
+  done
+  [ ${#pids[@]} = 1 ] || die "More than one Revit $YEAR runs in $NAME."
+  echo "${pids[0]}"
+}
+agent_view() { # B, YEAR, NAME: gives the running Revit a bundle ID. Computer use tools list apps by it, and Revit under Wine
+  # has none. Only this process has it, until it ends; no file changes
+  local pid asn id="local.revit-macos.revit-live-$NAME"
+  revit_running "$B" "$YEAR" || die "Open Revit $YEAR first."
+  pid="$(ui_revit_pid)" || exit 1
+  asn="$(lsappinfo find "pid=$pid")"
+  [ -n "$asn" ] || die "Could not find Revit in Launch Services."
+  lsappinfo setinfo "$asn" "CFBundleIdentifier=$id" || die "Could not give Revit its ID."
+  case "$(lsappinfo info -only bundleid "$asn")" in
+    *"\"$id\""*) ;;
+    *) die "Could not give Revit its ID." ;;
+  esac
+  echo "Revit is now visible to computer use tools as $id, until it quits."
+}

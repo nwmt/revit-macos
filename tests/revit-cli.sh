@@ -1613,6 +1613,30 @@ exec 5>&-; wait "$LPID_a" 2>/dev/null
 ui_world; mcp_bg a mcp 2027 --server ui; mcp_wait ui_bridge_alive 100; stop_fakes; run_mcp rebuild 2027 --yes
 check "ui: a connected server keeps rebuild away" eval '[ "$RC" != 0 ] && grep -q "An AI assistant is using Revit 2027" <<<"$ERR"'
 exec 5>&-; wait "$LPID_a" 2>/dev/null; mcp_wait "! ui_server_alive" 50
+# ---- ./revit agent-view: lsappinfo played by a script that records its calls ----
+av_world() { # $1 = what lsappinfo find prints
+  mkdir -p "$T/avbin"; cat > "$T/avbin/lsappinfo" <<EOF
+#!/bin/bash
+echo "\$*" >> "$T/av-calls"
+case "\$1" in
+  find) echo "$1" ;;
+  setinfo) [ ! -e "$T/av-fail" ] || exit 1 ;;
+  info) echo '    bundleID="local.revit-macos.revit-live-rvt2027-a"' ;;
+esac
+EOF
+  chmod +x "$T/avbin/lsappinfo"; rm -f "$T/av-calls" "$T/av-fail"; MCP_ENV=(PATH="$T/avbin:$PATH")
+}
+reset; bottle rvt2027-a 2027 2027; av_world "ASN:0x0-0x1:"; run_mcp agent-view 2027; MCP_ENV=()
+check "agent-view: no Revit → refused, nothing set" eval '[ "$RC" != 0 ] && grep -q "Open Revit 2027 first" <<<"$ERR" && ! grep -q setinfo "$T/av-calls" 2>/dev/null'
+ui_world; av_world "ASN:0x0-0x1:"; run_mcp agent-view 2027; MCP_ENV=()
+check "agent-view: the id goes to the ASN of this bottle's Revit" eval '[ "$RC" = 0 ] && grep -qx "setinfo ASN:0x0-0x1: CFBundleIdentifier=local.revit-macos.revit-live-rvt2027-a" "$T/av-calls"'
+check "agent-view: it finds Revit by PID, not by name" grep -q "^find pid=[0-9]*$" "$T/av-calls"
+check "agent-view: says the id" eval 'grep -q "local.revit-macos.revit-live-rvt2027-a" <<<"$OUT"'
+ui_world; av_world ""; run_mcp agent-view 2027; MCP_ENV=()
+check "agent-view: no ASN → refused, nothing set" eval '[ "$RC" != 0 ] && ! grep -q setinfo "$T/av-calls"'
+ui_world; av_world "ASN:0x0-0x1:"; touch "$T/av-fail"; run_mcp agent-view 2027; MCP_ENV=()
+check "agent-view: lsappinfo fails → refused" eval '[ "$RC" != 0 ] && grep -q "Could not" <<<"$ERR"'
+reset; run "" --help; check "agent-view is in the help" grep -q "^  agent-view " <<<"$OUT"
 EXT="drive_c/users/crossover/AppData/Roaming/pyRevit-Master/extensions/revitmacos-ui.extension"
 reset; bottle rvt2027-a 2027 2027; run_mcp mcp commands 2027
 check "commands: no pyRevit → how to install it" eval '[ "$RC" != 0 ] && grep -q "./revit addins 2027 --only pyrevit" <<<"$ERR" && [ ! -e "$BOTTLES/rvt2027-a/$EXT" ]'

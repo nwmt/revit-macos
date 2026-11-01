@@ -80,6 +80,7 @@ Usage: ./revit <command> <year> [bottle]
   mcp       connect an AI assistant to a running Revit (--server pyrevit|python|ui; docs/mcp.md); first give it a token:
             mcp token <year> [bottle] [--tier read|write|code] [--name n], mcp bundle <year> for Claude Desktop,
             mcp tokens (list), mcp revoke <name>; mcp commands <year> [bottle] prepares --server ui
+  agent-view  make the running Revit visible to computer use tools, until it quits (docs/mcp.md)
   hittest   for the app: the Windows window under a point (stdin/stdout)
   theme     for the app: Revit's theme follows the Mac's light or dark look now
   rebuild   keep a restore point, delete the bottle and install Revit again (--no-point: keep none)
@@ -228,7 +229,7 @@ case "$MCPSUB" in   # no year, no bottle to check
     exec python3 -I -B "$ROOT/tools/mcp_gate.py" token-revoke --data "$DATA" --name "$YEAR_ARG" ;;
 esac
 case "$CMD" in
-  install|check|doctor|report|addins|import|cache|stop|cleanup|logs|debug|recent|rebuild|update|remove|status|find-installer|link-installer|test|mcp|set|hittest|theme|gdrive|rollback|points|open|start) ;;
+  install|check|doctor|report|addins|import|cache|stop|cleanup|logs|debug|recent|rebuild|update|remove|status|find-installer|link-installer|test|mcp|agent-view|set|hittest|theme|gdrive|rollback|points|open|start) ;;
   ""|help|-h|--help) usage; exit 0 ;;
   *) echo "Unknown command: $CMD" >&2; echo >&2; usage >&2; exit 1 ;;
 esac
@@ -709,6 +710,7 @@ case "$CMD" in
     need_crossover
     exec python3 -I -B "$ROOT/tools/mcp_gate.py" serve revit-macos-mcp-gate "$(cd "$B" 2>/dev/null && pwd -P || echo "$B")" \
       --root "$ROOT" --data "$DATA" --year "$YEAR" --bottle "$NAME" --server "$SERVER" --policy "$(pyrevit_agent_policy)" ;;
+  agent-view) need_crossover; bottle_guard running_ok "$YEAR" "$NAME"; agent_view ;;
   hittest) need_crossover; exec "$ROOT/scripts/hittest-launch.sh" "$YEAR" "$NAME" ;;
   theme) need_crossover; exec "$ROOT/scripts/theme-launch.sh" "$YEAR" "$NAME" ;;
   gdrive)   # lists folders ahead (tools/gdrive.py): Mac files only, no Wine, no lock; Revit may be open
