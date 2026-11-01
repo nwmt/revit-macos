@@ -16,12 +16,12 @@ class Bridge:
     def __init__(self):
         self.s = dict(MAIN)
         self.calls, self.controls, self.nodes, self.reply = [], [], [], "posted"
-        self.tree_status, self.back = "complete", None
+        self.tree_status, self.back, self.rects = "complete", None, []
 
     def state(self):
         return dict(self.s)
 
-    def command(self, n):
+    def command(self, n, expires):
         self.calls.append(("command", n))
         return self.reply
 
@@ -45,8 +45,9 @@ class Bridge:
         self.s["dialogs"] = []
         return "ok", "closed"
 
-    def click(self, h, x, y, kind):
+    def click(self, h, x, y, kind, rect):
         self.calls.append(("click", h, x, y, kind))
+        self.rects.append(rect)
         return "ok", "restored"
 
     def pid_start(self):
@@ -114,7 +115,7 @@ class Case(unittest.TestCase):
         return json.loads(r[0]["text"])
 
     def ran(self, cid):
-        def command(n):
+        def command(n, expires):
             self.b.calls.append(("command", n))
             self.log('  Jrn.Command "Internal"  , "x , %s" \n' % cid)
             return "posted"
@@ -407,6 +408,30 @@ class Click(Case):
         self.b.s["dialogs"] = [dict(Dialogs.WIN32, hwnd="bb", rect=(900, 500, 1500, 1100))]
         self.assertEqual(self.call("click", window="bb", x=750, y=500)["status"], "refused")
 
+    def test_the_window_moves_while_the_click_waits_for_a_person(self):
+        self.shot()
+        self.m.idle = 0.0
+        self.t0 = self.t
+
+        def idle():
+            if self.t - self.t0 >= 1:
+                self.b.s["rect"] = (50, 20, 3050, 2020)
+                return 60.0
+            return 0.0
+        self.m.idle_seconds = idle
+        self.assertEqual(self.call("click", window="aa", x=1, y=1)["status"], "refused")
+        self.assertEqual(self.b.calls, [])
+
+    def test_another_window_with_the_same_handle_and_size(self):
+        self.shot()
+        self.b.s["title"] = "Autodesk Revit 2099 - [b.rvt]"
+        self.assertEqual(self.call("click", window="aa", x=1, y=1)["status"], "refused")
+
+    def test_the_bridge_checks_the_same_rectangle_at_the_last_moment(self):
+        self.shot()
+        self.call("click", window="aa", x=1, y=1)
+        self.assertEqual(self.b.rects, [(10, 20, 3010, 2020)])
+
     def test_no_picture_no_click(self):
         self.assertEqual(self.call("click", window="aa", x=1, y=1)["status"], "refused")
 
@@ -455,12 +480,37 @@ class Close(Case):
         self.table()
         self.log('  Jrn.Command "Internal"  , " , ID_TOGGLE_ALLOW_PINNED_SELECTION" \n')
         self.srv.call("ui_state", {})
-        self.t += 100
         self.srv.close()
         self.assertEqual(self.b.calls, [("command", 1004)])
 
 
 class Main(unittest.TestCase):
+    def start(self, d, fake, pid):
+        tool = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "ui_server.py")
+        return subprocess.run([sys.executable, "-I", "-B", tool, "revit-macos-ui-server", d, "--year", "2099", "--revit-pid", str(pid),
+                               "--write", "0", "--bridge", fake], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, timeout=20)
+
+    def test_no_such_revit(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d)
+        got = self.start(d, "/bin/false", 99999)
+        self.assertNotEqual(got.returncode, 0)
+        self.assertIn(b"Revit", got.stderr)
+
+    def test_a_revit_that_ended_while_the_bridge_started(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d)
+        # not a child of this test: a killed child stays a zombie, with its start time, until it is waited for
+        pid = int(subprocess.check_output(["/bin/sh", "-c", "/bin/sleep 30 >/dev/null 2>&1 & echo $!"]))
+        fake = os.path.join(d, "bridge")
+        with open(fake, "w") as f:
+            f.write('#!/bin/sh\nkill %d\nsleep 0.5\necho "hello 1 0 0 1 1"\nsleep 5\n' % pid)
+        os.chmod(fake, 0o755)
+        got = self.start(d, fake, pid)
+        self.assertNotEqual(got.returncode, 0)
+        self.assertIn(b"Revit", got.stderr)
+
     def test_the_lock_fd_is_closed_before_the_bridge_starts(self):
         d = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, d)

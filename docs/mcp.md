@@ -269,7 +269,7 @@ It reads about 7 elements a second and may answer `busy`, for example on the Hom
 | Status | Meaning |
 |---|---|
 | `ran` | Revit's journal shows the command |
-| `not_run` | Revit did not run it: it is not available here. This takes about 10 seconds, and it briefly flips Select Pinned Elements and back to prove it |
+| `not_run` | Revit did not run it: it is not available here. This takes about 12 seconds. To prove it, Select Pinned Elements is flipped, and flipped back before the next command or when the connection ends |
 | `blocked` | A dialog is open or Revit does not answer. Nothing was sent |
 | `unconfirmed`, `pending` | Not known yet: the command may be in Revit's queue. Do not repeat it. No other command goes out until it is settled or Revit quits |
 

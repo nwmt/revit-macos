@@ -22,7 +22,9 @@
  *                         ok <main hwnd or 0> <title> <enabled> <responds> <rect>
  *   dialog <hwnd>         + <hwnd> <class> <text> <enabled> <visible> <rect> for each control, then ok <hwnd> <title>;
  *                         a WPF window answers as tree <hwnd> 7 200
- *   command <id>          WM_COMMAND to the main window, if it is enabled and answers: ok posted, else blocked <why>
+ *   command <id> <expires> WM_COMMAND to the main window, if it is enabled and answers: ok posted, else blocked <why>.
+ *                         expires: milliseconds since 1970. After it the command is refused: a process that stood still
+ *                         must not post what its server has already given up on
  *   press <hwnd>          BM_CLICK to a button of Revit: ok pressed
  *   settext <hwnd> <text> WM_SETTEXT to an Edit of Revit: ok <the text read back>
  *   close <hwnd>          WM_CLOSE to a dialog of Revit, not the main window: ok closed
@@ -30,9 +32,9 @@
  *                         UI Automation: + <depth> <control type> <name> <automation id> <class> <enabled> <rect> for each
  *                         element, then ok <count> complete|partial. One at a time; the answer comes while other requests
  *                         go on. partial: limit or 60 s reached.
- *   click <top> <x> <y> <left|double|right>
- *                         a real click in the window <top>, or the point's own child of it: ok restored, the cursor is
- *                         back where it was, or ok moved, somebody moved it meanwhile and it stays
+ *   click <top> <x> <y> <left|double|right> <rect>
+ *                         a real click in the window <top>, which must have this rect, or the point's own child of it: ok
+ *                         restored, the cursor is back where it was, or ok moved, somebody moved it meanwhile and it stays
  *
  * A hwnd of another process is refused, so a stale hwnd that now names another program's window does nothing. A password
  * field is never read or set.
@@ -409,24 +411,39 @@ static void button(DWORD flags)
 
 static int near_point(POINT a, POINT b) { return labs(a.x - b.x) <= 2 && labs(a.y - b.y) <= 2; }
 
-static void do_click(long seq, HWND top, POINT p, const char *kind)
+static const char *not_target(HWND top, POINT p, const RECT *want)
 {
     HWND m = main_window();
+    RECT r;
+    if (!ours(top) || !IsWindowVisible(top)) return "not a visible window of Revit";
+    if (top == m && !IsWindowEnabled(m)) return "a dialog is open";
+    if (!GetWindowRect(top, &r) || !EqualRect(&r, want)) return "the window moved";
+    if (GetAncestor(WindowFromPoint(p), GA_ROOT) != top) return "another window is at this point";
+    return NULL;
+}
+
+static void do_click(long seq, HWND top, POINT p, const char *kind, const RECT *want)
+{
+    const char *why;
     POINT old, now;
     int dbl = !strcmp(kind, "double"), right = !strcmp(kind, "right"), i;
     DWORD down = right ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_LEFTDOWN, up = right ? MOUSEEVENTF_RIGHTUP : MOUSEEVENTF_LEFTUP;
     if (!dbl && !right && strcmp(kind, "left")) { finish(seq, "refused", "unknown click"); return; }
-    if (!ours(top) || !IsWindowVisible(top)) { finish(seq, "refused", "not a visible window of Revit"); return; }
-    if (top == m && !IsWindowEnabled(m)) { finish(seq, "refused", "a dialog is open"); return; }
-    if (GetAncestor(WindowFromPoint(p), GA_ROOT) != top) { finish(seq, "refused", "another window is at this point"); return; }
+    if ((why = not_target(top, p, want))) { finish(seq, "refused", why); return; }
     SetForegroundWindow(top);
     Sleep(100);
     if (GetForegroundWindow() != top) { finish(seq, "refused", "the window did not come to the foreground"); return; }
+    if ((why = not_target(top, p, want))) { finish(seq, "refused", why); return; }
     GetCursorPos(&old);
     SetCursorPos(p.x, p.y);
     Sleep(60);
     button(MOUSEEVENTF_MOVE);
     Sleep(60);
+    if ((why = not_target(top, p, want)) || GetForegroundWindow() != top) {
+        SetCursorPos(old.x, old.y);
+        finish(seq, "refused", why ? why : "the window lost the foreground");
+        return;
+    }
     for (i = 0; i <= dbl; i++) {
         button(down);
         Sleep(dbl ? 20 : 60);
@@ -457,13 +474,23 @@ static void do_dialog(long seq, HWND h)
     say("\n");
 }
 
-static void do_command(long seq, long id)
+static long long now_ms(void)
+{
+    FILETIME f;
+    ULARGE_INTEGER u;
+    GetSystemTimeAsFileTime(&f);
+    u.LowPart = f.dwLowDateTime; u.HighPart = f.dwHighDateTime;
+    return (long long)(u.QuadPart / 10000 - 11644473600000LL);
+}
+
+static void do_command(long seq, long id, long long expires)
 {
     HWND m = main_window();
     if (id <= 0 || id > 0xFFFF) { finish(seq, "refused", "not a command number"); return; }
     if (!m) { finish(seq, "blocked", "no main window"); return; }
     if (!IsWindowEnabled(m)) { finish(seq, "blocked", "a dialog is open"); return; }
     if (!responds(m)) { finish(seq, "blocked", "Revit does not answer"); return; }
+    if (now_ms() > expires) { finish(seq, "refused", "too late"); return; }
     if (!PostMessageW(m, WM_COMMAND, (WPARAM)id, 0)) { finish(seq, "error", "PostMessage failed"); return; }
     finish(seq, "ok", "posted");
 }
@@ -554,9 +581,11 @@ static void line(char *s)
     if (!strcmp(verb, "press") && hwnd_of(next_field(&p), &h) && !p) { do_press(seq, h); return; }
     if (!strcmp(verb, "close") && hwnd_of(next_field(&p), &h) && !p) { do_close(seq, h); return; }
     if (!strcmp(verb, "settext") && hwnd_of(next_field(&p), &h) && p) { do_settext(seq, h, p); return; }
-    if (!strcmp(verb, "command") && (a = next_field(&p)) && !p) {
+    if (!strcmp(verb, "command") && (a = next_field(&p)) && p) {
         long id;
-        if (number(a, &id)) { do_command(seq, id); return; }
+        char *e = next_field(&p), *stop;
+        long long expires = e ? strtoll(e, &stop, 10) : 0;
+        if (number(a, &id) && e && *e && !*stop && !p) { do_command(seq, id, expires); return; }
     }
     if (!strcmp(verb, "tree") && hwnd_of(next_field(&p), &h)) {
         long depth, limit;
@@ -565,9 +594,11 @@ static void line(char *s)
     if (!strcmp(verb, "click") && hwnd_of(next_field(&p), &h)) {
         long x, y;
         char *kind;
-        if (number(next_field(&p), &x) && number(next_field(&p), &y) && (kind = next_field(&p)) && !p) {
+        RECT want;
+        if (number(next_field(&p), &x) && number(next_field(&p), &y) && (kind = next_field(&p)) && p
+            && sscanf(p, "%ld,%ld,%ld,%ld", &want.left, &want.top, &want.right, &want.bottom) == 4) {
             POINT pt = { x, y };
-            do_click(seq, h, pt, kind);
+            do_click(seq, h, pt, kind, &want);
             return;
         }
     }

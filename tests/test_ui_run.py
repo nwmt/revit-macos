@@ -67,13 +67,15 @@ class Bridge:
         self.sent, self.journal, self.ident = [], journal, ident
         self.main_enabled, self.answers, self.dialogs = True, True, []
         self.reply = {}          # number -> blocked|failed|lost
+        self.expires = []
         self.on_command = None
         self.killed, self.can_kill, self.alive_set = [], True, set()
 
     def state(self):
         return {"main": 1, "enabled": self.main_enabled, "responds": self.answers, "dialogs": list(self.dialogs)}
 
-    def command(self, n):
+    def command(self, n, expires):
+        self.expires.append(expires)
         r = self.reply.get(n, "posted")
         if r in ("posted", "lost"):
             self.sent.append(n)
@@ -324,6 +326,35 @@ class Barrier(Case):
         self.assertEqual(self.b.sent, [1001])
 
 
+class Expiry(Case):
+    def test_a_command_is_valid_for_a_moment_only(self):
+        self.echo(X)
+        t = self.c.t
+        self.r.run(X, 10)
+        self.assertEqual(self.b.expires, [t + ui_run.VALID_S])
+
+    def test_no_barrier_before_the_command_has_expired(self):
+        """A bridge that stands still between reading X and posting it cannot post it after this."""
+        seen = {}
+        def play(n):
+            if n == 1003:
+                seen["at"] = self.c.t
+                self.j.add(B)
+        self.b.on_command = play
+        t = self.c.t
+        self.assertEqual(self.r.run(X, 0)["status"], "not_run")
+        self.assertGreaterEqual(seen["at"], t + ui_run.VALID_S)
+
+    def test_an_expired_command_from_a_crashed_client_is_settled_without_waiting(self):
+        self.b.reply[1003] = "blocked"
+        self.r.run(X, 1)
+        del self.b.reply[1003]
+        self.c.sleep(30)
+        other = Bridge(self.j, (51, 501.0))
+        other.on_command = lambda n: self.j.add(B) if n == 1003 else None
+        self.assertEqual(self.runner(other).run(Y, 0)["previous"], {"id": X, "status": "not_run"})
+
+
 class Shared(Case):
     def unresolved(self):
         self.b.reply[1003] = "blocked"
@@ -401,12 +432,32 @@ class Parity(Case):
         self.r.parity()
         self.assertEqual(self.b.sent, [1003])
 
-    def test_not_before_the_quiet(self):
+    def test_at_once_when_no_barrier_is_on_its_way(self):
         self.echo(B)
         self.r.run(X, 1)
         self.b.sent.clear()
         self.r.parity()
+        self.assertEqual(self.b.sent, [1003])
+
+    def test_not_while_one_may_still_be_on_its_way(self):
+        self.j.add(B)
+        self.r.reconcile()
+        self.b.reply[1003] = "lost"
+        self.r.run(X, 1)                       # a barrier is out, no line yet: it may even the count by itself
+        self.j.add(X)
+        self.r.reconcile()
+        self.b.sent.clear()
+        self.r.parity()
         self.assertEqual(self.b.sent, [])
+
+    def test_the_next_command_evens_the_toggle_first(self):
+        self.echo(B)
+        self.r.run(X, 1)
+        self.echo(B, Y)
+        self.b.sent.clear()
+        self.assertEqual(self.r.run(Y, 1)["status"], "ran")
+        self.assertEqual(self.b.sent, [1003, 1002])
+        self.assertEqual(self.data()["seen"] % 2, 0)
 
     def test_not_with_a_command_pending(self):
         self.j.add(B)

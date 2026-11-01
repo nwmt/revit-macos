@@ -4,8 +4,8 @@
 WM_COMMAND gives no answer, so the journal is the proof: a line with the label Internal and the command's ID. No line
 does not mean no command: it may be waiting in Revit's queue. Commands run in the order they were sent, so a barrier, a
 command that always leaves a line, proves that everything sent before it was handled: X with no line before the
-barrier did not run. There is no command that leaves no trace, so the barrier is a toggle, and parity() sends one more
-when an odd number came through.
+barrier did not run. There is no command that leaves no trace, so the barrier is a toggle, and one more goes out, before
+the next command or when the connection ends, when an odd number came through.
 
   sent, seen   barriers posted (or their answer lost), barrier lines read; sent - seen may still be in the queue
   need         at the time X went: that many barrier lines after X prove it, one for each older barrier + one of its own
@@ -19,9 +19,10 @@ import fcntl
 import json
 import os
 
-QUIET_S = 20          # no new lines this long: parity() may send
+QUIET_S = 20          # no new lines this long: a barrier that was sent and not seen is taken as lost
 BARRIER_WAIT_S = 20
 POLL_S = 0.25
+VALID_S = 2           # a command the bridge has not posted by then is dropped: see _fence
 DIALOG_WAIT_S = 1.5   # the journal line comes before the command's dialog is up
 UIA_WAIT_S = 120
 INTERNAL = "Internal"
@@ -112,15 +113,18 @@ class Runner:
         return bool(s["main"] and s["enabled"] and s["responds"])
 
     def _fence(self, d):
-        """The bridge that took the pending command must be gone or be ours: it could still post it after a not_run."""
+        """A bridge that stood still with the command could post it after a not_run: it must be gone or ours, and the
+        command past its time, which uibridge.exe checks at the moment it posts."""
         p = d["pending"]
         old = p.get("bridge")
-        if not old or tuple(old) == tuple(self.b.pid_start()) or not self.b.alive(*old):
-            return True
-        if not self.b.terminate_old(*old):
-            return False
-        p["bridge"] = list(self.b.pid_start())
-        self.st.save(d)
+        if old and tuple(old) != tuple(self.b.pid_start()) and self.b.alive(*old):
+            if not self.b.terminate_old(*old):
+                return False
+            p["bridge"] = list(self.b.pid_start())
+            self.st.save(d)
+        left = p.get("expires", 0) - self.now()
+        if left > 0:
+            self.sleep(left)
         return True
 
     def _send_barrier(self, d):
@@ -129,11 +133,17 @@ class Runner:
             return False
         d["sent"] += 1
         self.st.save(d)
-        if self.b.command(n) in ("blocked", "failed"):
+        if self.b.command(n, self.now() + VALID_S) in ("blocked", "failed"):
             d["sent"] -= 1
             self.st.save(d)
             return False
         return True
+
+    def _even(self, d):
+        """An odd number of barriers left the toggle flipped: one more, unless one may still be on its way."""
+        quiet = self.now() - d["last_record"] >= QUIET_S
+        if not d["pending"] and d["seen"] % 2 and (d["sent"] <= d["seen"] or quiet):
+            self._send_barrier(d)
 
     def _settle(self, d):
         """One barrier for the pending command, and the wait for it. False: the journal is gone."""
@@ -181,9 +191,12 @@ class Runner:
                 self.st.save(d)
                 return self._answer("blocked", cid, previous)
             before = [x["hwnd"] for x in s["dialogs"]]
-            d["pending"] = {"id": cid, "need": max(0, d["sent"] - d["seen"]) + 1, "after": 0, "bridge": list(self.b.pid_start())}
+            self._even(d)
+            expires = self.now() + VALID_S
+            d["pending"] = {"id": cid, "need": max(0, d["sent"] - d["seen"]) + 1, "after": 0, "expires": expires,
+                            "bridge": list(self.b.pid_start())}
             self.st.save(d)
-            sent = self.b.command(n)
+            sent = self.b.command(n, expires)
             if sent in ("blocked", "failed"):
                 d["pending"] = None
                 self.st.save(d)
@@ -216,9 +229,7 @@ class Runner:
             if not self._sync(d):
                 return
             self.st.save(d)
-            if d["pending"] or d["seen"] % 2 == 0 or self.now() - d["last_record"] < QUIET_S:
-                return
-            self._send_barrier(d)
+            self._even(d)
 
     def uia_begin(self):
         """True: this client may walk the tree now. Recorded first, so a crash in the walk is seen by the next client."""

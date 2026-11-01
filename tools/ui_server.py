@@ -138,9 +138,9 @@ class Bridge:
         return {"main": None if f[0] == "0" else f[0], "title": f[1], "enabled": f[2] == "1", "responds": f[3] == "1",
                 "rect": tuple_rect(f[4]), "dialogs": dialogs}
 
-    def command(self, n):
+    def command(self, n, expires):
         try:
-            status = self._ask(["command", n])[1]
+            status = self._ask(["command", n, int(expires * 1000)])[1]
         except Lost:
             return "lost"
         return {"ok": "posted", "blocked": "blocked"}.get(status, "failed")
@@ -169,8 +169,8 @@ class Bridge:
         _, status, f = self._ask(["settext", hwnd(h), text])
         return status, " ".join(f)
 
-    def click(self, h, x, y, kind):
-        _, status, f = self._ask(["click", hwnd(h), x, y, kind])
+    def click(self, h, x, y, kind, rect):
+        _, status, f = self._ask(["click", hwnd(h), x, y, kind, ",".join(str(v) for v in rect)])
         return status, " ".join(f)
 
     def close(self, h):
@@ -337,7 +337,7 @@ class Server:
         rect = tuple(w["rect"])
         if self._aspect(rect, width, height) > self._aspect(main, width, height):
             rect = main     # a dialog that is a child window on the Mac comes in the picture of its parent
-        self.shots[h] = {"size": (width, height), "rect": rect, "window": tuple(w["rect"])}
+        self.shots[h] = {"size": (width, height), "rect": rect, "window": tuple(w["rect"]), "title": w["title"]}
         return {"status": "ok", "hwnd": h, "width": width, "height": height}, data
 
     @staticmethod
@@ -385,13 +385,20 @@ class Server:
     def _quiet(self):
         return ui_mac.wait_user_quiet(self.m.idle_seconds, self.m.button_down, self.sleep, self.now)
 
-    def _click(self, h, x, y, kind):
+    def _same(self, h, rect, title):
+        w = self._window(h)
+        return bool(w) and tuple(w["rect"]) == rect and w["title"] == title
+
+    def _click(self, h, x, y, kind, rect, title):
+        """rect and title: what the window was when the point was chosen; the wait may outlast that."""
         if not self._quiet():
             return {"status": "user_active", "why": "Somebody is using the mouse or keyboard."}
         with self.state.locked():
             if self.m.idle_seconds() < ui_mac.QUIET_S or self.m.button_down():
                 return {"status": "user_active", "why": "Somebody is using the mouse or keyboard."}
-            status, detail = self.b.click(h, x, y, kind)
+            if not self._same(h, rect, title):
+                return {"status": "refused", "why": "The window changed. Take a new picture."}
+            status, detail = self.b.click(h, x, y, kind, rect)
         return {"status": status, "detail": detail}
 
     def press_button(self, dialog, button):
@@ -406,7 +413,7 @@ class Server:
             if not hit:
                 return {"status": "refused", "why": "no such button"}
             l, t, r, b = hit["rect"]
-            return self._after_press(dialog, self._click(dialog, (l + r) // 2, (t + b) // 2, "left"))
+            return self._after_press(dialog, self._click(dialog, (l + r) // 2, (t + b) // 2, "left", tuple(w["rect"]), w["title"]))
         hit = next((c for c in self.b.dialog(dialog) if c["cls"] == "Button" and button in (c["text"].replace("&", ""), c["hwnd"])),
                    None)
         if not hit:
@@ -450,16 +457,16 @@ class Server:
         x, y = int(x), int(y)
         if kind not in KINDS:
             return {"status": "refused", "why": "kind is left, double or right"}
-        shot, w = self.shots.get(window), self._window(window)
+        shot = self.shots.get(window)
         if not shot:
             return {"status": "refused", "why": "Take ui_screenshot of this window first."}
-        if not w or tuple(w["rect"]) != shot["window"]:
+        if not self._same(window, shot["window"], shot["title"]):
             return {"status": "refused", "why": "The window changed since the picture. Take a new one."}
         try:
             wx, wy = ui_mac.to_wine(x, y, shot["size"][0], shot["size"][1], shot["rect"])
         except ValueError as e:
             return {"status": "refused", "why": str(e)}
-        return self._click(window, wx, wy, kind)
+        return self._click(window, wx, wy, kind, shot["window"], shot["title"])
 
     # ---- MCP ----
     def call(self, name, args):
@@ -532,11 +539,18 @@ def main(argv):
         except OSError:
             pass
     start = proc_start(a.revit_pid)
+    if not start:
+        print("Revit is not running any more.", file=sys.stderr)
+        return 1
     try:
         started = time.mktime(time.strptime(start, "%a %b %d %H:%M:%S %Y"))
     except ValueError:
         started = 0
     bridge = Bridge(shlex.split(a.bridge))
+    if proc_start(a.revit_pid) != start:    # the bridge may have found a new Revit: this session is the old one's
+        print("Revit ended while the connection started. Connect again.", file=sys.stderr)
+        bridge.end()
+        return 1
     threading.Thread(target=lambda: (bridge.proc.wait(), os._exit(0)), daemon=True).start()
     server = Server(Config(a.bottle, a.year, a.revit_pid, start, bool(a.write), started), bridge, Mac())
     try:
