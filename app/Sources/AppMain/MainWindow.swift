@@ -18,7 +18,7 @@ struct MainWindow: View {
             case .bottle(let ref): VersionView(app: app, env: env, ref: ref).id(ref)   // a draft belongs to its bottle
             }
         }
-        .frame(minWidth: 880, minHeight: 560)
+        .frame(minWidth: 960, minHeight: 560)
         .sheet(item: $router.sheet) { PlanSheet(app: app, env: env, request: $0) }
         .sheet(item: $router.recover, onDismiss: { env.router.recoverGone() }) { RecoverSheet(app: app, env: env, ref: $0) }
     }
