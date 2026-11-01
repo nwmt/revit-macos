@@ -275,7 +275,8 @@ It reads about 7 elements a second and may answer `busy`, for example on the Hom
 
 If a dialog opens in the instant between the check and the command, the command still goes through and both dialogs
 stay open; the answer says `overlapped`. `set_text` works in Win32 dialogs only, and a file dialog may keep its own name:
-check the file afterwards. Password fields are never read or set. `press_button` tells whether the dialog is still open:
+check the file afterwards. Password fields are never read or set. The first click on a palette such as the Project Browser only activates it: click once, then double-click to open a view.
+A click right after a model opens may be lost too. `press_button` tells whether the dialog is still open:
 a button may do nothing, and the Cancel of Keyboard Shortcuts does not react to a click. `close_dialog` closes a dialog as
 its X does.
 
