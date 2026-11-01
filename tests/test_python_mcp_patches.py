@@ -47,10 +47,10 @@ class Patches(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(getattr(cls, "tmp", ""), ignore_errors=True)
 
-    def test_1_four_patches_apply_in_order(self):
+    def test_1_patches_apply_in_order(self):
         self.assertEqual([os.path.basename(p) for p in PATCHES],
                          ["01-code-execution-ipy2.patch", "02-views-unquote-ipy2.patch", "03-pairing-ioerror.patch",
-                          "04-startup-error-file.patch"])
+                          "04-startup-error-file.patch", "05-model-info-truth.patch", "06-screen-view-and-review.patch"])
         for p in PATCHES:
             r = patch(self.src, p)
             self.assertEqual(r.returncode, 0, p + r.stdout + r.stderr)
@@ -88,6 +88,33 @@ class Patches(unittest.TestCase):
         self.assertTrue(tries and any(isinstance(c, ast.Expr) and getattr(c.value, "func", None) is not None
                                       and getattr(c.value.func, "id", "") == "register_routes"
                                       for c in tries[-1].body), "register_routes() is not inside a try")
+
+    def test_8_model_info_counts_links_and_warnings(self):
+        src = read(os.path.join(self.src, "revit_mcp", "model_info.py"))
+        self.assertIn("DB.FailureSeverity.Error", src)
+        self.assertIn("OfClass(DB.RevitLinkInstance)", src)
+        self.assertNotIn("get_linked_model_instances", src)
+
+    def test_9_cut_list_keeps_its_elements(self):
+        self.assertIn('"message" in response and not response.get("truncated")', read(os.path.join(self.src, "tools", "utils.py")))
+
+    def test_a_tools_follow_the_view_on_screen(self):
+        views = read(os.path.join(self.src, "revit_mcp", "views.py"))
+        colors = read(os.path.join(self.src, "revit_mcp", "colors.py"))
+        self.assertNotIn("uidoc.ActiveView", views)
+        self.assertEqual(views.count("active_graphical_view(uidoc.Document)"), 2)
+        self.assertNotIn("doc.ActiveView", colors)
+
+    def test_b_review_shows_text_and_escapes_what_hides(self):
+        src = read(os.path.join(self.src, "revit_mcp", "security.py"))
+        self.assertIn("preview = review_text(data)", src)
+        start, end = src.index("HIDDEN = "), src.index("def authorize_request")
+        ns = {"re": __import__("re"), "json": __import__("json")}
+        exec(src[start:end], ns)
+        text = ns["review_text"]({"code": "\u042f\u202e\u200b\ufeff\x07"})
+        self.assertIn("\u042f", text)
+        for hidden in "\u202e\u200b\ufeff\x07":
+            self.assertNotIn(hidden, text)
 
 
 if __name__ == "__main__":
