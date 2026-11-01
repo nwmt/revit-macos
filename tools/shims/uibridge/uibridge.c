@@ -481,7 +481,7 @@ static void do_press(long seq, HWND h)
 
 static void do_close(long seq, HWND h)
 {
-    if (!ours(h) || GetParent(h)) { finish(seq, "refused", "not a window of Revit"); return; }
+    if (!ours(h) || (GetWindowLongPtrW(h, GWL_STYLE) & WS_CHILD)) { finish(seq, "refused", "not a window of Revit"); return; }
     if (h == main_window()) { finish(seq, "refused", "the main window"); return; }
     if (!PostMessageW(h, WM_CLOSE, 0, 0)) { finish(seq, "error", "PostMessage failed"); return; }
     finish(seq, "ok", "closed");
