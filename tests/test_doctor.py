@@ -608,6 +608,8 @@ class PythonMcp(Sandbox):
         self.write(j(e, "startup.py"), "# startup-error.txt\nregister_routes()\n")
         self.write(j(e, "revit_mcp/code_execution.py"), '"print": _printer(captured_output)\n')
         self.write(j(e, "revit_mcp/views.py"), "Uri.UnescapeDataString\n")
+        self.write(j(e, "revit_mcp/model_info.py"), "DB.FailureSeverity.Error\n")
+        self.write(j(e, "revit_mcp/security.py"), "review_text(data)\n")
         self.write(j(e, "revit_mcp/pairing.py"), "except (IOError, OSError, ValueError, PairingError):\n")
         srv = j(b, dr.PYREVIT_CLONE_REL, "pyrevitlib/pyrevit/routes/server")
         self.write(j(srv, "server.py"), "return revitmacos_serial.dispatch(self, request, route_handler)\r\n")

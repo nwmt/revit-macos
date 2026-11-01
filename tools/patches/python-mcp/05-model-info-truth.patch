@@ -1,0 +1,41 @@
+--- a/revit_mcp/model_info.py	2026-11-01 22:32:06
++++ b/revit_mcp/model_info.py	2026-11-01 22:32:06
+@@ -97,7 +97,7 @@
+                 warnings_count = len(warnings)
+                 # Count critical warnings (simplified check)
+                 critical_warnings = sum(
+-                    1 for w in warnings if w.GetSeverity() == DB.WarningType.Error
++                    1 for w in warnings if w.GetSeverity() == DB.FailureSeverity.Error
+                 )
+             except:
+                 warnings_count = 0
+@@ -272,16 +272,12 @@
+             # ============ LINKED MODELS ============
+             try:
+                 linked_models = []
+-                rvt_links = q.get_linked_model_instances(doc).ToElements()
++                rvt_links = DB.FilteredElementCollector(doc).OfClass(DB.RevitLinkInstance)
+ 
+                 for link_instance in rvt_links:
+                     try:
+                         link_doc = link_instance.GetLinkDocument()
+-                        link_name = (
+-                            q.get_rvt_link_instance_name(link_instance)
+-                            if hasattr(q, "get_rvt_link_instance_name")
+-                            else "Unknown Link"
+-                        )
++                        link_name = get_element_name(link_instance)
+ 
+                         # Get load status
+                         link_type = doc.GetElement(link_instance.GetTypeId())
+--- a/tools/utils.py	2026-11-01 22:32:06
++++ b/tools/utils.py	2026-11-01 22:32:06
+@@ -92,7 +92,7 @@
+             # For successful responses, return the most relevant data
+             if "output" in response:  # Code execution responses
+                 return response["output"]
+-            elif "message" in response:
++            elif "message" in response and not response.get("truncated"):
+                 return response["message"]
+             elif "result" in response:
+                 return str(response["result"])

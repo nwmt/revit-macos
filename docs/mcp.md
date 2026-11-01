@@ -207,8 +207,11 @@ Open Revit with a model and make a token: `./revit mcp token 2020 --server pytho
 Desktop (not tried yet).
 
 When the assistant asks to change the model or run Python, Revit shows **Revit MCP request review**. Answer within 30
-seconds (60 for Python and pictures of views): after that the assistant stops waiting, though Revit still does what you
-allowed.
+seconds (60 for Python and pictures of views, 120 for saving): after that the assistant stops waiting, though Revit still
+does what you allowed.
+
+A dialog open in Revit blocks every request, and the server does not start until it closes. On a large project that
+can be **Virtual Memory - High Usage**: close it. After `./revit stop` or a restart of Revit, connect the assistant again.
 
 Two of its tools do nothing on a Mac: `launch_revit` and `list_revit_installations` look for Revit in Windows, outside
 the bottle. Start Revit from `~/Applications` instead. Close documents in Revit yourself:
@@ -249,8 +252,9 @@ Before you connect it:
    into the bottle, once for each Revit build. After a Revit update it does so again by itself. Nothing is sent anywhere.
 
 `./revit agent-view 2027` is separate and needs none of this: it makes the running Revit visible to computer use tools
-until Revit quits. They can then see it and click dialogs and the Project Browser, but clicks on the ribbon and in the
-drawing area do not arrive; use this server for those.
+until Revit quits. They can then see it. In the background they can click the Project Browser; clicks on dialogs, the
+ribbon and the drawing area do not arrive. Taking full control of the screen, they reach all of these; without it, use this
+server.
 
 ### Connect
 

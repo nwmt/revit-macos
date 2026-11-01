@@ -181,9 +181,22 @@ def b_held_until_written(tc, m):
     tc.assertEqual(seen, [True])
 
 
+def b_utf8_body(tc, m):
+    """The body arrives as UTF-8 bytes in a string: text, keys and nested values come out right, the rest stays."""
+    floor = "\u042d\u0442\u0430\u0436 1"
+    garbled = floor.encode("utf-8").decode("latin-1")
+    req = Req("one")
+    req.data = {garbled: [garbled, {"path": garbled}, 7, None, True], "plain": "ascii", "escaped": "caf\u00e9"}
+    m.dispatch(FakeHandler(Shared()), req, None)
+    tc.assertEqual(req.data, {floor: [floor, {"path": floor}, 7, None, True], "plain": "ascii", "escaped": "caf\u00e9"})
+
+
 class Dispatch(unittest.TestCase):
     def setUp(self):
         self.m = load()
+
+    def test_utf8_body(self):
+        b_utf8_body(self, self.m)
 
     def test_two_requests_get_their_own_answers(self):
         b_own_answers(self, self.m)

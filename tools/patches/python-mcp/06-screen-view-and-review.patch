@@ -1,0 +1,127 @@
+--- a/revit_mcp/colors.py	2026-11-01 22:45:53
++++ b/revit_mcp/colors.py	2026-11-01 22:49:57
+@@ -10,7 +10,7 @@
+ from .security import authorize_request
+ import random
+ from collections import defaultdict
+-from .utils import normalize_string, element_id_value
++from .utils import normalize_string, element_id_value, active_graphical_view
+ 
+ logger = logging.getLogger(__name__)
+ 
+@@ -140,7 +140,7 @@
+         dict: Compatibility status and recommendations
+     """
+     try:
+-        active_view = doc.ActiveView
++        active_view = active_graphical_view(doc)
+ 
+         # Check visual style
+         visual_style_param = active_view.get_Parameter(
+@@ -823,7 +823,7 @@
+                 for element in group_elements:
+                     try:
+                         # Apply to active view first (CRITICAL FIX!)
+-                        active_view = doc.ActiveView
++                        active_view = active_graphical_view(doc)
+                         active_view.SetElementOverrides(element.Id, override_settings)
+                         elements_colored += 1
+ 
+@@ -934,7 +934,7 @@
+         elements_cleared = 0
+ 
+         # Get active view for clearing overrides
+-        active_view = doc.ActiveView
++        active_view = active_graphical_view(doc)
+ 
+         with DB.Transaction(doc, "Clear Element Colors") as t:
+             t.Start()
+--- a/revit_mcp/security.py	2026-11-01 22:45:53
++++ b/revit_mcp/security.py	2026-11-01 22:49:57
+@@ -1,10 +1,20 @@
+ # -*- coding: utf-8 -*-
+ """Authentication and in-Revit review for bridge requests."""
+ import json
++import re
+ from pyrevit import routes
+ from .pairing import validate_request
+ 
+ 
++# A person reads this: their language as it is, and as escapes only what could hide or reorder text on screen.
++HIDDEN = re.compile(u"[\x00-\x08\x0b-\x1f\x7f-\xa0\xad\u200b-\u200f\u2028-\u202f\u205f-\u206f\ufeff\ufff9-\ufffb]")
++
++
++def review_text(data):
++    text = json.dumps(data, indent=2, ensure_ascii=False)
++    return HIDDEN.sub(lambda m: u"\\u{:04x}".format(ord(m.group())), text)
++
++
+ def authorize_request(request, action=None):
+     """Return a denial response, or None when the request may proceed."""
+     # pyRevit's dispatcher can post a route response to callbackUrl. Remove it
+@@ -18,7 +28,7 @@
+         from pyrevit import forms
+         try:
+             data = json.loads(request.data) if isinstance(request.data, str) else request.data
+-            preview = json.dumps(data, indent=2, ensure_ascii=True)
++            preview = review_text(data)
+         except (ValueError, TypeError):
+             return routes.make_response(data={"error": "Invalid request payload."}, status=400)
+         warning = "An MCP client requests: {}.\nReview the full request below before allowing it.".format(action)
+--- a/revit_mcp/utils.py	2026-11-01 22:45:53
++++ b/revit_mcp/utils.py	2026-11-01 22:49:57
+@@ -47,6 +47,14 @@
+         return int(element_id.IntegerValue)
+ 
+ 
++def active_graphical_view(doc):
++    """The view on screen. uidoc.ActiveView and doc.ActiveView answer with the Project Browser when it has the focus."""
++    from pyrevit import HOST_APP
++
++    view = HOST_APP.uidoc.ActiveGraphicalView
++    return view if view is not None else doc.ActiveView
++
++
+ def get_element_name(element):
+     """
+     Get the name of a Revit element.
+--- a/revit_mcp/views.py	2026-11-01 22:45:53
++++ b/revit_mcp/views.py	2026-11-01 22:49:57
+@@ -26,7 +26,7 @@
+     def unquote(s):
+         return Uri.UnescapeDataString(s)
+ 
+-from .utils import normalize_string, get_element_name, element_id_value
++from .utils import normalize_string, get_element_name, element_id_value, active_graphical_view
+ 
+ logger = logging.getLogger(__name__)
+ 
+@@ -328,7 +328,7 @@
+                     data={"error": "No active Revit document"}, status=503
+                 )
+ 
+-            current_view = uidoc.ActiveView
++            current_view = active_graphical_view(uidoc.Document)
+             if not current_view:
+                 return routes.make_response(
+                     data={"error": "No active view found"}, status=404
+@@ -416,7 +416,7 @@
+                     data={"error": "No active Revit document"}, status=503
+                 )
+ 
+-            current_view = uidoc.ActiveView
++            current_view = active_graphical_view(uidoc.Document)
+             if not current_view:
+                 return routes.make_response(
+                     data={"error": "No active view found"}, status=404
+--- a/tools/document_tools.py	2026-11-01 22:45:53
++++ b/tools/document_tools.py	2026-11-01 22:49:57
+@@ -65,7 +65,7 @@
+             file_path: Optional path for Save As. If omitted, saves in place.
+         """
+         data = {"file_path": file_path}
+-        response = await revit_post("/save_document/", data, ctx)
++        response = await revit_post("/save_document/", data, ctx, timeout=120.0)
+         return format_response(response)
+ 
+     @mcp.tool()

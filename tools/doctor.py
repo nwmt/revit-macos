@@ -845,7 +845,9 @@ PYMCP_SERVER_REL = PYREVIT_CLONE_REL + "/pyrevitlib/pyrevit/routes/server"
 # a marker of each patch in tools/patches/python-mcp/*.patch: (file in the extension, text the patch puts there)
 PYMCP_PATCH_MARKS = (("startup.py", "startup-error.txt"), ("revit_mcp/code_execution.py", "_printer(captured_output)"),
                      ("revit_mcp/views.py", "Uri.UnescapeDataString"),
-                     ("revit_mcp/pairing.py", "except (IOError, OSError, ValueError, PairingError):"))
+                     ("revit_mcp/pairing.py", "except (IOError, OSError, ValueError, PairingError):"),
+                     ("revit_mcp/model_info.py", "DB.FailureSeverity.Error"),
+                     ("revit_mcp/security.py", "review_text(data)"))
 
 
 def collect_mcp(ctx, p):
