@@ -1610,7 +1610,8 @@ check "ui: the lock is free once it runs" lock_is_free
 check "ui: the server is marked with the bottle" eval 'o="$(ps -axww -o command=)"; grep -qF "revit-macos-ui-server $(cd "$BOTTLES/rvt2027-a" && pwd -P) " <<<"$o"'
 run_mcp stop 2027; check "ui: ./revit stop ends the server and the bridge" eval '[ "$RC" = 0 ] && mcp_wait "! ui_server_alive && ! ui_bridge_alive" 50'
 exec 5>&-; wait "$LPID_a" 2>/dev/null
-ui_world; mcp_bg a mcp 2027 --server ui; mcp_wait ui_bridge_alive 100; stop_fakes; run_mcp rebuild 2027 --yes
+ui_world; mcp_bg a mcp 2027 --server ui; mcp_wait ui_bridge_alive 100; printf '%s\n' "$UI_INIT" >&5; mcp_wait '[ -s "$T/mcp-out-a" ]' 100   # past its check of Revit
+stop_fakes; run_mcp rebuild 2027 --yes
 check "ui: a connected server keeps rebuild away" eval '[ "$RC" != 0 ] && grep -q "An AI assistant is using Revit 2027" <<<"$ERR"'
 exec 5>&-; wait "$LPID_a" 2>/dev/null; mcp_wait "! ui_server_alive" 50
 # ---- ./revit agent-view: lsappinfo played by a script that records its calls ----
