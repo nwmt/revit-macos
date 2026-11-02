@@ -20,9 +20,10 @@ public struct EngineStatus: Decodable, Equatable, Sendable {
     public let app: AppInfo?               // only inside the app's bundle
     public let bottles: [Bottle]
     public let restorePoints: [RestorePoint]   // of bottles that are gone too; [] from an older engine
+    public let restoreLeftovers: [String]  // bottle names with files of a restore point cut short; [] from an older engine
     public let shimsNow: String?           // the shims a rebuild would take
 
-    enum CodingKeys: String, CodingKey { case crossover, rosetta, msls31, busy, app, bottles, restorePoints, shimsNow }
+    enum CodingKeys: String, CodingKey { case crossover, rosetta, msls31, busy, app, bottles, restorePoints, restoreLeftovers, shimsNow }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -30,6 +31,7 @@ public struct EngineStatus: Decodable, Equatable, Sendable {
         msls31 = try c.decode(Bool.self, forKey: .msls31); busy = try c.decode(Busy.self, forKey: .busy)
         app = try c.decodeIfPresent(AppInfo.self, forKey: .app); bottles = try c.decode([Bottle].self, forKey: .bottles)
         restorePoints = try c.decodeIfPresent([RestorePoint].self, forKey: .restorePoints) ?? []
+        restoreLeftovers = try c.decodeIfPresent([String].self, forKey: .restoreLeftovers) ?? []
         shimsNow = try c.decodeIfPresent(String.self, forKey: .shimsNow)
     }
 
@@ -95,7 +97,18 @@ public struct Bottle: Decodable, Equatable, Sendable {
 
 public struct Support: Decodable, Equatable, Sendable {
     public let status, tested, gaps: String // status: works, mostly, untested
-    public init(status: String, tested: String, gaps: String) { self.status = status; self.tested = tested; self.gaps = gaps }
+    public let signin: String               // the profile's SIGNIN: idmgr signs in through the browser; "" from an older engine
+    public init(status: String, tested: String, gaps: String, signin: String = "") {
+        self.status = status; self.tested = tested; self.gaps = gaps; self.signin = signin
+    }
+
+    enum CodingKeys: String, CodingKey { case status, tested, gaps, signin }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(status: try c.decode(String.self, forKey: .status), tested: try c.decode(String.self, forKey: .tested),
+                  gaps: try c.decode(String.self, forKey: .gaps), signin: try c.decodeIfPresent(String.self, forKey: .signin) ?? "")
+    }
 }
 
 public struct Built: Decodable, Equatable, Sendable {
@@ -182,9 +195,28 @@ public struct AddinInfo: Decodable, Equatable, Sendable {
 
 /// doctor --json: the checks; a failed one is exit 1 with this on stdout.
 public struct DoctorReport: Decodable, Equatable, Sendable {
-    public struct Check: Decodable, Equatable, Sendable { public let id, status, title, detail: String }
+    public struct Check: Decodable, Equatable, Sendable {
+        public let id, status, title, detail: String
+        public let group, fix: String       // "" from an older engine
+        public init(id: String, status: String, title: String, detail: String = "", group: String = "", fix: String = "") {
+            self.id = id; self.status = status; self.title = title; self.detail = detail; self.group = group; self.fix = fix
+        }
+        enum CodingKeys: String, CodingKey { case id, status, title, detail, group, fix }
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            self.init(id: try c.decode(String.self, forKey: .id), status: try c.decode(String.self, forKey: .status),
+                      title: try c.decode(String.self, forKey: .title), detail: try c.decodeIfPresent(String.self, forKey: .detail) ?? "",
+                      group: try c.decodeIfPresent(String.self, forKey: .group) ?? "", fix: try c.decodeIfPresent(String.self, forKey: .fix) ?? "")
+        }
+    }
     public let checks: [Check]
+    public init(checks: [Check]) { self.checks = checks }
     public var problems: [Check] { checks.filter { $0.status == "warn" || $0.status == "fail" } }
+
+    /// What the app shows: host.terminal is about a Terminal, and the app is none.
+    public var forApp: DoctorReport { DoctorReport(checks: checks.filter { $0.id != "host.terminal" }) }
+    /// This Mac in the Add Revit sheet: the host group without the tools (the install brings them).
+    public var mac: [Check] { forApp.checks.filter { $0.group == "host" && !$0.id.hasPrefix("host.tool.") } }
 }
 
 public struct ReportResult: Decodable, Equatable, Sendable {

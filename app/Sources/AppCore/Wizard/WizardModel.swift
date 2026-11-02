@@ -1,6 +1,7 @@
-// The first-run wizard (spec §3): Rosetta, CrossOver, msls31.dll, the installer folder,
-// the check, the install. Every row reads the engine's status or answer; a check counts only for the inputs it
-// checked (year, folder, bottle name, source choice), and install needs a passed check of the current inputs.
+// The Add Revit sheet (first run too): This Mac, the tools (Rosetta, CrossOver, msls31.dll), the installer folder, the
+// check, the install. Every row reads the engine's status or answer; a check counts only for the inputs it checked
+// (year, folder, bottle name, source choice), and install needs a passed check of the current inputs. One showing of
+// the sheet is one session: reset() starts the next, and an answer that comes after it changes nothing.
 import Foundation
 import Observation
 
@@ -16,6 +17,9 @@ public struct InstallerChoice: Equatable, Sendable {
 
 public enum WizardError: Error, Equatable { case notReady }
 
+/// The rail of the sheet.
+public enum WizardStep: CaseIterable, Sendable { case mac, tools, installer, check, install }
+
 /// The inputs a check ran with.
 struct CheckKey: Equatable { let year: Int; let folder: String; let bottle: String; let source: SourceChoice? }
 
@@ -27,6 +31,14 @@ struct CheckKey: Equatable { let year: Int; let folder: String; let bottle: Stri
     public var bottleName = "" { didSet { if bottleName != oldValue { forgetCheck() } } }
     public private(set) var source: SourceChoice?
     public private(set) var crossoverNote: String?
+    public private(set) var macChecks: [DoctorReport.Check]?   // This Mac: doctor's host group, nil until it answers
+    public private(set) var macError: String?
+    public private(set) var installCtx: URL?                   // the install this showing started: the sheet follows it
+    public var viewing: WizardStep?                           // a step picked on the rail; nil: the current one
+    private var session = 0
+    // link-installer replaces installers/revit<year>: one at a time, across sessions too, so a late one from a sheet
+    // that went cannot point the link back at its folder after a newer choice
+    @ObservationIgnored private var linking: Task<EngineOutput?, Never>?
 
     private var working: Set<WizardRow> = []
     private var errors: [WizardRow: String] = [:]
@@ -35,6 +47,32 @@ struct CheckKey: Equatable { let year: Int; let folder: String; let bottle: Stri
     private var outcome: (state: RowState, warnings: [String], mismatch: Bool)?
 
     public init(app: AppModel, system: any SystemActions) { self.app = app; self.system = system }
+
+    // MARK: steps
+
+    public func passed(_ step: WizardStep) -> Bool {
+        func ok(_ r: WizardRow) -> Bool { switch state(r) { case .done, .warning: true; default: false } }
+        switch step {
+        case .mac: return macChecks != nil || macError != nil
+        case .tools: return ok(.rosetta) && ok(.crossover) && ok(.msls31)
+        case .installer: return ok(.installer)
+        case .check: return ok(.check)
+        case .install: return installCtx != nil
+        }
+    }
+
+    /// The first step not passed; Install once all are.
+    public var current: WizardStep { WizardStep.allCases.first { !passed($0) } ?? .install }
+    public var shown: WizardStep { viewing ?? current }
+
+    public func loadMac() async {
+        let my = session
+        guard let out = await app.query(["doctor", "--json"]) else { if my == session { macError = app.engineError ?? "" }; return }
+        guard my == session else { return }
+        // a failed check is exit 1 with the JSON
+        if let r = try? JSONDecoder.engine.decode(DoctorReport.self, from: out.stdout) { macChecks = r.mac; macError = nil }
+        else { macError = Self.trimmed(out.stderr) }
+    }
 
     // MARK: rows
 
@@ -137,17 +175,23 @@ struct CheckKey: Equatable { let year: Int; let folder: String; let bottle: Stri
     }
 
     public func importMsls31(_ file: URL) async {
+        let my = session
         errors[.msls31] = nil
-        working.insert(.msls31); defer { working.remove(.msls31) }
-        guard let out = await app.query(["import", "msls31", file.path]) else { errors[.msls31] = app.engineError ?? ""; return }
+        working.insert(.msls31); defer { if my == session { working.remove(.msls31) } }
+        let out = await app.query(["import", "msls31", file.path])
+        guard my == session else { return }
+        guard let out else { errors[.msls31] = app.engineError ?? ""; return }
         guard out.exitCode == 0 else { errors[.msls31] = Self.trimmed(out.stderr); return }
         await app.refresh()
     }
 
     public func chooseInstaller(_ folder: URL) async {
+        let my = session
         installer = nil; errors[.installer] = nil; forgetCheck()
-        working.insert(.installer); defer { working.remove(.installer) }
-        guard let out = await app.query(["find-installer", folder.path, "--json"]) else { errors[.installer] = app.engineError ?? ""; return }
+        working.insert(.installer); defer { if my == session { working.remove(.installer) } }
+        let found = await app.query(["find-installer", folder.path, "--json"])
+        guard my == session else { return }
+        guard let out = found else { errors[.installer] = app.engineError ?? ""; return }
         guard out.exitCode == 0, let info = try? JSONDecoder.engine.decode(InstallerInfo.self, from: out.stdout) else {
             errors[.installer] = Self.trimmed(out.stderr); return
         }
@@ -158,7 +202,15 @@ struct CheckKey: Equatable { let year: Int; let folder: String; let bottle: Stri
         guard info.complete || info.downloadable else {
             errors[.installer] = String(localized: "Missing: \(info.missing.joined(separator: ", "))"); return
         }
-        guard let link = await app.query(["link-installer", String(year), folder.path]) else { errors[.installer] = app.engineError ?? ""; return }
+        if let earlier = linking { _ = await earlier.value }
+        guard my == session else { return }
+        let app = self.app
+        let t = Task { await app.query(["link-installer", String(year), folder.path]) }
+        linking = t
+        let linked = await t.value
+        if linking == t { linking = nil }
+        guard my == session else { return }
+        guard let link = linked else { errors[.installer] = app.engineError ?? ""; return }
         guard link.exitCode == 0 else { errors[.installer] = Self.trimmed(link.stderr); return }
         installer = InstallerChoice(folder: folder, info: info, year: year)
         bottleName = proposedName(year)
@@ -172,13 +224,14 @@ struct CheckKey: Equatable { let year: Int; let folder: String; let bottle: Stri
 
     public func runCheck() async {
         guard let i = installer, nameOK, let key = currentKey else { return }
+        let my = session
         forgetCheck()
         checkKey = key
         do {
             try await app.start(.check(year: i.year, bottle: bottleName, source: source))
-            if checkKey == key { checkCtx = app.watched?.ctx }
+            if my == session, checkKey == key { checkCtx = app.watched?.ctx }
         } catch {
-            if checkKey == key { errors[.check] = app.engineError ?? (app.isBusy ? (app.busyText ?? "") : "\(error)") }
+            if my == session, checkKey == key { errors[.check] = app.engineError ?? (app.isBusy ? (app.busyText ?? "") : "\(error)") }
         }
     }
 
@@ -189,21 +242,26 @@ struct CheckKey: Equatable { let year: Int; let folder: String; let bottle: Stri
 
     public func install() async throws {
         guard case .open = state(.install), let i = installer else { throw WizardError.notReady }
+        let my = session
         try await app.start(.install(year: i.year, bottle: bottleName, source: source))
-        reset()   // the install runs in the progress window; the wizard is ready for the next version
+        if my == session { installCtx = app.watched?.ctx; viewing = nil }   // the sheet follows this run
     }
 
-    /// Back to the start: no installer, no name, no source choice, no check.
+    /// Back to the start, a new session: no installer, name, source choice, check, Mac answer or install to follow.
+    /// What runs in the engine goes on.
     public func reset() {
-        installer = nil; source = nil; crossoverNote = nil; errors = [:]
+        session += 1
+        installer = nil; source = nil; crossoverNote = nil; errors = [:]; working = []
+        macChecks = nil; macError = nil; installCtx = nil; viewing = nil
         bottleName = ""
         forgetCheck()
     }
 
     private func act(_ row: WizardRow, _ f: () async throws -> Void) async {
+        let my = session
         errors[row] = nil
-        working.insert(row); defer { working.remove(row) }
-        do { try await f() } catch { errors[row] = (error as? LocalizedError)?.errorDescription ?? "\(error)" }
+        working.insert(row); defer { if my == session { working.remove(row) } }
+        do { try await f() } catch { if my == session { errors[row] = (error as? LocalizedError)?.errorDescription ?? "\(error)" } }
     }
 
     static func trimmed(_ s: String) -> String { s.trimmingCharacters(in: .whitespacesAndNewlines) }

@@ -182,7 +182,7 @@ struct MenuLabel: View {
         switch LaunchRoute.pick(activeRun: app.watched != nil, forFile: FileInbox.opened, loginItem: LaunchInfo.loginItem,
                                 noBottles: (app.status?.bottles ?? []).isEmpty, busy: app.isBusy, showInDock: SettingsModel.showsInDock(.standard)) {
         case .activity: env.router.open(.run)
-        case .wizard: env.router.open(.wizard)
+        case .addVersion: env.router.open(.wizard)
         case .main: env.router.open(.main)
         case .nothing: break
         }

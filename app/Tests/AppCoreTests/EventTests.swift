@@ -18,7 +18,7 @@ import Testing
             == .end(EndInfo(exitCode: 0, result: "ok", failedAction: "", failedSteps: [], logDir: "", reason: nil)))
 }
 
-@Test func unknownEventIsUnknown() { #expect(EventParser.parse(#"{"event":"plan","n":3}"#) == .unknown("plan")) }
+@Test func unknownEventIsUnknown() { #expect(EventParser.parse(#"{"event":"phase","n":3}"#) == .unknown("phase")) }
 
 @Test(arguments: ["not json", "", #"{"event":"step"}"#, #"{"x":1}"#, #"["event"]"#, #"{"event":"end","result":"ok"}"#])
 func malformedLineIsNil(_ line: String) { #expect(EventParser.parse(line) == nil) }

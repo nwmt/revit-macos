@@ -106,8 +106,8 @@ let bottle2027 = #"{"name":"rvt2027-a","year":"2027","revit":true,"running":fals
         LaunchRoute.pick(activeRun: active, forFile: file, loginItem: login, noBottles: none, busy: busy, showInDock: dock)
     }
     #expect(p() == .main); #expect(p(active: true, file: true, login: true) == .activity); #expect(p(file: true, none: true) == .nothing)
-    #expect(p(none: true) == .wizard); #expect(p(login: true, none: true) == .nothing); #expect(p(none: true, busy: true) == .main)
-    #expect(p(login: true) == .nothing); #expect(p(dock: false) == .nothing); #expect(p(none: true, dock: false) == .wizard)
+    #expect(p(none: true) == .addVersion); #expect(p(login: true, none: true) == .nothing); #expect(p(none: true, busy: true) == .main)
+    #expect(p(login: true) == .nothing); #expect(p(dock: false) == .nothing); #expect(p(none: true, dock: false) == .addVersion)
 }
 
 @Test func libraryCardsAndPointsOfBottlesGone() throws {

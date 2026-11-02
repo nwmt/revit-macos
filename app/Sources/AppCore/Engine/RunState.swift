@@ -11,6 +11,7 @@ public struct RunState: Equatable, Sendable {
     public var actions: [Item] = []            // first-seen order; a later event for the same id updates it
     public var steps: [Item] = []
     public var download: DownloadProgress?     // the last progress event
+    public var plan: InstallPlan?              // nil before it comes, and from a run that sends none
     public var messages: [Message] = []
     public var end: EndInfo?
 
@@ -39,6 +40,8 @@ public struct RunState: Equatable, Sendable {
             download = DownloadProgress(done: done, total: total)
         case let .message(level, text):
             messages.append(Message(level: level, text: text))
+        case let .plan(p):
+            plan = p
         case let .end(info):
             end = info
         case .unknown:

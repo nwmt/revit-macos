@@ -27,6 +27,12 @@ actor FakeEngine: EngineClient {
     func setOnProcessStart(_ f: (@Sendable () async -> Void)?) { onProcessStart = f }
     func closeGate() { gateClosed = true }
     func openGate() { gateClosed = false; gate?.resume(); gate = nil }
+    /// A query that waits until release(): an answer that comes late.
+    var held: String?
+    var heldWaiting = false
+    private var heldGate: CheckedContinuation<Void, Never>?
+    func hold(query args: [String]) { held = args.joined(separator: " ") }
+    func release() { held = nil; heldGate?.resume(); heldGate = nil }
 
     /// Appends lines to the events file of a ctx (default: the last started run).
     func emit(_ lines: [String], ctx: URL? = nil) {
@@ -40,6 +46,11 @@ actor FakeEngine: EngineClient {
             if !statusQueue.isEmpty { return statusQueue.count > 1 ? statusQueue.removeFirst() : statusQueue[0] }
         } else {
             calls.append("run " + args.joined(separator: " "))
+            if held == args.joined(separator: " ") {
+                heldWaiting = true
+                await withCheckedContinuation { heldGate = $0 }
+                heldWaiting = false
+            }
         }
         return queries[args.joined(separator: " ")] ?? EngineOutput(stdout: Data(), stderr: "no answer", exitCode: 1)
     }

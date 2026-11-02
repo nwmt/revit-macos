@@ -8,8 +8,16 @@ public enum EngineEvent: Equatable, Sendable {
     case step(id: String, state: String, detail: String?)
     case progress(step: String, done: Int64, total: Int64)
     case message(level: String, text: String)
+    case plan(InstallPlan)                     // install.sh, before its first action
     case end(EndInfo)
     case unknown(String)                       // an event name this app does not know: ignored
+}
+
+/// What an install will do: its actions and the profile's steps, in order.
+public struct InstallPlan: Equatable, Sendable {
+    public let actions: [String]
+    public let steps: [String]
+    public init(actions: [String], steps: [String]) { self.actions = actions; self.steps = steps }
 }
 
 /// The end line: the run's result, from the child's result file (revit's sup_end).
@@ -78,6 +86,9 @@ public enum EventParser {
         case "message":
             guard let level = str("level"), let text = str("text") else { return nil }
             return .message(level: level, text: text)
+        case "plan":
+            guard let a = obj["actions"] as? [String], let st = obj["steps"] as? [String] else { return nil }
+            return .plan(InstallPlan(actions: a, steps: st))
         case "end":
             guard let e = try? JSONDecoder().decode(EndInfo.self, from: data) else { return nil }
             return .end(e)

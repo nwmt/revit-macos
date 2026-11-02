@@ -125,12 +125,12 @@ public struct GDriveDraft: Equatable, Sendable {
 
 /// Which window a launch opens: the first rule that holds.
 public enum LaunchRoute: Equatable, Sendable {
-    case activity, wizard, main, nothing
+    case activity, addVersion, main, nothing
 
     public static func pick(activeRun: Bool, forFile: Bool, loginItem: Bool, noBottles: Bool, busy: Bool, showInDock: Bool) -> LaunchRoute {
         if activeRun { return .activity }
         if forFile { return .nothing }
-        if noBottles && !busy && !loginItem { return .wizard }
+        if noBottles && !busy && !loginItem { return .addVersion }
         if loginItem || !showInDock { return .nothing }
         return .main
     }

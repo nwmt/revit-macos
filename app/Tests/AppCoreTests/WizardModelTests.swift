@@ -215,14 +215,54 @@ let mismatchEnd = #"{"event":"end","exit_code":1,"result":"source_mismatch","fai
         if c == .source { await w.h.fake.openGate() }
     }
 
-    @Test func installResetsTheWizardForTheNextVersion() async throws {
+    @Test func installIsFollowedUntilTheSheetGoes() async throws {
         let w = WizardHarness()
         await w.status(wizardStatus())
         await w.installerReady()
         await w.check([checkEnd])
         try await w.wizard.install()
-        #expect(w.wizard.installer == nil); #expect(w.wizard.bottleName == ""); #expect(w.wizard.source == nil)
-        #expect(w.wizard.state(.installer) == .open); #expect(w.wizard.state(.check) == .waiting)
+        let ctx = w.h.model.watched?.ctx
+        #expect(w.wizard.installCtx != nil); #expect(w.wizard.installCtx == ctx); #expect(w.wizard.passed(.install))
+        w.wizard.reset()   // the sheet went (Hide, Done, Esc): the next showing starts clean, the run goes on
+        #expect(w.wizard.installCtx == nil); #expect(w.wizard.installer == nil); #expect(w.wizard.bottleName == "")
+        #expect(w.wizard.source == nil); #expect(w.wizard.state(.installer) == .open); #expect(w.wizard.state(.check) == .waiting)
+        #expect(w.h.model.watched?.ctx == ctx)
+    }
+
+    @Test func aLateAnswerAfterResetChangesNothing() async {
+        let w = WizardHarness()
+        await w.status(wizardStatus())
+        let p = w.folder.path
+        await w.h.fake.set(query: ["find-installer", p, "--json"], out(okInstaller))
+        await w.h.fake.set(query: ["link-installer", "2025", p], out("ok\n"))
+        await w.h.fake.hold(query: ["link-installer", "2025", p])
+        let t = Task { await w.wizard.chooseInstaller(w.folder) }
+        for _ in 0..<400 { if await w.h.fake.heldWaiting { break }; try? await Task.sleep(for: .milliseconds(5)) }   // bounded
+        #expect(await w.h.fake.heldWaiting)
+        w.wizard.reset()
+        await w.h.fake.release(); await t.value
+        #expect(w.wizard.installer == nil); #expect(w.wizard.bottleName == ""); #expect(w.wizard.state(.installer) == .open)
+    }
+
+    @Test func aLateLinkCannotTakeTheLinkBack() async {
+        let w = WizardHarness()
+        await w.status(wizardStatus())
+        let a = w.folder.path, b = "/tmp/Other Installer"
+        for p in [a, b] {
+            await w.h.fake.set(query: ["find-installer", p, "--json"], out(okInstaller))
+            await w.h.fake.set(query: ["link-installer", "2025", p], out("ok\n"))
+        }
+        await w.h.fake.hold(query: ["link-installer", "2025", a])
+        let first = Task { await w.wizard.chooseInstaller(w.folder) }
+        for _ in 0..<400 { if await w.h.fake.heldWaiting { break }; try? await Task.sleep(for: .milliseconds(5)) }   // bounded
+        w.wizard.reset()                                                   // Cancel, then the sheet again
+        let second = Task { await w.wizard.chooseInstaller(URL(fileURLWithPath: b)) }
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(!(await w.h.fake.calls).contains("run link-installer 2025 \(b)"))   // waits for the earlier link
+        await w.h.fake.release(); await first.value; await second.value
+        let links = await w.h.fake.calls.filter { $0.hasPrefix("run link-installer") }
+        #expect(links == ["run link-installer 2025 \(a)", "run link-installer 2025 \(b)"])   // B is the last word
+        #expect(w.wizard.installer?.folder.path == b)
     }
 
     @Test func busyKeepsCheckAndInstallWaiting() async {
