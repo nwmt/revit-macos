@@ -199,7 +199,7 @@ private struct DisplayKeysTab: View {
                         Text("On").tag("on"); Text("Off").tag("off")
                     }
                     .pickerStyle(.segmented).frame(maxWidth: 420)
-                    Text(SettingsDraft.steelCost).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Text(SettingsDraft.steelCost(year: ref.year)).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     if s == "mixed" { Text("Steel Connections is set only in part. On puts it right.").font(.callout).foregroundStyle(.orange) }
                     if s == "off" { Text("If a model stops opening, turn it back on here.").font(.callout) }
                 }
@@ -210,7 +210,7 @@ private struct DisplayKeysTab: View {
     private func apply() {
         if draft.needsSteelConfirm,
            !Confirm.ask(String(localized: "Turn off Steel Connections?"),
-                        SettingsDraft.steelCost + "\n\n" + String(localized: "If a model stops opening, turn it back on here."),
+                        SettingsDraft.steelCost(year: ref.year) + "\n\n" + String(localized: "If a model stops opening, turn it back on here."),
                         button: String(localized: "Turn Off"), destructive: true) { return }
         let c = draft.changes
         Task { await Confirm.start(app: app, env: env, .set(year: ref.year, bottle: ref.bottle, settings: c)) }

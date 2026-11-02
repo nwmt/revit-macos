@@ -54,8 +54,13 @@ public enum FixesLine: Equatable, Sendable {
 /// Display & Keys: what the bottle has and what is picked; Apply sends only what changed.
 public struct SettingsDraft: Equatable, Sendable {
     public static let keys = ["retina", "keys", "theme", "steel"]
-    /// The price of steel=off, as the engine and versions/2027.md state it.
-    public static let steelCost = String(localized: "On: models with links wait 1 to 3 minutes on first open. Off: they open faster, but the steel connection tools are gone, and 1 of 7 models tried stopped with a serious error while opening.")
+    /// The price of steel=off, as the engine and versions/<year>.md state it.
+    public static func steelCost(year: Int) -> String {
+        if year == 2020 {
+            return String(localized: "On: Revit closes when it draws a view with steel connections. Off: such views open, but the steel connection tools are gone.")
+        }
+        return String(localized: "On: models with links wait 1 to 3 minutes on first open. Off: they open faster, but the steel connection tools are gone, and 1 of 7 models tried stopped with a serious error while opening.")
+    }
 
     public let original: [String: String]
     public var picked: [String: String]

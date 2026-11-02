@@ -105,7 +105,7 @@
  *    windows up by awareness, so per-monitor and system requests stay as they are. Only in Revit 2027's Revit.exe, the
  *    one tested. RVTFIX_DPIPARK set and empty disables.
  *
- * 4, 5 and 10 run when the DLL loads (LdrRegisterDllNotification), or at once if it is already loaded.
+ * 4, 5, 10 and 14 run when the DLL loads (LdrRegisterDllNotification), or at once if it is already loaded.
  *
  * Diagnostics: OutputDebugString with the "[rvtfix]" prefix (CX_DEBUGMSG=+debugstr).
  * 13. Models that crash on open while pyRevit is loaded (2020: ArchiveException 105, "can't fix the ordering of
@@ -113,6 +113,11 @@
  *    and mozglue.dll call setlocale(). On Windows no such library comes into Revit; here they share ucrtbase with it, so
  *    the C locale of the whole process leaves "C", and Revit, reading a model's elements, finds their order wrong.
  *    Fix: in the import address tables of these two DLLs setlocale only answers what is set and sets nothing.
+ * 14. "Virtual Memory - High Usage" after every start with a project open (2020, 2027): Revit compares the process's
+ *    PagefileUsage with the Mac's RAM in SysUtil::checkForExcessivePaging (Utility.dll), and Wine reports the address
+ *    space reserved there, 40 to 130 GB with a few GB in use. The modal dialog then blocks Revit, an MCP server for it
+ *    included. Fix: the exported function answers false (its first three bytes become xor eax,eax; ret). Only in
+ *    Revit.exe. RVTFIX_PAGING set and empty disables.
  */
 #include <windows.h>
 #include <ole2.h>
@@ -364,6 +369,7 @@ typedef void *(*get_image_desc_fn)(void *self, const void *path);
 typedef const WCHAR *(*kstring_wcs_fn)(const void *str);
 typedef void *(*heap_new_fn)(size_t);
 static BOOL imgcache_on;
+static BOOL paging_on;
 static get_image_desc_fn orig_get_image_desc;   /* the moved prologue, then a jump back */
 static kstring_wcs_fn kstring_wcs;              /* OGSObjects!KString::operator const wchar_t * */
 static heap_new_fn *imgdesc_new_slot;           /* the import slot of the function's own operator new */
@@ -443,6 +449,15 @@ static void patch_imagedesc(HMODULE mod)
     if (write_jump(f, (void *)hook_get_image_desc)) trace("OGSOIIOIntegration.dll: GetImageDesc cached for %d ms\n", IMGDESC_TTL);
 }
 
+/* --- 14. The low memory check: Wine's PagefileUsage is the reserved address space --- */
+static void patch_paging(HMODULE mod)
+{
+    static const BYTE no[] = { 0x31, 0xc0, 0xc3 };   /* xor eax,eax; ret: bool false */
+    BYTE *f = (BYTE *)GetProcAddress(mod, "?checkForExcessivePaging@SysUtil@@YA_NXZ");
+    if (!f) { trace("Utility.dll: no SysUtil::checkForExcessivePaging, left as is\n"); return; }
+    trace("Utility.dll: low memory check %s\n", write_mem(f, no, sizeof(no)) ? "answers false" : "write failed");
+}
+
 static void patch_autodesk(HMODULE mod, const WCHAR *name)
 {
     if (!lstrcmpiW(name, L"OGSDeviceDX11.dll")) {
@@ -450,6 +465,7 @@ static void patch_autodesk(HMODULE mod, const WCHAR *name)
         else trace("OGSDeviceDX11.dll: no d3dwp.dll next to Revit.exe, left as is\n");
     } else if (!lstrcmpiW(name, L"DesktopMFC.dll")) patch_mfc((BYTE *)mod);
     else if (imgcache_on && !lstrcmpiW(name, L"OGSOIIOIntegration.dll")) patch_imagedesc(mod);
+    else if (paging_on && !lstrcmpiW(name, L"Utility.dll")) patch_paging(mod);
 }
 
 static void fix_autodesk(void)
@@ -464,15 +480,22 @@ static void fix_autodesk(void)
             imgcache_on = FALSE;
             trace("texture cache: disabled (RVTFIX_IMGCACHE is empty)\n");
         }
+        paging_on = !lstrcmpiW(slash + 1, L"Revit.exe");
+        SetLastError(0);
+        if (paging_on && !GetEnvironmentVariableW(L"RVTFIX_PAGING", env, 2) && GetLastError() != ERROR_ENVVAR_NOT_FOUND) {
+            paging_on = FALSE;
+            trace("low memory check: left as is (RVTFIX_PAGING is empty)\n");
+        }
         lstrcpyW(slash + 1, L"d3dwp.dll");
         have_d3dwp = GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES;
     }
     if ((m = GetModuleHandleW(L"OGSDeviceDX11.dll"))) patch_autodesk(m, L"OGSDeviceDX11.dll");
     if ((m = GetModuleHandleW(L"DesktopMFC.dll"))) patch_autodesk(m, L"DesktopMFC.dll");
     if ((m = GetModuleHandleW(L"OGSOIIOIntegration.dll"))) patch_autodesk(m, L"OGSOIIOIntegration.dll");
+    if ((m = GetModuleHandleW(L"Utility.dll"))) patch_autodesk(m, L"Utility.dll");
 }
 
-/* DLLs loaded later: WebView2Loader.dll (2), OGSDeviceDX11.dll, DesktopMFC.dll and OGSOIIOIntegration.dll (4, 5, 10). */
+/* DLLs loaded later: WebView2Loader.dll (2), OGSDeviceDX11.dll, DesktopMFC.dll, OGSOIIOIntegration.dll and Utility.dll (4, 5, 10, 14). */
 static void watch_dlls(void)
 {
     ldr_register_fn reg = (ldr_register_fn)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "LdrRegisterDllNotification");

@@ -761,7 +761,7 @@ case "$CMD" in
       in_list "$s" ${STEPS[@]+"${STEPS[@]}"} && continue
       [ "$s" = gdrive ] && continue   # every profile has it; a bottle of an older profile gets it here
       [ "$s" = theme ] && die "The theme setting is for Revit 2027 only."
-      [ "$s" = steel ] && die "The steel setting is for Revit 2027 only."
+      [ "$s" = steel ] && die "The steel setting is for Revit 2020 and 2027 only."
       die "Retina and Mac keys are tested on Revit 2020 and 2027 only."
     done
     need_crossover; bottle_guard must_exist "$YEAR" "$NAME"; not_busy
@@ -770,8 +770,11 @@ case "$CMD" in
         || die "G: changes only while nothing runs in the bottle: quit Revit, then ./revit stop $YEAR$SFX and try again."
     fi
     echo "Revit $YEAR ($NAME): ${shown[*]}. Applies the next time Revit starts."
-    [ "${REVIT_STEEL:-}" != off ] \
-      || echo "Linked models open faster, but the steel connection tools are gone and a few models stop with a serious error while opening. If one does: ./revit set $YEAR$SFX steel=on"
+    if [ "${REVIT_STEEL:-}" = off ] && [ "$YEAR" = 2020 ]; then
+      echo "Views with steel connections no longer close Revit, but the steel connection tools are gone. To bring them back: ./revit set $YEAR$SFX steel=on"
+    elif [ "${REVIT_STEEL:-}" = off ]; then
+      echo "Linked models open faster, but the steel connection tools are gone and a few models stop with a serious error while opening. If one does: ./revit set $YEAR$SFX steel=on"
+    fi
     in_list retina "${list[@]}" \
       && echo "The first start may open Revit's window at another size: maximize it, quit Revit and start it again."
     run_ctx_new; sup_traps; lock_take --no-trap "./revit set $YEAR $NAME"; bottle_guard must_exist "$YEAR" "$NAME"

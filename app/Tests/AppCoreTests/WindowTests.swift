@@ -76,7 +76,8 @@ let bottle2027 = #"{"name":"rvt2027-a","year":"2027","revit":true,"running":fals
     var d = SettingsDraft(settings2027)
     d.picked["steel"] = "off"
     #expect(d.needsSteelConfirm); #expect(d.changes == ["steel=off"])
-    #expect(SettingsDraft.steelCost.contains("steel connection tools")); #expect(SettingsDraft.steelCost.contains("1 of 7"))
+    #expect(SettingsDraft.steelCost(year: 2027).contains("steel connection tools")); #expect(SettingsDraft.steelCost(year: 2027).contains("1 of 7"))
+    #expect(SettingsDraft.steelCost(year: 2020).contains("view with steel connections")); #expect(!SettingsDraft.steelCost(year: 2020).contains("1 of 7"))
     var on = SettingsDraft(["steel": "off"])
     on.picked["steel"] = "on"
     #expect(!on.needsSteelConfirm); #expect(on.changes == ["steel=on"])

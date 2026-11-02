@@ -978,7 +978,11 @@ def collect_bottle(ctx):
     return b
 
 
-STEEL_MANIFESTS = ("Autodesk.SteelConnectionsDB.addin", "Autodesk.SteelConnectionsUI.addin")
+def steel_manifests(year):
+    """As steel_manifests of scripts/lib/common.sh."""
+    if int(year) == 2020:
+        return ("RvtDwgAddon.addin", "RvtSteelConnectionsUI.addin")
+    return ("Autodesk.SteelConnectionsDB.addin", "Autodesk.SteelConnectionsUI.addin")
 
 
 def collect_steel(p, year):
@@ -988,8 +992,8 @@ def collect_steel(p, year):
     if not os.path.isdir(active):   # Revit there and no add-in, or manifests kept without it: the bottle lost something
         revit = os.path.isfile(os.path.join(os.path.dirname(os.path.dirname(active)), "Revit.exe"))
         return "missing" if revit or os.path.isdir(stash) else "none"
-    here = [os.path.isfile(os.path.join(active, m)) for m in STEEL_MANIFESTS]
-    away = [os.path.isfile(os.path.join(stash, m)) for m in STEEL_MANIFESTS]
+    here = [os.path.isfile(os.path.join(active, m)) for m in steel_manifests(year)]
+    away = [os.path.isfile(os.path.join(stash, m)) for m in steel_manifests(year)]
     if not all(a or s for a, s in zip(here, away)):
         return "missing"
     return "on" if not any(away) else "off" if not any(here) else "mixed"

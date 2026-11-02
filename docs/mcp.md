@@ -210,8 +210,8 @@ When the assistant asks to change the model or run Python, Revit shows **Revit M
 seconds (60 for Python and pictures of views, 120 for saving): after that the assistant stops waiting, though Revit still
 does what you allowed.
 
-A dialog open in Revit blocks every request, and the server does not start until it closes. On a large project that
-can be **Virtual Memory - High Usage**: close it. After `./revit stop` or a restart of Revit, connect the assistant again.
+A dialog open in Revit blocks every request, and the server does not start until it closes. After `./revit stop` or a
+restart of Revit, connect the assistant again.
 
 Two of its tools do nothing on a Mac: `launch_revit` and `list_revit_installations` look for Revit in Windows, outside
 the bottle. Start Revit from `~/Applications` instead. Close documents in Revit yourself:

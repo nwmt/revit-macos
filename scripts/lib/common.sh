@@ -320,21 +320,26 @@ bottle_guard() { # $1 = must_exist | running_ok (like must_exist, Revit may run:
 }
 
 # ---- Steel Connections (./revit set steel=, step steel): where its two manifests are ----
-STEEL_MANIFESTS=(Autodesk.SteelConnectionsDB.addin Autodesk.SteelConnectionsUI.addin)
+steel_manifests() { # $1 = year: the two manifests of Steel Connections in its AddIns\SteelConnections
+  case "$1" in
+    2020) echo RvtDwgAddon.addin RvtSteelConnectionsUI.addin ;;
+    *) echo Autodesk.SteelConnectionsDB.addin Autodesk.SteelConnectionsUI.addin ;;
+  esac
+}
 steel_active() { echo "$(revit_dir_unix "$1" "$2")/AddIns/SteelConnections"; }   # $1 = bottle path, $2 = year
 steel_stash() { echo "$1/revit-macos/steel-off"; }   # $1 = bottle path; outside drive_c: Revit does not look there
 steel_state() { # $1 = bottle path, $2 = year → on | off | mixed (both files, split or doubled) | missing | none (no add-in)
-  local a s f na=0 ns=0 both=0
-  a="$(steel_active "$1" "$2")"; s="$(steel_stash "$1")"
+  local a s f na=0 ns=0 both=0 m
+  a="$(steel_active "$1" "$2")"; s="$(steel_stash "$1")"; read -r -a m <<<"$(steel_manifests "$2")"
   if [ ! -d "$a" ]; then
     if [ -n "$(ls -A "$s" 2>/dev/null)" ]; then echo missing; else echo none; fi   # manifests kept, the add-in itself lost
     return 0
   fi
-  for f in "${STEEL_MANIFESTS[@]}"; do
+  for f in "${m[@]}"; do
     [ -f "$a/$f" ] && na=$((na + 1)); [ -f "$s/$f" ] && ns=$((ns + 1))
     [ -f "$a/$f" ] || [ -f "$s/$f" ] && both=$((both + 1))
   done
-  if [ "$both" != "${#STEEL_MANIFESTS[@]}" ]; then echo missing
+  if [ "$both" != "${#m[@]}" ]; then echo missing
   elif [ "$ns" = 0 ]; then echo on
   elif [ "$na" = 0 ]; then echo off
   else echo mixed; fi

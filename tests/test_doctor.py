@@ -1092,13 +1092,23 @@ class Settings(Sandbox):
             self.assertEqual(dr.collect_steel(t, 2027), "missing")   # Revit without the add-in
             os.makedirs(a); os.makedirs(s)
             self.assertEqual(dr.collect_steel(t, 2027), "missing")
-            for m in dr.STEEL_MANIFESTS:
+            for m in dr.steel_manifests(2027):
                 open(os.path.join(a, m), "w").close()
             self.assertEqual(dr.collect_steel(t, 2027), "on")
-            os.rename(os.path.join(a, dr.STEEL_MANIFESTS[0]), os.path.join(s, dr.STEEL_MANIFESTS[0]))
+            os.rename(os.path.join(a, dr.steel_manifests(2027)[0]), os.path.join(s, dr.steel_manifests(2027)[0]))
             self.assertEqual(dr.collect_steel(t, 2027), "mixed")
-            os.rename(os.path.join(a, dr.STEEL_MANIFESTS[1]), os.path.join(s, dr.STEEL_MANIFESTS[1]))
+            os.rename(os.path.join(a, dr.steel_manifests(2027)[1]), os.path.join(s, dr.steel_manifests(2027)[1]))
             self.assertEqual(dr.collect_steel(t, 2027), "off")
+
+    def test_steel_manifests_by_year(self):
+        self.assertEqual(dr.steel_manifests(2020), ("RvtDwgAddon.addin", "RvtSteelConnectionsUI.addin"))
+        self.assertEqual(dr.steel_manifests(2027), ("Autodesk.SteelConnectionsDB.addin", "Autodesk.SteelConnectionsUI.addin"))
+        with tempfile.TemporaryDirectory() as t:
+            a = os.path.join(t, "drive_c/Program Files/Autodesk/Revit 2020/AddIns/SteelConnections")
+            os.makedirs(a)
+            for m in dr.steel_manifests(2020):
+                open(os.path.join(a, m), "w").close()
+            self.assertEqual(dr.collect_steel(t, 2020), "on")
 
     def test_no_settings_group_without_the_steps_or_the_registry(self):
         self.regs()

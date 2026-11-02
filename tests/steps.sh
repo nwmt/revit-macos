@@ -104,12 +104,12 @@ reset; in_repo 'load_profile 2020; profile_json; load_profile 2027; profile_json
 check "profile_json: one JSON object per profile, with its lists" eval '/usr/bin/perl -MJSON::PP -ne '"'"'my $j = decode_json($_);
   exit 1 unless ref $j->{STEPS} eq "ARRAY" && ref $j->{PKGS} eq "ARRAY" && ref $j->{RICHEDIT} eq "ARRAY"; print "$j->{YEAR} ",
   scalar @{$j->{STEPS}}, " $j->{STEPS}[0] ", scalar @{$j->{PKGS}}, " $j->{DOTNET} [$j->{ENSCAPE}] $j->{RVTFIX_ENV}[0]\n"'"'"' <<<"$OUT" |
-  tr "\n" "|" | grep -qxF "2020 24 netfx 0 netfx47 [3] RVTFIX_CEF_ARGS=|2027 27 vc 32 net10 [4] |"'
+  tr "\n" "|" | grep -qxF "2020 25 netfx 0 netfx47 [3] RVTFIX_CEF_ARGS=|2027 27 vc 32 net10 [4] |"'
 reset; mkdir -p "$T/real"; ln -s "$T/real" "$T/link"; ln -s "$T/nowhere" "$T/dangling"
 in_repo 'for p in "$HOME/not/there/yet" "'"$T"'/link/sub" "'"$T"'/dangling"; do free_gb "$p"; volume_id "$p"; done'
 check "free_gb and volume_id: a number for a path that is not there, a link, a link to nothing" \
   eval '[ "$(grep -cE "^[0-9]+$" <<<"$OUT")" = 6 ] && [ "$(sed -n 2p <<<"$OUT")" = "$(stat -f %d "$T")" ]'
-reset; in_repo 'load_profile 2020 && echo "${#STEPS[@]} ${STEPS[0]} ${STEPS[23]}"'; expect "the 2020 profile has its 24 steps" 0 "24 netfx gdrive"
+reset; in_repo 'load_profile 2020 && echo "${#STEPS[@]} ${STEPS[0]} ${STEPS[24]}"'; expect "the 2020 profile has its 25 steps" 0 "25 netfx gdrive"
 reset; in_repo 'for y in "${REVIT_SUPPORTED[@]}"; do load_profile "$y"; in_list pdfprinter "${STEPS[@]}" && echo "$y"; done; echo checked'
 expect "no year installs the PDF printer by default" 0 "checked"; check "pdfprinter in no STEPS" test "$OUT" = checked
 
@@ -627,6 +627,13 @@ check "steel=on: no empty folder left" test ! -d "$SS"
 steel_run REVIT_STEEL=on; expect "steel=on again" 0 "Steel Connections on"; check "steel=on again: nothing changes" steel_is "DB UI" ""
 steel_world "DB" "UI"; steel_run REVIT_STEEL=off; expect "steel=off from a split state" 0 "off"; check "steel=off from a split state: both away" steel_is "" "DB UI"
 steel_world "DB" "UI"; steel_run REVIT_STEEL=on; expect "steel=on from a split state" 0 "on"; check "steel=on from a split state: both back" steel_is "DB UI" ""
+reset; mkbottle rvt2020-t 2020 2020
+SA2="$BOTTLES/rvt2020-t/drive_c/Program Files/Autodesk/Revit 2020/AddIns/SteelConnections"; mkdir -p "$SA2"
+touch "$SA2/RvtDwgAddon.addin" "$SA2/RvtSteelConnectionsUI.addin" "$SA2/DscAddinManagerBase.dll"
+STEP_ENV=(REVIT_STEEL=off); run_steps 2020 rvt2020-t steel; expect "steel=off on 2020" 0 "Steel Connections off"
+check "steel=off on 2020: its two manifests moved, the DLL stays" eval '[ "$(ls "$SA2")" = DscAddinManagerBase.dll ] && [ "$(ls "$BOTTLES/rvt2020-t/revit-macos/steel-off" | xargs)" = "RvtDwgAddon.addin RvtSteelConnectionsUI.addin" ]'
+STEP_ENV=(REVIT_STEEL=on); run_steps 2020 rvt2020-t steel; expect "steel=on on 2020" 0 "Steel Connections on"
+check "steel=on on 2020: both back" eval '[ "$(ls "$SA2" | xargs)" = "DscAddinManagerBase.dll RvtDwgAddon.addin RvtSteelConnectionsUI.addin" ]'
 steel_world "DB UI" "DB UI"; steel_run REVIT_STEEL=off; expect "steel=off with both places full" 0 "off"; check "steel=off with both places full: the folder is empty" steel_is "" "DB UI"
 steel_world "DB UI" "DB UI"; steel_run REVIT_STEEL=on; expect "steel=on with both places full" 0 "on"; check "steel=on: the kept file wins" grep -qx s "$SA/Autodesk.SteelConnectionsDB.addin"
 steel_world "DB" ""; steel_run REVIT_STEEL=off; expect "steel=off with a file lost" 1 "steel"; check "steel=off with a file lost: nothing moved" steel_is "DB" ""

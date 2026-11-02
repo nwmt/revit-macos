@@ -8,7 +8,7 @@ PRODKEY=829L1
 SIGNIN=adsso
 LICENSING_OK="1"                   # the licensing installer's takeown and `sc sdshow` fail under Wine
 STEPS=(netfx vc fonts licensing svcshim adsso rcl rvt ret materials register ncryptshim ssoenv wbemshim richedit dynamo
-  d3d9dxvk warpshim rvtfix tlbpin samples retina mackeys gdrive)
+  d3d9dxvk warpshim rvtfix tlbpin samples retina mackeys steel gdrive)
 PKGS=""
 REVITINI=()
 THEME=0

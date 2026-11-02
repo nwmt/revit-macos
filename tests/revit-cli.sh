@@ -517,7 +517,7 @@ mkdir -p "$BOTTLES/rvt2024-a/revit-macos"; printf '{"kind":"install","result":"o
 run "" status --json; check "status: what built the bottle" eval '[ "$(sj rvt2024-a built)" = "{\"build\":\"\",\"engine\":\"app:0.1.3\",\"shims\":\"0.15.0\",\"time\":\"t\"}" ]'
 reset; bottle rvt2027-a 2027 2027; bottle rvt2020-a 2020 2020; run "" status --json
 check "status: 2027 has all five settings" eval '[ "$(sj rvt2027-a settings)" = "{\"gdrive\":\"auto\",\"keys\":\"\",\"retina\":\"\",\"steel\":\"none\",\"theme\":\"\"}" ]'
-check "status: 2020 has no theme, no steel" eval '[ "$(sj rvt2020-a settings)" = "{\"gdrive\":\"auto\",\"keys\":\"\",\"retina\":\"\"}" ]'
+check "status: 2020 has steel, no theme" eval '[ "$(sj rvt2020-a settings)" = "{\"gdrive\":\"auto\",\"keys\":\"\",\"retina\":\"\",\"steel\":\"none\"}" ]'
 run "" status; check "status without --json: no new words" eval '! grep -q support <<<"$OUT"'
 check "status: a non-Revit bottle is left out" eval '! grep -q "\"exp\"" <<<"$OUT"'
 reset; bottle rvt2027-a 2027 2027; mkdir -p "$BOTTLES/rvt2027-a/dosdevices" "$H/Library/CloudStorage/GoogleDrive-someone@example.com/My Drive"
@@ -739,7 +739,10 @@ check "set steel=off: says what it costs" grep -qF "a few models stop with a ser
 reset; bottle rvt2027-a 2027 2027; run "" set 2027 steel=on; expect "set steel=on" 0 "Revit 2027 (rvt2027-a): steel=on"
 check "set steel=on: no warning" eval '! grep -q "serious error" <<<"$OUT"'
 reset; bottle rvt2027-a 2027 2027; run "" set 2027 steel=maybe; expect "set: an unknown steel value" 1 "steel is on or off"
-reset; bottle rvt2020-a 2020 2020; run "" set 2020 steel=off; expect "set steel on 2020: refused" 1 "The steel setting is for Revit 2027 only."
+reset; bottle rvt2020-a 2020 2020; run "" set 2020 steel=off; expect "set steel=off on 2020" 0 "Revit 2020 (rvt2020-a): steel=off"
+check "set steel=off on 2020: the steel step" called "run-steps.sh 2020 rvt2020-a steel |"
+check "set steel=off on 2020: says what it costs there" grep -qF "Views with steel connections no longer close Revit" <<<"$OUT"
+reset; bottle rvt2025-a 2025 2025; run "" set 2025 steel=off; expect "set steel on 2025: refused" 1 "The steel setting is for Revit 2020 and 2027 only."
 reset; bottle rvt2027-a 2027 2027; run "" set 2027 theme=blue; expect "set: an unknown theme" 1 "theme is mac (follow the Mac), light or dark"
 reset; bottle rvt2026-a 2026 2026; run "" set 2026 theme=mac; expect "set theme: 2027 only" 1 "The theme setting is for Revit 2027 only."
 check "set theme 2026: nothing runs" not_called "run-steps.sh"

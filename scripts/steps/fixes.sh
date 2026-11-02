@@ -107,28 +107,29 @@ step_downloads() { # Load Autodesk Family stays at 100%: the WebView2 browser sa
 }
 
 steel_set_off() { # the manifests go to the bottle's own folder; a file Autodesk's packages brought back goes too
-  local a s f
-  a="$(steel_active "$B" "$YEAR")"; s="$(steel_stash "$B")"
+  local a s f m
+  a="$(steel_active "$B" "$YEAR")"; s="$(steel_stash "$B")"; read -r -a m <<<"$(steel_manifests "$YEAR")"
   mkdir -p "$s" || return 1
-  for f in "${STEEL_MANIFESTS[@]}"; do
+  for f in "${m[@]}"; do
     if [ -f "$s/$f" ]; then rm -f "$a/$f" || return 1
     else mv "$a/$f" "$s/$f" || return 1; fi
   done
 }
 steel_reapply() { # after packages were delivered: a bottle set to off stays off; a bottle never set is left alone
-  local s f had=0
-  s="$(steel_stash "$B")"
-  for f in "${STEEL_MANIFESTS[@]}"; do [ -f "$s/$f" ] && had=1; done
+  local s f had=0 m
+  s="$(steel_stash "$B")"; read -r -a m <<<"$(steel_manifests "$YEAR")"
+  for f in "${m[@]}"; do [ -f "$s/$f" ] && had=1; done
   [ "$had" = 1 ] || return 0
   [ "$(steel_state "$B" "$YEAR")" != missing ] || { echo "a Steel Connections manifest is missing: ./revit rebuild"; return 1; }
   steel_set_off
 }
 step_steel() { # Models with links wait 1 to 3 minutes on first open: Steel Connections asks SQL LocalDB, which the bottle
-  # has not got, and SqlClient retries until its timeout. Revit's own add-in settings leave built-in add-ins alone, so
+  # has not got, and SqlClient retries until its timeout (2027). On 2020 SqlClient fails at once, Wine's token has no
+  # TokenRestrictedSids, and Revit quits when it draws a view with steel connections. Revit's own add-in settings leave built-in add-ins alone, so
   # off moves its two manifests out of the add-in's folder and on puts them back; no Autodesk file changes.
   # REVIT_STEEL=on|off; empty (an install): keep what the bottle has. Revit must be closed (bottle_guard)
-  local mode="${REVIT_STEEL:-}" a s f
-  a="$(steel_active "$B" "$YEAR")"; s="$(steel_stash "$B")"
+  local mode="${REVIT_STEEL:-}" a s f m
+  a="$(steel_active "$B" "$YEAR")"; s="$(steel_stash "$B")"; read -r -a m <<<"$(steel_manifests "$YEAR")"
   case "$mode" in
     "") steel_reapply; return ;;
     on|off) ;;
@@ -139,7 +140,7 @@ step_steel() { # Models with links wait 1 to 3 minutes on first open: Steel Conn
   esac
   if [ "$mode" = off ]; then steel_set_off || return 1
   else
-    for f in "${STEEL_MANIFESTS[@]}"; do
+    for f in "${m[@]}"; do
       [ ! -f "$s/$f" ] || mv -f "$s/$f" "$a/$f" || return 1
     done
     rmdir "$s" 2>/dev/null
