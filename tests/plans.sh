@@ -82,6 +82,24 @@ $OUT"; fi
   prep; OUT="$(cd / && exec 7>"$T/ev" && "${INST_ENV[@]}" REVIT_EVENTS_FD=7 /bin/bash "$R/install.sh" 2024 rvt2024-t 2>&1)"
   if grep -q '"event":"action","id":"shims","state":"running"' "$T/ev" && grep -q '"event":"action","id":"apps","state":"done","exit":0' "$T/ev"; then
     ok "install.sh emits each action"; else fail "install.sh emits each action" "$(cat "$T/ev")"; fi
+  # the plan, before the first action: the actions as they ran and the profile's steps, both arrays of strings
+  steps24="$(cd / && HOME="$H" ROOT="$R" /bin/bash -c '. "$ROOT/scripts/lib/common.sh"; load_profile 2024; echo "${STEPS[*]}"')"
+  if /usr/bin/perl -MJSON::PP -e 'my ($plan, @ran, $n, $first); open(my $f, "<", $ARGV[0]) or exit 1;
+    while (<$f>) { my $e = decode_json($_); if ($e->{event} eq "plan") { $n++; $plan = $e; $first //= "plan" }
+      if ($e->{event} eq "action") { $first //= "action"; push @ran, $e->{id} if $e->{state} eq "running" } }
+    exit 1 unless $n == 1 && $first eq "plan" && ref $plan->{actions} eq "ARRAY" && ref $plan->{steps} eq "ARRAY";
+    exit 1 if grep { ref $_ } @{$plan->{actions}}, @{$plan->{steps}};
+    exit 1 unless "@{$plan->{actions}}" eq "@ran" && "@{$plan->{steps}}" eq $ARGV[1]' "$T/ev" "$steps24"
+  then ok "install.sh: one plan event first, its actions and steps"; else fail "install.sh: one plan event first, its actions and steps" "$(cat "$T/ev")"; fi
+  prep; OUT="$(cd / && exec 7>"$T/ev" && "${INST_ENV[@]}" REVIT_EVENTS_FD=7 INSTALL_DRYRUN=1 /bin/bash "$R/install.sh" 2024 rvt2024-t 2>&1)"
+  ! grep -q '"event":"plan"' "$T/ev" && ok "a dry run sends no plan" || fail "a dry run sends no plan" "$(cat "$T/ev")"
+  prep
+  printf '#!/bin/bash\nexit 1\n' > "$R/scripts/get-redist.sh"
+  OUT="$(cd / && exec 7>"$T/ev" && "${INST_ENV[@]}" REVIT_EVENTS_FD=7 /bin/bash "$R/install.sh" 2024 rvt2024-t 2>&1)"
+  if /usr/bin/perl -MJSON::PP -e 'my ($plan, @ran); open(my $f, "<", $ARGV[0]) or exit 1;
+    while (<$f>) { my $e = decode_json($_); $plan = $e if $e->{event} eq "plan"; push @ran, $e->{id} if $e->{event} eq "action" && $e->{state} eq "running" }
+    my @p = @{$plan->{actions}}; exit 1 unless @ran && @ran < @p; for my $i (0..$#ran) { exit 1 unless $ran[$i] eq $p[$i] }' "$T/ev"
+  then ok "install.sh cut short: what ran is the start of the plan"; else fail "install.sh cut short: what ran is the start of the plan" "$(cat "$T/ev")"; fi
   prep; printf '#!/bin/bash\nexit 1\n' > "$R/scripts/get-shims.sh"; inst 2024 rvt2024-t
   if [ "$RC" = 1 ] && grep -qF "Step failed: scripts/get-shims.sh" <<<"$OUT"; then ok "a failed action stops install.sh"; else fail "a failed action stops install.sh" "$OUT"; fi
   grep -qE '^   shims +exit=1 ' "$R"/logs/rvt2024-t/*-install/summary.txt && ok "the failed action is in summary.txt" || fail "the failed action is in summary.txt" ""

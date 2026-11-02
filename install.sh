@@ -188,6 +188,8 @@ RUNLOG_REQUESTED="${STEPS[*]}"; RUNLOG_EXTRACTED="$DST"; trap 'rc_=$?; bottle_ou
 cp "$SL" "$RUN_DIR/source.list"; export REVIT_SOURCE_LIST="$RUN_DIR/source.list"
 result_set log_dir "$RUN_DIR"; export INSTALL_PARENT=1   # the runner leaves the final result to this script
 echo; echo "Logs: $(tilde "$RUN_DIR")"
+json_list() { local x o=""; for x in "$@"; do o+="${o:+,}$(json_str "$x")"; done; printf '[%s]' "$o"; }
+emit plan actions "$(json_list "${PLAN[@]}")" steps "$(json_list ${STEPS[@]+"${STEPS[@]}"})"   # the app draws the phases ahead
 t0=$SECONDS; i=1
 for a in "${PLAN[@]}"; do
   stop_check

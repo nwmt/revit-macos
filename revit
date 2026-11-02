@@ -242,7 +242,7 @@ esac
 . "$ROOT/scripts/lib/points.sh"
 status_extra() { # $1 = bottle path, $2 = year, $3 = theme_mode, $4 = gdrive state as JSON: the JSON keys support, settings, built
   ( load_profile "$2" || { printf ',"support":null,"settings":{},"built":null'; exit 0; }
-    python3 -I -B "$ROOT/tools/bottle_state.py" "$1" --status "$STATUS" --tested "$TESTED" --gaps "$GAPS" --steps "${STEPS[*]}" \
+    python3 -I -B "$ROOT/tools/bottle_state.py" "$1" --status "$STATUS" --tested "$TESTED" --gaps "$GAPS" --signin "${SIGNIN:-}" --steps "${STEPS[*]}" \
       --theme "$3" --steel "$(in_list steel "${STEPS[@]}" && steel_state "$1" "$2")" --gdrive "$4" 2>/dev/null \
       || printf ',"support":null,"settings":{},"built":null' )
 }

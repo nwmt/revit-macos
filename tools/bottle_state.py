@@ -3,12 +3,12 @@
 """What ./revit status --json says about one bottle beyond its files: the display and key settings and what built it.
 
   bottle_state.py <bottle>      prints {"retina": …, "keys": …, "built": …} as JSON
-  bottle_state.py <bottle> --status S --tested T --gaps G --steps "…" --theme M --steel S --gdrive JSON
+  bottle_state.py <bottle> --status S --tested T --gaps G --steps "…" --theme M --steel S --gdrive JSON --signin I
                                 prints the bottle's keys of ./revit status --json: ,"support":…,"settings":…,"built":…
 
 retina: on, compact, off; mixed when the values fit no ./revit set; "" when they cannot be read. keys: mac, windows,
 "" otherwise. built: shims, engine and time of the newest install that ended ok or partial; null without one. It reads
-the bottle's files only, no Wine, and writes nothing. Run with python3 -I -B.
+the bottle's files only, no Wine, and writes nothing. support.signin is the profile's SIGNIN (idmgr: the browser). Run with python3 -I -B.
 """
 import argparse
 import json
@@ -61,7 +61,7 @@ def status_keys(state, a):
         drive = ""
     wanted = (("retina", "retina", state["retina"]), ("mackeys", "keys", state["keys"]), ("theme", "theme", a.theme),
               ("steel", "steel", a.steel), ("gdrive", "gdrive", drive))
-    keys_ = {"support": {"status": a.status, "tested": a.tested, "gaps": a.gaps},
+    keys_ = {"support": {"status": a.status, "tested": a.tested, "gaps": a.gaps, "signin": a.signin or ""},
              "settings": {k: v for step, k, v in wanted if step in steps}, "built": state["built"]}
     return "," + json.dumps(keys_, separators=(",", ":"), ensure_ascii=False)[1:-1]
 
@@ -69,7 +69,7 @@ def status_keys(state, a):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("bottle")
-    for o in ("status", "tested", "gaps", "steps", "theme", "steel", "gdrive"):
+    for o in ("status", "tested", "gaps", "steps", "theme", "steel", "gdrive", "signin"):
         p.add_argument("--" + o)
     a = p.parse_args()
     s = doctor.collect_settings(a.bottle)

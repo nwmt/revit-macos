@@ -509,7 +509,7 @@ check "status: valid JSON" eval 'printf "%s" "$OUT" | /usr/bin/perl -MJSON::PP -
 check "status: a Revit bottle" grep -qF '{"name":"rvt2024-a","year":"2024","revit":true,"running":false,"revit_pids":[],"addins":[],"theme_mode":"","gdrive":{"mode": "auto", "mapping": "none", "accounts": "zero", "names": 0, "settings": false, "names_kind": "en"},' <<<"$OUT"
 check "status: a half-installed bottle" grep -qF '{"name":"rvt2025-b","year":"2025","revit":false,' <<<"$OUT"
 sj() { /usr/bin/perl -MJSON::PP -e 'my $d = decode_json($ARGV[0]); my ($b) = grep { $_->{name} eq $ARGV[1] } @{$d->{bottles}}; print JSON::PP->new->canonical->allow_nonref->encode($b->{$ARGV[2]})' "$OUT" "$1" "$2"; }
-check "status: support comes from the profile" eval '[ "$(sj rvt2024-a support)" = "{\"gaps\":\"First PDF print may produce nothing\",\"status\":\"works\",\"tested\":\"2024.3.6\"}" ]'
+check "status: support comes from the profile" eval '[ "$(sj rvt2024-a support)" = "{\"gaps\":\"First PDF print may produce nothing\",\"signin\":\"idmgr\",\"status\":\"works\",\"tested\":\"2024.3.6\"}" ]'
 check "status: settings only where the profile has the step" eval '[ "$(sj rvt2024-a settings)" = "{\"gdrive\":\"auto\"}" ]'
 check "status: a bottle no install record names" eval '[ "$(sj rvt2024-a built)" = null ]'
 check "status: the shims of this engine" grep -q '"shims_now":"' <<<"$OUT"
@@ -518,6 +518,7 @@ run "" status --json; check "status: what built the bottle" eval '[ "$(sj rvt202
 reset; bottle rvt2027-a 2027 2027; bottle rvt2020-a 2020 2020; run "" status --json
 check "status: 2027 has all five settings" eval '[ "$(sj rvt2027-a settings)" = "{\"gdrive\":\"auto\",\"keys\":\"\",\"retina\":\"\",\"steel\":\"none\",\"theme\":\"\"}" ]'
 check "status: 2020 has steel, no theme" eval '[ "$(sj rvt2020-a settings)" = "{\"gdrive\":\"auto\",\"keys\":\"\",\"retina\":\"\",\"steel\":\"none\"}" ]'
+check "status: how each year signs in" eval 'grep -q "\"signin\":\"adsso\"" <<<"$(sj rvt2020-a support)" && grep -q "\"signin\":\"idmgr\"" <<<"$(sj rvt2027-a support)"'
 run "" status; check "status without --json: no new words" eval '! grep -q support <<<"$OUT"'
 check "status: a non-Revit bottle is left out" eval '! grep -q "\"exp\"" <<<"$OUT"'
 reset; bottle rvt2027-a 2027 2027; mkdir -p "$BOTTLES/rvt2027-a/dosdevices" "$H/Library/CloudStorage/GoogleDrive-someone@example.com/My Drive"
