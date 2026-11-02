@@ -66,9 +66,9 @@ class BottleState(unittest.TestCase):
         self.regs()
         r = subprocess.run([sys.executable, "-I", "-B", TOOL, self.b, "--status", "works", "--tested", "2027.3", "--gaps", "G",
                             "--steps", "vc retina mackeys steel gdrive", "--theme", "", "--steel", "off",
-                            "--gdrive", '{"mode": "account"}'], capture_output=True, text=True, check=True)
+                            "--gdrive", '{"mode": "account"}', "--signin", "idmgr"], capture_output=True, text=True, check=True)
         d = json.loads("{" + r.stdout[1:] + "}")
-        self.assertEqual(d, {"support": {"status": "works", "tested": "2027.3", "gaps": "G"}, "built": None,
+        self.assertEqual(d, {"support": {"status": "works", "tested": "2027.3", "gaps": "G", "signin": "idmgr"}, "built": None,
                              "settings": {"retina": "on", "keys": "mac", "steel": "off", "gdrive": "account"}})
 
     def test_built_old_records(self):

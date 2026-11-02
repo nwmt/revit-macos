@@ -17,7 +17,7 @@ public enum InstallPhases {
         for a in s.actions where !ids.contains(a.id) { ids.append(a.id) }
         return ids.map { id in
             let item = s.actions.first { $0.id == id }
-            let state = item.map { state($0.state) } ?? .todo
+            let state: Phase.State = item.map { Self.state($0.state) } ?? .todo
             var detail = "", percent: Int?
             switch (id, state) {
             case ("revit", .running):
