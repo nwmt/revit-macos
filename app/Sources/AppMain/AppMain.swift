@@ -1,5 +1,5 @@
-// The app: a menu (MenuBarExtra) and its windows — the main window (Library, a page per Revit, Activity), the first-run
-// wizard, the settings. Every decision is the engine's (AppCore's models ask it); these views only draw and ask.
+// The app: a menu (MenuBarExtra) and its windows — the main window (Library, a page per Revit, Activity; Add Revit is
+// a sheet over it), the settings. Every decision is the engine's (AppCore's models ask it); these views only draw and ask.
 // The name comes from Info.plist (app/app.conf), never from this file.
 import AppCore
 import AppKit
@@ -34,14 +34,6 @@ struct AppMain: App {
                 Button("Settings…") { env.router.open(.settings) }.keyboardShortcut(",")
             }
         }
-
-        Window("Add Revit", id: Route.wizard.id) {
-            if let app = env.app { WizardWindow(app: app, env: env).appWindow(env) }
-        }
-        .windowResizability(.contentSize)
-        .defaultLaunchBehavior(.suppressed)
-        .restorationBehavior(.disabled)
-        .handlesExternalEvents(matching: [])   // a file from Finder is the delegate's: SwiftUI would show this window for it
 
         Window("Settings", id: Route.settings.id) {
             if let app = env.app { SettingsWindow(app: app, env: env).appWindow(env) }
@@ -182,7 +174,7 @@ struct MenuLabel: View {
         switch LaunchRoute.pick(activeRun: app.watched != nil, forFile: FileInbox.opened, loginItem: LaunchInfo.loginItem,
                                 noBottles: (app.status?.bottles ?? []).isEmpty, busy: app.isBusy, showInDock: SettingsModel.showsInDock(.standard)) {
         case .activity: env.router.open(.run)
-        case .addVersion: env.router.open(.wizard)
+        case .addVersion: env.router.addVersion()
         case .main: env.router.open(.main)
         case .nothing: break
         }

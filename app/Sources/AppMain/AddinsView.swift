@@ -35,7 +35,7 @@ struct AddinsView: View {
             if myRun { Button("Show progress in Activity") { env.router.open(.run) } }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .sheet(isPresented: Binding(get: { license != nil }, set: { if !$0 { license = nil } })) {
+        .routedSheet(isPresented: Binding(get: { license != nil }, set: { if !$0 { license = nil } }), router: env.router) {
             if let l = license {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("This add-in has its own license.").font(.headline)

@@ -31,7 +31,7 @@ struct LibraryView: View {
                 if c.cards.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("No Revit on this Mac yet.").font(.headline)
-                        Button("Add Revit version…") { env.router.open(.wizard) }.disabled(app.isBusy)
+                        Button("Add Revit version…") { env.router.addVersion() }.disabled(app.isBusy)
                     }
                 }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 14, alignment: .top)], spacing: 14) {
@@ -117,10 +117,10 @@ private struct Card: View {
             Text(card.note).font(.callout).foregroundStyle(.secondary).lineLimit(2).frame(minHeight: 34, alignment: .topLeading)
             if card.running { Button("Revit not responding?") { env.router.recover(card.ref) }.buttonStyle(.link).font(.callout) }
             HStack {
-                RevitButton(app: app, year: card.year, bottle: card.bottle, running: card.running, pids: card.pids, blocked: card.taskHere)
+                RevitButton(app: app, env: env, year: card.year, bottle: card.bottle, running: card.running, pids: card.pids, blocked: card.taskHere)
                 let viewer = AppLinks.viewerApp(year: card.year, bottle: card.bottle, home: home)
                 if !card.running, !card.starting, FileManager.default.fileExists(atPath: viewer.path) {
-                    Button("Viewer") { Task { await RevitActions.open(app: app, year: card.year, bottle: card.bottle, viewer: true) } }
+                    Button("Viewer") { Task { await RevitActions.open(app: app, env: env, year: card.year, bottle: card.bottle, viewer: true) } }
                         .disabled(app.isBusy)
                 }
                 Spacer()

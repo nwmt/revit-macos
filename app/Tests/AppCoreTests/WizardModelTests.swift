@@ -258,6 +258,8 @@ let mismatchEnd = #"{"event":"end","exit_code":1,"result":"source_mismatch","fai
         w.wizard.reset()                                                   // Cancel, then the sheet again
         let second = Task { await w.wizard.chooseInstaller(URL(fileURLWithPath: b)) }
         try? await Task.sleep(for: .milliseconds(50))
+        await w.wizard.chooseInstaller(URL(fileURLWithPath: "/tmp/Third"))   // a second choice while B waits: refused
+        #expect(!(await w.h.fake.calls).contains { $0.contains("/tmp/Third") })
         #expect(!(await w.h.fake.calls).contains("run link-installer 2025 \(b)"))   // waits for the earlier link
         await w.h.fake.release(); await first.value; await second.value
         let links = await w.h.fake.calls.filter { $0.hasPrefix("run link-installer") }

@@ -108,6 +108,7 @@ struct ResultView: View {
     let app: AppModel
     let env: AppEnvironment
     let run: WatchedRun
+    var nav: ResultNav?                        // nil: Activity's
 
     var body: some View {
         if run.succeeded {
@@ -117,13 +118,13 @@ struct ResultView: View {
                 if kind == .ok, let r = run.record?.request, isInstall(r) {
                     HStack {
                         let b = app.status?.bottles.first { $0.name == r.bottle }
-                        RevitButton(app: app, year: r.year, bottle: r.bottle, running: b?.running ?? false, pids: b?.revitPids ?? [], blocked: false)
+                        RevitButton(app: app, env: env, year: r.year, bottle: r.bottle, running: b?.running ?? false, pids: b?.revitPids ?? [], blocked: false)
                         Button("Choose add-ins…") { env.router.open(.addins(BottleRef(year: r.year, bottle: r.bottle))) }
                     }
                 }
             }
         } else if let f = app.failure {
-            FailureView(app: app, env: env, run: run, failure: f)
+            FailureView(app: app, env: env, run: run, failure: f, nav: nav ?? .activity(app, env))
         } else {
             Text("The task did not end well. Its log has the details.").foregroundStyle(.secondary)   // details closed
         }

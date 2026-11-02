@@ -85,7 +85,7 @@ struct AiTab: View {
                 }
             }
         }
-        .sheet(isPresented: $adding, onDismiss: { Task { await m.load() } }) { NewConnectionSheet(model: m) }
+        .routedSheet(isPresented: $adding, router: env.router, onDismiss: { Task { await m.load() } }) { NewConnectionSheet(model: m) }
     }
 
     private func word(_ outcome: String) -> String {

@@ -8,7 +8,7 @@ struct MainWindow: View {
     let env: AppEnvironment
 
     var body: some View {
-        @Bindable var router = env.router
+        let router = env.router
         NavigationSplitView {
             Sidebar(app: app, env: env).navigationSplitViewColumnWidth(min: 200, ideal: 220)
         } detail: {
@@ -19,8 +19,15 @@ struct MainWindow: View {
             }
         }
         .frame(minWidth: 960, minHeight: 560)
-        .sheet(item: $router.sheet) { PlanSheet(app: app, env: env, request: $0) }
-        .sheet(item: $router.recover, onDismiss: { env.router.recoverGone() }) { RecoverSheet(app: app, env: env, ref: $0) }
+        // one sheet at a time: however it closes, the router hears it went (dropped) and when it is gone
+        .sheet(item: Binding(get: { router.sheet }, set: { if $0 == nil { router.dropped() } }), onDismiss: { router.gone() }) { s in
+            switch s {
+            case .plan(let r): PlanSheet(app: app, env: env, request: r)
+            case .recover(let ref): RecoverSheet(app: app, env: env, ref: ref)
+            case .addVersion: if let w = env.wizard { AddVersionSheet(wizard: w, app: app, env: env) }
+            case .signIn(let o): SignInSheet(app: app, env: env, request: o)
+            }
+        }
     }
 }
 
@@ -55,7 +62,7 @@ struct Sidebar: View {
         }
         .safeAreaInset(edge: .bottom) {
             VStack(alignment: .leading, spacing: 8) {
-                Button { env.router.open(.wizard) } label: { Label("Add Revit version", systemImage: "plus") }
+                Button { env.router.addVersion() } label: { Label("Add Revit version", systemImage: "plus") }
                     .buttonStyle(.plain).disabled(app.isBusy)
                 if let s = app.status { Text(toolsLine(s)).font(.caption).foregroundStyle(.secondary) }
             }
@@ -69,9 +76,19 @@ struct Sidebar: View {
     }
 }
 
-/// Open and Show Revit: one path for the menu, the Library, the version page and the end of an install.
+/// Open and Show Revit: one path for the menu, the Library, the version page and the end of an install. The first Open
+/// of a bottle after its install shows the sign-in hint first (SignInHint); files from Finder do not come this way.
 @MainActor enum RevitActions {
-    static func open(app: AppModel, year: Int, bottle: String, viewer: Bool = false) async {
+    static func open(app: AppModel, env: AppEnvironment, year: Int, bottle: String, viewer: Bool = false) async {
+        let built = app.status?.bottles.first { $0.name == bottle }?.built?.time
+        if SignInHint(defaults: .standard).due(bottle: bottle, builtTime: built) {
+            env.router.show(.signIn(OpenRequest(year: year, bottle: bottle, viewer: viewer))); return
+        }
+        await start(app: app, year: year, bottle: bottle, viewer: viewer)
+    }
+
+    /// Past the hint.
+    static func start(app: AppModel, year: Int, bottle: String, viewer: Bool) async {
         switch await app.open(year: year, bottle: bottle, viewer: viewer) {
         case .starting: break
         case .running(let pids): show(pids)
@@ -92,6 +109,7 @@ struct Sidebar: View {
 
 struct RevitButton: View {
     let app: AppModel
+    let env: AppEnvironment
     let year: Int
     let bottle: String
     let running: Bool
@@ -104,7 +122,7 @@ struct RevitButton: View {
         } else if app.revitStarting[bottle] != nil {
             Button("Starting…") {}.buttonStyle(.borderedProminent).disabled(true)
         } else {
-            Button("Open") { Task { await RevitActions.open(app: app, year: year, bottle: bottle) } }
+            Button("Open") { Task { await RevitActions.open(app: app, env: env, year: year, bottle: bottle) } }
                 .buttonStyle(.borderedProminent).disabled(blocked)
         }
     }

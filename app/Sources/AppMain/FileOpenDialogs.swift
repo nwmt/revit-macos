@@ -78,5 +78,5 @@ import AppKit
         return buttons[a.runModal().rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue]
     }
 
-    func addRevit() { router.open(.wizard) }
+    func addRevit() { router.addVersion() }
 }

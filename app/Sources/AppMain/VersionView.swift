@@ -53,7 +53,7 @@ struct VersionView: View {
                 Button("Revit not responding?") { env.router.recover(ref) }.buttonStyle(.link)
                 Button("Force quit…") { forceQuit() }.disabled(app.isBusy)
             }
-            RevitButton(app: app, year: ref.year, bottle: ref.bottle, running: b.running, pids: b.revitPids, blocked: app.isBusy)
+            RevitButton(app: app, env: env, year: ref.year, bottle: ref.bottle, running: b.running, pids: b.revitPids, blocked: app.isBusy)
         }
     }
 
@@ -333,15 +333,9 @@ private struct MaintenanceTab: View {
                 Text("Checks Revit, its bottle and this Mac. Changes nothing.").font(.callout).foregroundStyle(.secondary)
                 Button(checking ? "Checking…" : "Check now") { check() }.disabled(checking)
                 if let e = healthError { Text(e).foregroundStyle(.red) }
-                if let h = health {
+                if let h = health?.forApp {
                     if h.problems.isEmpty { Label("All checks passed", systemImage: "checkmark.circle").foregroundStyle(.green) }
-                    ForEach(h.problems, id: \.id) { c in
-                        VStack(alignment: .leading, spacing: 1) {
-                            Label(c.title, systemImage: c.status == "fail" ? "xmark.circle" : "exclamationmark.triangle")
-                                .foregroundStyle(c.status == "fail" ? .red : .orange)
-                            if !c.detail.isEmpty { Text(c.detail).font(.caption).foregroundStyle(.secondary) }
-                        }
-                    }
+                    HealthList(checks: h.problems)
                 }
             }
             section("Logs and reports") {
@@ -449,5 +443,31 @@ private struct MaintenanceTab: View {
         guard let data = app.dataFolder else { return }
         let l = AppLinks.logs(data: data, bottle: ref.bottle)
         NSWorkspace.shared.open(FileManager.default.fileExists(atPath: l.path) ? l : AppLinks.logs(data: data, bottle: nil))
+    }
+}
+
+/// doctor's checks: problems in red or orange with what to do, the rest as they are.
+struct HealthList: View {
+    let checks: [DoctorReport.Check]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(checks, id: \.id) { c in
+                VStack(alignment: .leading, spacing: 1) {
+                    Label(c.title, systemImage: symbol(c.status)).foregroundStyle(color(c.status))
+                    if !c.detail.isEmpty { Text(c.detail).font(.caption).foregroundStyle(.secondary) }
+                    if !c.fix.isEmpty, c.status == "fail" || c.status == "warn" {
+                        Text(c.fix).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                    }
+                }
+            }
+        }
+    }
+
+    private func symbol(_ s: String) -> String {
+        switch s { case "fail": "xmark.circle"; case "warn": "exclamationmark.triangle"; case "ok": "checkmark.circle"; default: "info.circle" }
+    }
+    private func color(_ s: String) -> Color {
+        switch s { case "fail": .red; case "warn": .orange; case "ok": .green; default: .secondary }
     }
 }

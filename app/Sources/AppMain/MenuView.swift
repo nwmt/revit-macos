@@ -25,7 +25,7 @@ struct MenuView: View {
             Divider()
         }
         Button("Open \(env.name)") { env.router.open(.main) }
-        Button("Add Revit version…") { env.router.open(.wizard) }.disabled(!m.changesEnabled)
+        Button("Add Revit version…") { env.router.addVersion() }.disabled(!m.changesEnabled)
         Button("Close all…") { Task { await Confirm.closeAll(app: app) } }.disabled(!m.changesEnabled)
         Divider()
         Button("Settings…") { env.router.open(.settings) }
@@ -57,7 +57,7 @@ struct BottleMenu: View {
         } else if item.starting {
             Button("Starting…") {}.disabled(true)
         } else {
-            Button("Open Revit") { Task { await RevitActions.open(app: app, year: item.year, bottle: item.bottle) } }
+            Button("Open Revit") { Task { await RevitActions.open(app: app, env: env, year: item.year, bottle: item.bottle) } }
         }
         if !item.recent.isEmpty {
             Menu("Open Recent") {
@@ -68,7 +68,7 @@ struct BottleMenu: View {
         }
         let viewer = AppLinks.viewerApp(year: item.year, bottle: item.bottle, home: home)
         if !item.running, !item.starting, FileManager.default.fileExists(atPath: viewer.path) {
-            Button("Open Revit Viewer") { Task { await RevitActions.open(app: app, year: item.year, bottle: item.bottle, viewer: true) } }
+            Button("Open Revit Viewer") { Task { await RevitActions.open(app: app, env: env, year: item.year, bottle: item.bottle, viewer: true) } }
                 .disabled(!changes)
         }
         Button("Revit \(String(item.year)) in \(env.name)…") { env.router.page(ref) }

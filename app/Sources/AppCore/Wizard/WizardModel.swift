@@ -186,6 +186,7 @@ struct CheckKey: Equatable { let year: Int; let folder: String; let bottle: Stri
     }
 
     public func chooseInstaller(_ folder: URL) async {
+        guard !working.contains(.installer) else { return }   // one choice at a time: its link-installer may still run
         let my = session
         installer = nil; errors[.installer] = nil; forgetCheck()
         working.insert(.installer); defer { if my == session { working.remove(.installer) } }

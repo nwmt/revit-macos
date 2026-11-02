@@ -4,11 +4,39 @@
 import AppCore
 import SwiftUI
 
+/// Where a result's buttons lead. Activity: as always. A sheet: each closes the sheet first, and what it leads to comes
+/// once the sheet is gone; a Retry that starts a run leads to Activity (the sheet follows only its own run).
+struct ResultNav {
+    let addins: (BottleRef) -> Void
+    let addVersion: () -> Void
+    let retry: (RunRequest) -> Void
+    let close: () -> Void
+
+    @MainActor static func activity(_ app: AppModel, _ env: AppEnvironment) -> ResultNav {
+        ResultNav(addins: { env.router.open(.addins($0)) }, addVersion: { env.router.addVersion() },
+                  retry: { retry($0, app, env) }, close: { app.dismissFailure() })
+    }
+
+    @MainActor static func sheet(_ app: AppModel, _ env: AppEnvironment) -> ResultNav {
+        let r = env.router
+        return ResultNav(addins: { ref in r.close { r.open(.addins(ref)) } }, addVersion: { r.close { r.addVersion() } },
+                         retry: { req in r.close { retry(req, app, env); if SheetRequest.of(req, bottleExists: true) == nil { r.open(.run) } } },
+                         close: { app.dismissFailure(); r.close() })
+    }
+
+    @MainActor private static func retry(_ r: RunRequest, _ app: AppModel, _ env: AppEnvironment) {
+        if let s = SheetRequest.of(r, bottleExists: app.status?.bottles.contains { $0.name == r.bottle } ?? true) { env.router.ask(s); return }   // deletes something: a new plan, confirmed again
+        app.dismissFailure()
+        Task { await Confirm.start(app: app, env: env, r) }
+    }
+}
+
 struct FailureView: View {
     let app: AppModel
     let env: AppEnvironment
     let run: WatchedRun
     let failure: Failure
+    let nav: ResultNav
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -26,10 +54,10 @@ struct FailureView: View {
                 actions(log: log, retry: true)
             case .crossoverMissing:
                 Text("CrossOver is missing or not the tested version.").font(.headline)
-                Button("Set up CrossOver…") { env.router.open(.wizard) }
+                Button("Set up CrossOver…") { nav.addVersion() }
             case .rosettaMissing:
                 Text("Rosetta is not installed.").font(.headline)
-                Button("Install Rosetta…") { env.router.open(.wizard) }
+                Button("Install Rosetta…") { nav.addVersion() }
             case .sourceMismatch(let text):
                 Text("The unpacked Revit is from another installer.").font(.headline)
                 engineText(text)
@@ -46,7 +74,7 @@ struct FailureView: View {
                 Text("Done, but some steps failed.").font(.headline)
                 Text("Revit may still work. Failed: \(steps.joined(separator: ", "))")
                 if let r = app.retryRequest, isInstall(r) {
-                    Button("Choose add-ins…") { env.router.open(.addins(BottleRef(year: r.year, bottle: r.bottle))) }
+                    Button("Choose add-ins…") { nav.addins(BottleRef(year: r.year, bottle: r.bottle)) }
                 }
                 actions(log: log, retry: downloadFailed)
             case .failed(let at, let text, let log):
@@ -66,7 +94,7 @@ struct FailureView: View {
                 Button("Copy diagnostic report") {
                     Task { await Report.copy(app: app, year: run.state.year ?? run.record?.request.year, bottle: run.state.bottle ?? run.record?.request.bottle, logDir: logDir) }
                 }
-                Button("Close") { app.dismissFailure() }
+                Button("Close") { nav.close() }
             }
         }
         .textSelection(.enabled)
@@ -103,11 +131,7 @@ struct FailureView: View {
         if let d = app.dataFolder { NSWorkspace.shared.open(AppLinks.logs(data: d, bottle: run.state.bottle)) }
     }
 
-    private func retry(_ r: RunRequest) {
-        if let s = SheetRequest.of(r, bottleExists: app.status?.bottles.contains { $0.name == r.bottle } ?? true) { env.router.ask(s); return }   // deletes something: a new plan, confirmed again
-        app.dismissFailure()
-        Task { await Confirm.start(app: app, env: env, r) }
-    }
+    private func retry(_ r: RunRequest) { nav.retry(r) }
 
     private func isRebuild(_ r: RunRequest) -> Bool { if case .rebuild = r { true } else { false } }
 }
