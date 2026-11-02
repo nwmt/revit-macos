@@ -17,7 +17,7 @@ struct AddVersionSheet: View {
         Group {
             if wizard.installCtx != nil { InstallProgressView(wizard: wizard, app: app, env: env) } else { setup }
         }
-        .frame(width: 880, height: 600)
+        .frame(width: 860, height: 500)   // the main window is at least 560 high: the sheet fits with its buttons
         .task { if wizard.macChecks == nil && wizard.macError == nil { await wizard.loadMac() } }
         .onDisappear { wizard.reset() }   // Hide, Done, Cancel, Esc: the next showing starts clean; a run goes on
         .fileImporter(isPresented: $pickFile, allowedContentTypes: [.item]) { r in
@@ -96,7 +96,10 @@ struct AddVersionSheet: View {
         case .installer:
             heading(String(localized: "Revit installer"), String(localized: "The folder with your Revit installer from your Autodesk Account. It is only read."))
             rowView(.installer)
-            if wizard.installer != nil {
+        case .check:
+            heading(String(localized: "Check"), String(localized: "What the install needs, checked first. Nothing changes."))
+            rowView(.check)
+            if wizard.installer != nil {   // the check is of this name: a new name needs a new check
                 DisclosureGroup("Advanced: bottle name") {
                     HStack {
                         TextField("rvt2025-a", text: $wizard.bottleName).frame(width: 180)
@@ -104,13 +107,11 @@ struct AddVersionSheet: View {
                     }.padding(.top, 4)
                 }
             }
-        case .check:
-            heading(String(localized: "Check"), String(localized: "What the install needs, checked first. Nothing changes."))
-            rowView(.check)
         case .install:
             heading(String(localized: "Install"), String(localized: "Everything is ready."))
             if let i = wizard.installer {
-                Text("Revit \(String(i.year)) goes into bottle \(wizard.bottleName). The rest of the installer downloads during the install.")
+                Text(i.info.complete ? "Revit \(String(i.year)) goes into bottle \(wizard.bottleName)."
+                     : "Revit \(String(i.year)) goes into bottle \(wizard.bottleName). The rest of the installer downloads during the install.")
                     .fixedSize(horizontal: false, vertical: true)
             }
             if case .waiting = wizard.state(.install), let b = wizard.busyText { Text("Busy: \(b)").foregroundStyle(.secondary) }
