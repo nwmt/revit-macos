@@ -140,6 +140,12 @@ import Testing
         let t = q.gone(); #expect(t == nil); q.showQueued(); #expect(q.shown == "late")
     }
 
+    @Test func theSameSheetIsNotAskedTwice() {
+        var q = SheetQueue<String>()
+        q.show("signIn"); q.show("signIn"); #expect(q.queued == nil)
+        q.show("plan"); q.show("plan"); #expect(q.queued == "plan")
+    }
+
     @Test func aPageSheetHoldsTheQueue() {
         var q = SheetQueue<String>()
         q.localShown()                                   // New connection is open
@@ -153,8 +159,10 @@ import Testing
         q.show("recover")
         #expect(q.close(then: { ran.append("rollback") }) == nil)
         q.show("addVersion")                             // came while Recover was closing
-        let t = q.gone(); t?(); q.showQueued()
-        #expect(ran == ["rollback"]); #expect(q.shown == "addVersion")
+        let t = q.gone(); t?(); q.show("rollback"); q.showQueued()   // the step shows its sheet, as the router's does
+        #expect(ran == ["rollback"]); #expect(q.shown == "rollback"); #expect(q.queued == "addVersion")
+        q.dropped(); _ = q.gone(); q.showQueued()
+        #expect(q.shown == "addVersion")
         var empty = SheetQueue<String>()
         #expect(empty.close(then: { ran.append("now") }) != nil)   // nothing shown: the step is handed back at once
     }

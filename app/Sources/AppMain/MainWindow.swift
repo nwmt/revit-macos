@@ -80,6 +80,7 @@ struct Sidebar: View {
 /// of a bottle after its install shows the sign-in hint first (SignInHint); files from Finder do not come this way.
 @MainActor enum RevitActions {
     static func open(app: AppModel, env: AppEnvironment, year: Int, bottle: String, viewer: Bool = false) async {
+        await app.refresh()   // right after an install the status may not have its run record yet
         let built = app.status?.bottles.first { $0.name == bottle }?.built?.time
         if SignInHint(defaults: .standard).due(bottle: bottle, builtTime: built) {
             env.router.show(.signIn(OpenRequest(year: year, bottle: bottle, viewer: viewer))); return

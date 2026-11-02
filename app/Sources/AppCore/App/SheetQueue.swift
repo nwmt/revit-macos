@@ -15,7 +15,9 @@ public struct SheetQueue<Sheet: Equatable> {
 
     public var busy: Bool { shown != nil || closing || localSheets > 0 }
 
+    /// The sheet already up (or already waiting) is not asked for twice.
     public mutating func show(_ s: Sheet) {
+        guard s != shown, s != queued else { return }
         if busy { queued = s } else { shown = s }
     }
 

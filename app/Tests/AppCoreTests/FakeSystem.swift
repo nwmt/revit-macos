@@ -11,8 +11,15 @@ struct FakeError: Error, LocalizedError { let text: String; var errorDescription
     var brewArgs: [[String]] = []
     var opened: [URL] = []
 
+    var holdRosetta = false                 // installRosetta waits for releaseRosetta(): one still running
+    var rosettaWaiting = false
+    var rosettaCalls: Int { calls.filter { $0 == "rosetta" }.count }
+    private var rosettaGate: CheckedContinuation<Void, Never>?
+    func releaseRosetta() { holdRosetta = false; rosettaGate?.resume(); rosettaGate = nil }
+
     func installRosetta() async throws {
         calls.append("rosetta")
+        if holdRosetta { rosettaWaiting = true; await withCheckedContinuation { rosettaGate = $0 }; rosettaWaiting = false }
         if let e = rosettaError { throw FakeError(text: e) }
     }
     func brew() -> URL? { brewPath }

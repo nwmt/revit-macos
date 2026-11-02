@@ -31,6 +31,7 @@ public struct SignInHint {
     }
 
     public func turnOff() { defaults.set(true, forKey: Self.offKey) }
+    public var isOff: Bool { defaults.bool(forKey: Self.offKey) }
 }
 
 public struct SignInText: Equatable, Sendable {

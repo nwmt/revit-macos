@@ -355,7 +355,12 @@ struct InstallProgressView: View {
                 Button("Choose add-ins…") { env.router.close { env.router.open(.addins(BottleRef(year: y, bottle: bottle))) } }
                 Button("Done") { env.router.close() }
                 Button("Open Revit \(String(y))") {
-                    env.router.close { Task { await RevitActions.open(app: app, env: env, year: y, bottle: bottle) } }
+                    // a fresh install is always due for the hint: it comes at once, before any sheet that waited
+                    let req = OpenRequest(year: y, bottle: bottle)
+                    env.router.close {
+                        if SignInHint(defaults: .standard).isOff { Task { await RevitActions.start(app: app, year: y, bottle: bottle, viewer: false) } }
+                        else { env.router.show(.signIn(req)) }
+                    }
                 }.keyboardShortcut(.defaultAction)
             } else {
                 Button("Done") { env.router.close() }.keyboardShortcut(.defaultAction)
@@ -435,17 +440,22 @@ struct SignInSheet: View {
                 Toggle("Don't show this again", isOn: $never)
                 Spacer()
                 Button("Cancel", role: .cancel) { env.router.close() }.keyboardShortcut(.cancelAction)
-                Button(request.viewer ? "Open Revit Viewer" : "Open Revit \(String(request.year))") { open(b?.built?.time) }.keyboardShortcut(.defaultAction)
+                Button(request.viewer ? "Open Revit Viewer" : "Open Revit \(String(request.year))") { open() }.keyboardShortcut(.defaultAction)
             }
         }
         .padding(24).frame(width: 600, alignment: .topLeading)
     }
 
-    private func open(_ built: String?) {
+    private func open() {
         let hint = SignInHint(defaults: .standard)
-        hint.mark(bottle: request.bottle, builtTime: built)
         if never { hint.turnOff() }
-        let r = request
-        env.router.close { Task { await RevitActions.start(app: app, year: r.year, bottle: r.bottle, viewer: r.viewer) } }
+        let r = request, app = app
+        env.router.close {
+            Task {
+                await app.refresh()   // the run record of a fresh install may have come only now
+                hint.mark(bottle: r.bottle, builtTime: app.status?.bottles.first { $0.name == r.bottle }?.built?.time)
+                await RevitActions.start(app: app, year: r.year, bottle: r.bottle, viewer: r.viewer)
+            }
+        }
     }
 }

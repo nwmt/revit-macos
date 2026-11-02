@@ -175,9 +175,10 @@ struct CheckKey: Equatable { let year: Int; let folder: String; let bottle: Stri
     }
 
     public func importMsls31(_ file: URL) async {
+        guard !working.contains(.msls31) else { return }
         let my = session
         errors[.msls31] = nil
-        working.insert(.msls31); defer { if my == session { working.remove(.msls31) } }
+        working.insert(.msls31); defer { working.remove(.msls31) }
         let out = await app.query(["import", "msls31", file.path])
         guard my == session else { return }
         guard let out else { errors[.msls31] = app.engineError ?? ""; return }
@@ -252,16 +253,20 @@ struct CheckKey: Equatable { let year: Int; let folder: String; let bottle: Stri
     /// What runs in the engine goes on.
     public func reset() {
         session += 1
-        installer = nil; source = nil; crossoverNote = nil; errors = [:]; working = []
+        installer = nil; source = nil; crossoverNote = nil; errors = [:]
+        working = working.intersection(Self.tools)   // Rosetta, CrossOver, msls31.dll: still installing, shown so, not started twice
         macChecks = nil; macError = nil; installCtx = nil; viewing = nil
         bottleName = ""
         forgetCheck()
     }
 
+    static let tools: Set<WizardRow> = [.rosetta, .crossover, .msls31]
+
     private func act(_ row: WizardRow, _ f: () async throws -> Void) async {
+        guard !working.contains(row) else { return }   // one at a time, across showings of the sheet too
         let my = session
         errors[row] = nil
-        working.insert(row); defer { if my == session { working.remove(row) } }
+        working.insert(row); defer { working.remove(row) }
         do { try await f() } catch { if my == session { errors[row] = (error as? LocalizedError)?.errorDescription ?? "\(error)" } }
     }
 

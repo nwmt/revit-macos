@@ -229,6 +229,20 @@ let mismatchEnd = #"{"event":"end","exit_code":1,"result":"source_mismatch","fai
         #expect(w.h.model.watched?.ctx == ctx)
     }
 
+    @Test func aToolStillInstallingIsNotStartedAgain() async {
+        let w = WizardHarness()
+        await w.status(wizardStatus(rosetta: false))
+        w.system.holdRosetta = true
+        let first = Task { await w.wizard.installRosetta() }
+        for _ in 0..<400 { if w.system.rosettaWaiting { break }; try? await Task.sleep(for: .milliseconds(5)) }   // bounded
+        w.wizard.reset()                                                   // the sheet went and came back
+        #expect(w.wizard.state(.rosetta) == .working)
+        await w.wizard.installRosetta()                                    // refused: one is running
+        #expect(w.system.rosettaCalls == 1)
+        w.system.releaseRosetta(); await first.value
+        #expect(w.wizard.state(.rosetta) != .working)
+    }
+
     @Test func aLateAnswerAfterResetChangesNothing() async {
         let w = WizardHarness()
         await w.status(wizardStatus())
