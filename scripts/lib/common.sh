@@ -235,6 +235,8 @@ revit_pids() { # $1 = bottle path, $2 = year: the Mac PIDs of the Revit.exe of t
   # SIGPIPE
   local p rb out; rb="$(cd "$1" 2>/dev/null && pwd -P)" || return 0   # lsof prints real paths
   for p in $(pgrep -f "Autodesk.Revit $2.Revit\.exe" 2>/dev/null); do
+    # CrossOver's winewrapper.exe that `wine` leaves while Revit runs (./revit debug) has Revit.exe in its arguments
+    case "$(ps -o args= -p "$p" 2>/dev/null)" in *"winewrapper.exe --run -- "*) continue ;; esac
     out="$(lsof -p "$p" -Fn 2>/dev/null)"
     ! grep -qF "n$rb/" <<<"$out" || echo "$p"
   done

@@ -120,6 +120,14 @@ fake_revit() { # $1 = bottle, $2 = year: a process that looks like Revit.exe and
     "C:\\Program Files\\Autodesk\\Revit $2\\Revit.exe" &
   PIDS="$PIDS $!"; fake_ready
 }
+fake_wrapper() { # $1 = bottle, $2 = year: CrossOver's launcher as `wine` leaves it while Revit runs (./revit debug),
+  # Revit.exe in its arguments, a file of the bottle open
+  touch "$BOTTLES/$1/drive_c/open.tmp"
+  RDY="$RDY" perl -e 'open(my $f, "<", $ARGV[0]) or die; open(my $r, ">", $ENV{RDY}) and close $r; sleep 60' "$BOTTLES/$1/drive_c/open.tmp" \
+    "/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/lib/wine/x86_64-windows/winewrapper.exe" --run -- \
+    "C:\\Program Files\\Autodesk\\Revit $2\\Revit.exe" &
+  PIDS="$PIDS $!"; fake_ready
+}
 fake_mcphost() { # $1 = bottle: a process that looks like our MCP launcher (mcphost.exe) and holds a file open there
   touch "$BOTTLES/$1/drive_c/mcp.tmp"
   RDY="$RDY" perl -e 'open(my $f, "<", $ARGV[0]) or die; open(my $r, ">", $ENV{RDY}) and close $r; sleep 60' "$BOTTLES/$1/drive_c/mcp.tmp" \
@@ -230,8 +238,14 @@ check "wrong year: nothing stopped" not_called "wineserver"
 reset; bottle exp "" ""; run "" stop 2024 exp; expect "stop refuses a non-Revit bottle" 1 "does not look like a Revit bottle"
 reset; bottle rvt2024-b 2024 ""; run "" stop 2024 rvt2024-b; expect "stop accepts a half-installed bottle" 0 "Stopped"
 check "stop kills that bottle's wineserver" called "wineserver -k | REVIT_YEAR= INSTALL_DRYRUN= CX_RECREATE= WINEPREFIX=$BOTTLES/rvt2024-b"
+reset; bottle rvt2024-a 2024 2024; mkdir -p "$BOTTLES/rvt2024-a/revit-macos"; date +%s > "$BOTTLES/rvt2024-a/revit-macos/open-start"
+run "" stop 2024; expect "stop with a start just recorded" 0 "Stopped"
+check "stop: the start it ended no longer blocks the next one" eval '[ ! -e "$BOTTLES/rvt2024-a/revit-macos/open-start" ]'
 reset; bottle rvt2024-a 2024 2024; touch "$T/wineserver-idle"; run "" stop 2024; expect "stop when nothing runs" 0 "Nothing is running in rvt2024-a."
 check "idle: nothing killed" not_called "wineserver -k |"
+reset; bottle rvt2024-a 2024 2024; touch "$T/wineserver-idle"; mkdir -p "$BOTTLES/rvt2024-a/revit-macos"; date +%s > "$BOTTLES/rvt2024-a/revit-macos/open-start"
+run "" stop 2024; expect "stop when nothing runs yet, a start recorded" 0 "Nothing is running in rvt2024-a."
+check "idle: a start under way keeps its mark (Wine may not be up yet)" eval '[ -s "$BOTTLES/rvt2024-a/revit-macos/open-start" ]'
 reset; bottle rvt2024-a 2024 2024; touch "$T/wineserver-fails"; run "" stop 2024; expect "stop reports a failure" 1 "Could not stop rvt2024-a."
 reset; bottle rvt2024-a 2024 2024; touch "$T/wineserver-idle"; fake_leftover rvt2024-a
 REVIT_LEFTOVER_AGE=0 run "" stop 2024
@@ -2041,6 +2055,8 @@ check "open: the lock does not reach Wine" eval '! grep -q FD9 "$T/ro-log"'
 open_world; fake_revit rvt2027-a 2027; frevit; run "" open "$H/Documents/p.rvt"
 expect "open: two Revits in one bottle → refused" 1 "Quit one"
 check "open: two Revits: nothing sent" eval '[ ! -e "$T/ro-log" ]'
+open_world; fake_wrapper rvt2027-a 2027; frevit; run "" open "$H/Documents/p.rvt"
+expect "open: Revit and the winewrapper that started it (./revit debug) are one Revit" 0 "Opened in Revit 2027 (rvt2027-a)."
 
 open_world; run "" open "$H/Documents/p.rvt"
 expect "open: Revit not running → its app starts, the file is sent" 0 "Opened in Revit 2027"

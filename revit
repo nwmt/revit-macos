@@ -680,10 +680,12 @@ case "$CMD" in
       kill -KILL $left 2>/dev/null
       for i in $(seq 1 30); do [ -n "$(bottle_leftovers "$B")" ] || break; sleep 0.1; done
       [ -z "$(bottle_leftovers "$B")" ] || die "Could not end the Windows programs left in $NAME. Restart the Mac."
+      rm -f "$B/revit-macos/open-start"   # the start it recorded has ended: the next ./revit start or open may go at once
       echo "Ended $(wc -w <<<"$left" | tr -d ' ') Windows program(s) left running in $NAME after Wine stopped unexpectedly."
       exit 0
     fi
     WINEPREFIX="$B" "$CX/bin/wineserver" -k 2>/dev/null 7>&- 9>&- || die "Could not stop $NAME. Quit CrossOver and try again."
+    rm -f "$B/revit-macos/open-start"   # as above; with no wineserver ("Nothing is running") a start may be under way: kept
     echo "Stopped Revit and everything else in $NAME. Start Revit again from ~/Applications." ;;
   logs)
     found="$(ls -td "$DATA/logs/$NAME"/*/ 2>/dev/null | head -8)"
